@@ -1,5 +1,5 @@
 """
-CLI entry point for PyHarness.
+CLI entry point for magitech-harness.
 """
 
 from __future__ import annotations
@@ -8,12 +8,12 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
-from harness import create_harness, define_tool
+from magitech_harness import create_harness, define_tool
 
 
 async def main_async() -> None:
     parser = argparse.ArgumentParser(
-        description="PyHarness: Pure Python All-Plugin Agent Runtime"
+        description="Magitech Harness: Composable Agent Runtime by Magitech"
     )
     parser.add_argument("prompt", nargs="?", help="Prompt to run through the agent loop")
     parser.add_argument(

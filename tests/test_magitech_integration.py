@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
-from kernel import Context, EventMode
-from harness import (
+from anima import Context, EventMode
+from magitech_harness import (
     AgentLoopService,
     EventType,
     LLMService,
@@ -140,6 +140,6 @@ async def test_shell_service_execution(tmp_path: Path):
     ctx = create_harness(storage_dir=tmp_path)
     await ctx.flush()
 
-    code, stdout, stderr = await ctx.shell.run("echo 'PyHarness Rocks'")
+    code, stdout, stderr = await ctx.shell.run("echo 'Magitech Rocks'")
     assert code == 0
-    assert "PyHarness Rocks" in stdout
+    assert "Magitech Rocks" in stdout

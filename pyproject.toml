@@ -1,21 +1,21 @@
 [project]
-name = "harness"
+name = "magitech-harness"
 version = "0.1.0"
-description = "Something From Nothing - Agent Runtime & Capability Harness"
+description = "Magitech Harness: Composable Agent Runtime by Magitech"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "kernel",
+    "anima",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
 ]
 
 [project.scripts]
-harness = "harness.cli:main"
-sfn = "harness.cli:main"
+magitech = "magitech_harness.cli:main"
+magitech-harness = "magitech_harness.cli:main"
 
 [tool.uv.sources]
-kernel = { path = "../kernel", editable = true }
+anima = { path = "../anima", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]

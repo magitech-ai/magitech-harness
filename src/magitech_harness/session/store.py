@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from harness.session.events import EventType, SessionEvent
+from magitech_harness.session.events import EventType, SessionEvent
 
 
 def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:

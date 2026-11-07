@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import inspect
 from typing import Any, Callable
-from kernel import Context, Disposer, Service
+from anima import Context, Disposer, Service
 
 
 class SystemPromptService(Service):

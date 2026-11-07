@@ -1,8 +1,8 @@
-# Harness
+# Magitech Harness
 
-The Agent Runtime and Capability Seams powering **Something From Nothing**.
+The autonomous agent runtime and capability seams by **Magitech**.
 
-Built on top of the standalone composable **`kernel`** ([`../kernel`](../kernel)).
+Built on top of **`anima`** ([`../anima`](../anima)), the composable micro-kernel.
 
 ---
 
@@ -10,7 +10,7 @@ Built on top of the standalone composable **`kernel`** ([`../kernel`](../kernel)
 
 ```
                     ┌─────────────────────────┐
-                    │      Kernel Context     │
+                    │      Anima Context      │
                     └────────────┬────────────┘
          ┌───────────────┬───────┴───────┬───────────────┐
          ▼               ▼               ▼               ▼
@@ -38,11 +38,11 @@ Built on top of the standalone composable **`kernel`** ([`../kernel`](../kernel)
 
 ### Prerequisites
 * Python 3.12+ (tested with `uv`)
-* The sibling `kernel` repository at `../kernel`
+* The sibling `anima` repository at `../anima`
 
 ### Installation & Test Suite
 ```bash
-cd /mnt/storage/projects/AI/harness
+cd /mnt/storage/projects/AI/magitech-harness
 
 # Run all integration tests
 uv run pytest -v
@@ -51,10 +51,10 @@ uv run pytest -v
 ### Running the CLI
 ```bash
 # Execute an agent turn
-uv run harness "Calculate 15 * 8"
+uv run magitech "Calculate 15 * 8"
 
-# Or use the sfn alias
-uv run sfn "Calculate 15 * 8"
+# Or use the full binary name
+uv run magitech-harness "Calculate 15 * 8"
 ```
 *(Session event logs persist to `.sessions/<session-id>.jsonl`)*
 

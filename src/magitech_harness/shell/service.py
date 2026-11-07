@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from kernel import Context, Service
-from harness.tools.definition import define_tool
+from anima import Context, Service
+from magitech_harness.tools.definition import define_tool
 
 
 class LocalShellService(Service):

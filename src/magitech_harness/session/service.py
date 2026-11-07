@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from kernel import Context, Service
-from harness.session.events import EventType, SessionEvent
-from harness.session.store import Session
+from anima import Context, Service
+from magitech_harness.session.events import EventType, SessionEvent
+from magitech_harness.session.store import Session
 
 
 class SessionService(Service):

@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from kernel import Context, Disposer, EventMode, Service
-from harness.session.events import ToolCallData, ToolResultData
-from harness.tools.definition import Tool
+from anima import Context, Disposer, EventMode, Service
+from magitech_harness.session.events import ToolCallData, ToolResultData
+from magitech_harness.tools.definition import Tool
 
 logger = logging.getLogger("harness.tools")
 

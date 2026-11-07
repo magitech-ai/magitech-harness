@@ -5,17 +5,17 @@ PyHarness: Pure Python, All-Plugin Agent Runtime.
 from __future__ import annotations
 
 from pathlib import Path
-from kernel import Context
-from harness.agent.loop import AgentLoopService
-from harness.llm.service import LLMService, MockLLMProvider
-from harness.llm.types import ModelResponse
-from harness.session.events import EventType, SessionEvent, ToolCallData, ToolResultData
-from harness.session.service import SessionService
-from harness.session.store import Session, derive_messages
-from harness.shell.service import LocalShellService
-from harness.system_prompt.service import SystemPromptService
-from harness.tools.definition import Tool, define_tool
-from harness.tools.service import ToolService
+from anima import Context
+from magitech_harness.agent.loop import AgentLoopService
+from magitech_harness.llm.service import LLMService, MockLLMProvider
+from magitech_harness.llm.types import ModelResponse
+from magitech_harness.session.events import EventType, SessionEvent, ToolCallData, ToolResultData
+from magitech_harness.session.service import SessionService
+from magitech_harness.session.store import Session, derive_messages
+from magitech_harness.shell.service import LocalShellService
+from magitech_harness.system_prompt.service import SystemPromptService
+from magitech_harness.tools.definition import Tool, define_tool
+from magitech_harness.tools.service import ToolService
 
 
 def create_harness(storage_dir: Path | str | None = None) -> Context:

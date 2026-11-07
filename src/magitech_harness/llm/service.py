@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any, Protocol
-from kernel import Context, Service
-from harness.llm.types import ModelResponse
-from harness.session.events import ToolCallData
+from anima import Context, Service
+from magitech_harness.llm.types import ModelResponse
+from magitech_harness.session.events import ToolCallData
 
 
 class LLMProvider(Protocol):

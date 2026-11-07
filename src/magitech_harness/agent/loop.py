@@ -8,9 +8,9 @@ from __future__ import annotations
 import logging
 import uuid
 from typing import Any
-from kernel import Context, Service
-from harness.session.events import EventType, ToolCallData
-from harness.session.store import Session
+from anima import Context, Service
+from magitech_harness.session.events import EventType, ToolCallData
+from magitech_harness.session.store import Session
 
 logger = logging.getLogger("harness.agent")
 

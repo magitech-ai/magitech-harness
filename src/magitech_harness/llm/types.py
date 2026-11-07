@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any
 from pydantic import BaseModel, Field
-from harness.session.events import ToolCallData
+from magitech_harness.session.events import ToolCallData
 
 
 class ModelResponse(BaseModel):
