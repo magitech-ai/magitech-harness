@@ -16,6 +16,8 @@ from magitech_harness.llm.service import (
 )
 from magitech_harness.llm.slug import parse_model_slug
 from magitech_harness.llm.types import ModelResponse
+from magitech_harness.plugins.manifest import PluginManifest
+from magitech_harness.plugins.service import PluginService
 from magitech_harness.session.events import (
     EventType,
     SessionEvent,
@@ -48,13 +50,14 @@ def create_harness(
 
     base_path = Path(storage_dir) if storage_dir else None
 
-    # Mount the 6 core capability seams
+    # Mount core capability seams
     ctx.plugin(SessionService, base_storage_dir=base_path)
     ctx.plugin(SystemPromptService)
     ctx.plugin(ToolService)
     ctx.plugin(LLMService)
     ctx.plugin(LocalShellService)
     ctx.plugin(AgentLoopService)
+    ctx.plugin(PluginService)
 
     if mock_provider:
 
@@ -78,6 +81,8 @@ __all__ = [
     "MockLLMProvider",
     "ModelResponse",
     "NoProviderError",
+    "PluginManifest",
+    "PluginService",
     "Session",
     "SessionEvent",
     "SessionService",
