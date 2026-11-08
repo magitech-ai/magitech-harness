@@ -71,7 +71,7 @@ class ToolService(Service):
                 "tools/post-execute",
                 raw_result,
                 modified_call,
-                default_handler=lambda res, tc: res,
+                default_handler=lambda res, *args, **kwargs: res,
             )
 
             result = ToolResultData(

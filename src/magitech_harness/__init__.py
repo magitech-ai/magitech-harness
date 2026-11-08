@@ -1,6 +1,4 @@
-"""
-PyHarness: Pure Python, All-Plugin Agent Runtime.
-"""
+"""Magitech Harness: Composable Agent Runtime by Magitech."""
 
 from __future__ import annotations
 

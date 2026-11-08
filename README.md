@@ -1,8 +1,11 @@
-# Magitech Harness
+# Magitech Harness (`mth`)
 
-The autonomous agent runtime and capability seams by **Magitech**.
+The composable autonomous agent runtime powering **Magitech**.
 
-Built on top of **`anima`** ([`../anima`](../anima)), the composable micro-kernel.
+Built directly on top of **`anima`** ([`https://github.com/magitech-ai/anima`](https://github.com/magitech-ai/anima)), the micro-kernel.
+
+[![Tests](https://img.shields.io/badge/coverage-100%25-brightgreen)](tests/)
+[![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 
 ---
 
@@ -38,22 +41,25 @@ Built on top of **`anima`** ([`../anima`](../anima)), the composable micro-kerne
 
 ### Prerequisites
 * Python 3.12+ (tested with `uv`)
-* The sibling `anima` repository at `../anima`
+* The `anima` micro-kernel at `../anima` (or installed via pip)
 
-### Installation & Test Suite
+### Running the Test Suite
+`magitech-harness` maintains strict **100% statement and 100% branch test coverage**:
+
 ```bash
 cd /mnt/storage/projects/AI/magitech-harness
 
-# Run all integration tests
-uv run pytest -v
+# Run all unit and integration tests with coverage enforcement
+uv run pytest
 ```
 
 ### Running the CLI
 ```bash
-# Execute an agent turn
-uv run magitech "Calculate 15 * 8"
+# Execute an agent turn using the mth CLI
+uv run mth "Calculate 15 * 8"
 
-# Or use the full binary name
+# Or use the aliases
+uv run magitech "Calculate 15 * 8"
 uv run magitech-harness "Calculate 15 * 8"
 ```
 *(Session event logs persist to `.sessions/<session-id>.jsonl`)*

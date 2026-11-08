@@ -64,13 +64,23 @@ class Tool(BaseModel):
 def define_tool(
     name: str,
     description: str,
-    parameters: dict[str, Any],
-    execute: Callable[[dict[str, Any]], Any | Awaitable[Any]],
+    parameters: dict[str, Any] | None = None,
+    execute: Callable[[dict[str, Any]], Any | Awaitable[Any]] | None = None,
 ) -> Tool:
-    """Helper to define a model-callable tool."""
+    """Helper to define a model-callable tool.
+
+    Args:
+        name: Name of the tool.
+        description: Description of what the tool does.
+        parameters: JSON Schema properties dict or parameter specifications.
+        execute: Handler callable (sync or async) executing the tool.
+
+    Returns:
+        A configured Tool instance.
+    """
     return Tool(
         name=name,
         description=description,
-        parameters=parameters,
+        parameters=parameters or {},
         handler=execute,
     )

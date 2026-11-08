@@ -26,8 +26,10 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.2.0",
     "pytest-asyncio>=1.4.1.post1",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+addopts = "--import-mode=importlib --cov=magitech_harness --cov-branch --cov-report=term-missing --cov-fail-under=100"
