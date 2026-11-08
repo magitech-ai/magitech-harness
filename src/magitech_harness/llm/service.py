@@ -7,13 +7,15 @@ pluggable provider registry and waterfall hooks.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from anima import Context, Service
 from anima.events import Disposer
 
+from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.llm.slug import parse_model_slug
-from magitech_harness.llm.types import ModelResponse
+from magitech_harness.llm.types import ModelChunk, ModelResponse
 from magitech_harness.session.events import ToolCallData
 
 
@@ -42,6 +44,17 @@ class LLMProvider(Protocol):
         Returns:
             A ModelResponse instance containing generated text and/or tool calls.
         """
+        ...
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+        signal: AbortSignal | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ModelChunk]:
+        """Streams response chunks from the underlying model."""
         ...
 
 
@@ -84,6 +97,31 @@ class MockLLMProvider:
         if self.responses:
             return self.responses.pop(0)
         return ModelResponse(text="Default mock response", tool_calls=[])
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+        signal: AbortSignal | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ModelChunk]:
+        """Yields mock response chunks as a stream."""
+        resp = await self.generate(messages, tools, system_prompt, **kwargs)
+        if signal and signal.is_aborted:
+            raise AbortError("Operation was aborted.")
+        if resp.text:
+            yield ModelChunk(
+                text=resp.text,
+                tool_calls=[],
+                finish_reason=None if resp.tool_calls else resp.finish_reason,
+            )
+        if resp.tool_calls:
+            yield ModelChunk(
+                text="",
+                tool_calls=resp.tool_calls,
+                finish_reason=resp.finish_reason,
+            )
 
 
 class LLMService(Service):
@@ -210,3 +248,48 @@ class LLMService(Service):
             default_handler=_call_provider,
         )
         return response
+
+    async def stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        system_prompt: str | None = None,
+        model: str | None = None,
+        signal: AbortSignal | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[ModelChunk]:
+        """Streams model output chunks from the resolved provider."""
+        provider_name, _ = parse_model_slug(model or "")
+        target_provider: LLMProvider | None = None
+
+        if provider_name and provider_name in self._providers:
+            target_provider = self._providers[provider_name]
+        elif self.active_provider is not None:
+            target_provider = self.active_provider
+
+        if target_provider is None:
+            raise NoProviderError(
+                "No active LLM provider plugin registered. Please install or configure "
+                "a provider plugin (e.g. 'mth plugin install openrouter') or specify one "
+                "in your profile.yaml."
+            )
+
+        if signal:
+            signal.throw_if_aborted()
+
+        self.ctx.emit("llm/stream-start", {"messages": messages, "model": model})
+
+        async for chunk in target_provider.stream(
+            messages=messages,
+            tools=tools,
+            system_prompt=system_prompt,
+            model=model,
+            signal=signal,
+            **kwargs,
+        ):
+            if signal:
+                signal.throw_if_aborted()
+            self.ctx.emit("llm/chunk", chunk)
+            yield chunk
+
+        self.ctx.emit("llm/stream-end", {"model": model})

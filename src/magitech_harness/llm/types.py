@@ -16,3 +16,9 @@ class ModelResponse(BaseModel):
     tool_calls: list[ToolCallData] = Field(default_factory=list)
     finish_reason: str = "stop"
     raw_response: dict[str, Any] = Field(default_factory=dict)
+
+
+class ModelChunk(BaseModel):
+    text: str = ""
+    tool_calls: list[ToolCallData] = Field(default_factory=list)
+    finish_reason: str | None = None

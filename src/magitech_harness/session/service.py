@@ -33,6 +33,43 @@ class SessionService(Service):
     def get(self, session_id: str) -> Session | None:
         return self._active_sessions.get(session_id)
 
+    def load(self, session_id: str) -> Session | None:
+        """Loads a session by ID from memory cache or storage directory."""
+        if session_id in self._active_sessions:
+            return self._active_sessions[session_id]
+
+        if self.base_storage_dir:
+            storage_path = self.base_storage_dir / f"{session_id}.jsonl"
+            if storage_path.exists():
+                session = Session.load(storage_path)
+                self._active_sessions[session_id] = session
+                return session
+
+        return None
+
+    def list_sessions(self) -> list[str]:
+        """Returns a sorted list of all active and persisted session IDs."""
+        ids = set(self._active_sessions.keys())
+        if self.base_storage_dir and self.base_storage_dir.exists():
+            for p in self.base_storage_dir.glob("*.jsonl"):
+                ids.add(p.stem)
+        return sorted(ids)
+
+    def delete(self, session_id: str) -> bool:
+        """Deletes a session from active memory and storage disk."""
+        existed = False
+        if session_id in self._active_sessions:
+            del self._active_sessions[session_id]
+            existed = True
+
+        if self.base_storage_dir:
+            storage_path = self.base_storage_dir / f"{session_id}.jsonl"
+            if storage_path.exists():
+                storage_path.unlink()
+                existed = True
+
+        return existed
+
     def log_event(
         self, session: Session, event_type: EventType, payload: dict
     ) -> SessionEvent:

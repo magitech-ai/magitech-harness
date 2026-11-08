@@ -5,6 +5,7 @@ from anima import Context, EventMode
 
 from magitech_harness.llm.service import LLMService, MockLLMProvider, NoProviderError
 from magitech_harness.llm.types import ModelResponse
+from magitech_harness.session.events import ToolCallData
 
 
 @pytest.mark.asyncio
@@ -121,3 +122,131 @@ def test_llm_service_set_unknown_active_provider_raises() -> None:
     service = LLMService(ctx)
     with pytest.raises(KeyError, match="not registered"):
         service.set_active_provider("nonexistent")
+
+
+@pytest.mark.asyncio
+async def test_llm_service_stream_mock_provider() -> None:
+    """Verifies streaming from active mock provider and event emission."""
+    ctx = Context()
+    service = LLMService(ctx)
+    p = MockLLMProvider()
+    tc = ToolCallData(call_id="call_1", name="bash", arguments={})
+    p.queue_response(text="Streaming chunk 1", tool_calls=[tc])
+    service.register_provider("mock", p)
+    service.set_active_provider("mock")
+
+    chunks = []
+    emitted_chunks = []
+    ctx.on("llm/chunk", lambda c: emitted_chunks.append(c))
+
+    async for chunk in service.stream(messages=[{"role": "user", "content": "hi"}]):
+        chunks.append(chunk)
+
+    assert len(chunks) == 2
+    assert chunks[0].text == "Streaming chunk 1"
+    assert len(chunks[1].tool_calls) == 1
+    assert len(emitted_chunks) == 2
+
+
+@pytest.mark.asyncio
+async def test_llm_service_stream_no_provider_raises() -> None:
+    """Verifies streaming raises NoProviderError if no provider is registered."""
+    ctx = Context()
+    service = LLMService(ctx)
+    with pytest.raises(
+        NoProviderError, match="No active LLM provider plugin registered"
+    ):
+        async for _ in service.stream(messages=[{"role": "user", "content": "hi"}]):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_llm_service_stream_with_aborted_signal() -> None:
+    """Verifies streaming raises AbortError when AbortSignal is cancelled."""
+    from magitech_harness.agent.cancellation import AbortError, AbortSignal
+
+    ctx = Context()
+    service = LLMService(ctx)
+    p = MockLLMProvider()
+    p.queue_response(text="test")
+    service.register_provider("mock", p)
+    service.set_active_provider("mock")
+
+    signal = AbortSignal()
+    signal.abort()
+
+    with pytest.raises(AbortError, match="Operation was aborted"):
+        async for _ in service.stream(
+            messages=[{"role": "user", "content": "hi"}], signal=signal
+        ):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_llm_service_stream_slug_routing() -> None:
+    """Verifies streaming routes to specific provider by slug."""
+    ctx = Context()
+    service = LLMService(ctx)
+    p = MockLLMProvider()
+    p.queue_response(text="routed stream")
+    service.register_provider("router", p)
+
+    received = []
+    async for chunk in service.stream(messages=[], model="router/some-model"):
+        received.append(chunk)
+
+    assert len(received) == 1
+    assert received[0].text == "routed stream"
+
+
+@pytest.mark.asyncio
+async def test_mock_llm_provider_stream_direct_and_abort() -> None:
+    """Verifies direct MockLLMProvider.stream calls, tool-only chunk, and abort signal."""
+    from magitech_harness.agent.cancellation import AbortError, AbortSignal
+
+    p = MockLLMProvider()
+    tc = ToolCallData(call_id="c_direct", name="ls", arguments={})
+    # Queue tool-only response (no text)
+    p.queue_response(text="", tool_calls=[tc])
+
+    chunks = []
+    async for chunk in p.stream(messages=[]):
+        chunks.append(chunk)
+
+    assert len(chunks) == 1
+    assert chunks[0].text == ""
+    assert len(chunks[0].tool_calls) == 1
+
+    # Now test abort on direct stream
+    signal = AbortSignal()
+    signal.abort()
+    with pytest.raises(AbortError, match="Operation was aborted"):
+        async for _ in p.stream(messages=[], signal=signal):
+            pass
+
+
+@pytest.mark.asyncio
+async def test_llm_service_stream_mid_stream_abort() -> None:
+    """Verifies abort triggered mid-stream inside LLMService.stream loop."""
+    from magitech_harness.agent.cancellation import AbortError, AbortSignal
+    from magitech_harness.llm.types import ModelChunk
+
+    class MultiChunkProvider:
+        async def generate(self, *args, **kwargs):
+            return ModelResponse(text="multi")
+
+        async def stream(self, *args, **kwargs):
+            yield ModelChunk(text="first")
+            yield ModelChunk(text="second")
+
+    ctx = Context()
+    service = LLMService(ctx)
+    service.register_provider("multi", MultiChunkProvider())
+    service.set_active_provider("multi")
+
+    signal = AbortSignal()
+
+    with pytest.raises(AbortError, match="Operation was aborted"):
+        async for chunk in service.stream(messages=[], signal=signal):
+            if chunk.text == "first":
+                signal.abort()
