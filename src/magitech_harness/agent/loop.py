@@ -12,6 +12,7 @@ from typing import Any, ClassVar
 from anima import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
+from magitech_harness.llm.types import UsageData
 from magitech_harness.session.events import EventType, ToolCallData
 from magitech_harness.session.store import Session
 
@@ -121,6 +122,7 @@ class AgentLoopService(Service):
                         "text": response.text,
                         "tool_calls": [tc.model_dump() for tc in response.tool_calls],
                         "turn_id": turn_id,
+                        "usage": response.usage.model_dump(),
                     },
                 )
                 final_assistant_text = response.text
@@ -250,6 +252,7 @@ class AgentLoopService(Service):
 
                 accumulated_text = ""
                 collected_tool_calls: list[ToolCallData] = []
+                accumulated_usage = UsageData()
 
                 async for chunk in self.ctx.llm.stream(
                     messages=messages,
@@ -263,6 +266,9 @@ class AgentLoopService(Service):
                         yield {"type": "chunk", "text": chunk.text}
                     if chunk.tool_calls:
                         collected_tool_calls.extend(chunk.tool_calls)
+                    if chunk.usage.total_tokens > 0:
+                        accumulated_usage = chunk.usage
+                        yield {"type": "usage", "usage": chunk.usage.model_dump()}
 
                 final_assistant_text = accumulated_text
                 self.ctx.sessions.log_event(
@@ -272,6 +278,7 @@ class AgentLoopService(Service):
                         "text": accumulated_text,
                         "tool_calls": [tc.model_dump() for tc in collected_tool_calls],
                         "turn_id": turn_id,
+                        "usage": accumulated_usage.model_dump(),
                     },
                 )
 

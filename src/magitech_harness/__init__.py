@@ -7,7 +7,13 @@ from typing import ClassVar
 
 from anima import Context
 
+from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.agent.loop import AgentLoopService
+from magitech_harness.approval.service import (
+    ApprovalRequest,
+    ApprovalService,
+    calculate_argument_digest,
+)
 from magitech_harness.llm.service import (
     LLMProvider,
     LLMService,
@@ -15,7 +21,8 @@ from magitech_harness.llm.service import (
     NoProviderError,
 )
 from magitech_harness.llm.slug import parse_model_slug
-from magitech_harness.llm.types import ModelResponse
+from magitech_harness.llm.types import ModelChunk, ModelResponse, UsageData
+from magitech_harness.plugins.layers import ConfigLayer, LayerResolutionService
 from magitech_harness.plugins.manifest import PluginManifest
 from magitech_harness.plugins.service import PluginService
 from magitech_harness.session.events import (
@@ -27,7 +34,7 @@ from magitech_harness.session.events import (
 from magitech_harness.session.pairing import is_tool_pairing_balanced
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session, derive_messages
-from magitech_harness.shell.service import LocalShellService
+from magitech_harness.shell.service import LocalShellService, ShellResult
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.definition import Tool, define_tool
 from magitech_harness.tools.service import ToolService
@@ -57,6 +64,8 @@ def create_harness(
     ctx.plugin(ToolService)
     ctx.plugin(LLMService)
     ctx.plugin(LocalShellService)
+    ctx.plugin(ApprovalService)
+    ctx.plugin(LayerResolutionService)
     ctx.plugin(AgentLoopService)
     ctx.plugin(PluginService)
 
@@ -74,12 +83,19 @@ def create_harness(
 
 
 __all__ = [
+    "AbortError",
+    "AbortSignal",
     "AgentLoopService",
+    "ApprovalRequest",
+    "ApprovalService",
+    "ConfigLayer",
     "EventType",
     "LLMProvider",
     "LLMService",
+    "LayerResolutionService",
     "LocalShellService",
     "MockLLMProvider",
+    "ModelChunk",
     "ModelResponse",
     "NoProviderError",
     "PluginManifest",
@@ -87,11 +103,14 @@ __all__ = [
     "Session",
     "SessionEvent",
     "SessionService",
+    "ShellResult",
     "SystemPromptService",
     "Tool",
     "ToolCallData",
     "ToolResultData",
     "ToolService",
+    "UsageData",
+    "calculate_argument_digest",
     "create_harness",
     "define_tool",
     "derive_messages",

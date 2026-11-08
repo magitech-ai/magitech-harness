@@ -1,6 +1,4 @@
-"""
-Cooperative cancellation primitive (AbortSignal and AbortError).
-"""
+"""Cooperative cancellation primitive (AbortSignal and AbortError)."""
 
 from __future__ import annotations
 
@@ -16,6 +14,7 @@ class AbortSignal:
 
     def __init__(self) -> None:
         self._aborted = False
+        self._reason: str | None = None
         self._listeners: list[Callable[[], None]] = []
 
     @property
@@ -23,11 +22,22 @@ class AbortSignal:
         """Returns True if abort() has been invoked."""
         return self._aborted
 
-    def abort(self) -> None:
+    @property
+    def aborted(self) -> bool:
+        """Alias for is_aborted."""
+        return self._aborted
+
+    @property
+    def reason(self) -> str | None:
+        """Returns the optional abort reason string."""
+        return self._reason
+
+    def abort(self, reason: str | None = None) -> None:
         """Trigger cancellation, notifying all registered listeners."""
         if self._aborted:
             return
         self._aborted = True
+        self._reason = reason
         listeners = list(self._listeners)
         self._listeners.clear()
         for listener in listeners:
@@ -50,7 +60,16 @@ class AbortSignal:
 
         return disposer
 
+    def add_listener(self, callback: Callable[[], None]) -> Callable[[], None]:
+        """Alias for on_abort."""
+        return self.on_abort(callback)
+
     def throw_if_aborted(self) -> None:
         """Raise AbortError immediately if the signal has been cancelled."""
         if self._aborted:
-            raise AbortError("Operation was aborted.")
+            msg = (
+                f"Operation was aborted: {self._reason}"
+                if self._reason
+                else "Operation was aborted."
+            )
+            raise AbortError(msg)

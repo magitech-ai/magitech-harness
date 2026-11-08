@@ -22,6 +22,8 @@ def test_create_harness_default() -> None:
     assert ctx.has("tools")
     assert ctx.has("llm")
     assert ctx.has("shell")
+    assert ctx.has("approvals")
+    assert ctx.has("layers")
     assert ctx.has("agent_loop")
     assert ctx.has("plugins")
     assert not ctx.llm.providers

@@ -8,8 +8,24 @@ from magitech_harness.agent.cancellation import AbortError, AbortSignal
 def test_abort_signal_initial_state() -> None:
     signal = AbortSignal()
     assert not signal.is_aborted
+    assert not signal.aborted
+    assert signal.reason is None
     # throwIfAborted should not raise
     signal.throw_if_aborted()
+
+
+def test_abort_signal_abort_with_reason_and_add_listener() -> None:
+    signal = AbortSignal()
+    events = []
+    disposer = signal.add_listener(lambda: events.append("aborted"))
+    signal.abort("Timeout")
+    assert signal.is_aborted
+    assert signal.aborted
+    assert signal.reason == "Timeout"
+    assert events == ["aborted"]
+    with pytest.raises(AbortError, match="Operation was aborted: Timeout"):
+        signal.throw_if_aborted()
+    disposer()
 
 
 def test_abort_signal_abort_triggers_listeners() -> None:

@@ -1,6 +1,6 @@
 """Unit tests for LLM types."""
 
-from magitech_harness.llm.types import ModelChunk, ModelResponse
+from magitech_harness.llm.types import ModelChunk, ModelResponse, UsageData
 from magitech_harness.session.events import ToolCallData
 
 
@@ -11,6 +11,22 @@ def test_model_response_defaults() -> None:
     assert resp.tool_calls == []
     assert resp.finish_reason == "stop"
     assert resp.raw_response == {}
+    assert resp.usage.total_tokens == 0
+
+
+def test_usage_data_defaults_and_fields() -> None:
+    """Verifies UsageData default values and custom fields."""
+    usage = UsageData(
+        prompt_tokens=10,
+        completion_tokens=20,
+        total_tokens=30,
+        reasoning_tokens=5,
+    )
+    assert usage.prompt_tokens == 10
+    assert usage.completion_tokens == 20
+    assert usage.total_tokens == 30
+    assert usage.reasoning_tokens == 5
+    assert usage.model_dump()["total_tokens"] == 30
 
 
 def test_model_response_with_tool_calls() -> None:

@@ -33,7 +33,7 @@ class SessionService(Service):
     def get(self, session_id: str) -> Session | None:
         return self._active_sessions.get(session_id)
 
-    def load(self, session_id: str) -> Session | None:
+    def load(self, session_id: str, *, repair_on_open: bool = True) -> Session | None:
         """Loads a session by ID from memory cache or storage directory."""
         if session_id in self._active_sessions:
             return self._active_sessions[session_id]
@@ -41,7 +41,7 @@ class SessionService(Service):
         if self.base_storage_dir:
             storage_path = self.base_storage_dir / f"{session_id}.jsonl"
             if storage_path.exists():
-                session = Session.load(storage_path)
+                session = Session.load(storage_path, repair_on_open=repair_on_open)
                 self._active_sessions[session_id] = session
                 return session
 
