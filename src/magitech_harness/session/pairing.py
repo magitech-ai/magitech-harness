@@ -25,7 +25,11 @@ def is_tool_pairing_balanced(events: list[SessionEvent], cut_index: int) -> bool
         if ev.type == EventType.ASSISTANT_MESSAGE:
             tool_calls = ev.payload.get("tool_calls", [])
             for tc in tool_calls:
-                call_id = tc.get("call_id") or tc.get("id")
+                call_id = (
+                    tc.get("call_id") or tc.get("id")
+                    if isinstance(tc, dict)
+                    else getattr(tc, "call_id", None)
+                )
                 if call_id:
                     pending_calls.add(call_id)
         elif ev.type == EventType.TOOL_RESULT:

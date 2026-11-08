@@ -78,16 +78,30 @@ def test_pairing_bounds() -> None:
 
 def test_pairing_edge_cases_empty_call_id_and_untracked_result() -> None:
     """Verifies branches for tool calls missing call_id and results not in pending."""
+    from magitech_harness.session.events import ToolCallData
+
     events = [
         # Tool call missing both 'call_id' and 'id'
         _event(
             EventType.ASSISTANT_MESSAGE,
             {"text": None, "tool_calls": [{"name": "no_id"}]},
         ),
+        # ToolCallData instance
+        _event(
+            EventType.ASSISTANT_MESSAGE,
+            {
+                "text": None,
+                "tool_calls": [
+                    ToolCallData(call_id="c_obj", name="test", arguments={})
+                ],
+            },
+        ),
+        # Tool result resolving c_obj
+        _event(EventType.TOOL_RESULT, {"call_id": "c_obj", "content": "res"}),
         # Tool result with unknown call_id not in pending_calls
         _event(EventType.TOOL_RESULT, {"call_id": "orphan_result", "content": "123"}),
         # Tool result without call_id
         _event(EventType.TOOL_RESULT, {"content": "no_call_id"}),
     ]
-    # Should still evaluate cleanly as balanced
-    assert is_tool_pairing_balanced(events, 2) is True
+    # Should evaluate cleanly as balanced
+    assert is_tool_pairing_balanced(events, 4) is True
