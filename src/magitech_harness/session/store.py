@@ -33,7 +33,13 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
                 "content": f"[Conversation summary up to checkpoint]:\n{summary}",
             }
         )
-        slice_events = events[latest_compaction_idx + 1 :]
+        compacted_count = latest_compaction.payload.get("compacted_count")
+        if compacted_count is not None:
+            slice_events = [
+                ev for ev in events[compacted_count:] if ev.type != EventType.COMPACTION
+            ]
+        else:
+            slice_events = events[latest_compaction_idx + 1 :]
     else:
         slice_events = events
 

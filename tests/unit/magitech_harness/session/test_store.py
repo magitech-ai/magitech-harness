@@ -131,6 +131,43 @@ def test_derive_messages_with_compaction() -> None:
     assert msgs[2]["content"] == "Step 2 done"
 
 
+def test_derive_messages_with_compaction_and_compacted_count() -> None:
+    """Verifies derive_messages uses compacted_count to keep non-compacted history."""
+    events = [
+        SessionEvent(
+            id="1",
+            session_id="s",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "Old 1"},
+        ),
+        SessionEvent(
+            id="2",
+            session_id="s",
+            type=EventType.ASSISTANT_MESSAGE,
+            payload={"text": "Old 2"},
+        ),
+        SessionEvent(
+            id="3",
+            session_id="s",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "Kept 3"},
+        ),
+        SessionEvent(
+            id="4",
+            session_id="s",
+            type=EventType.COMPACTION,
+            payload={"summary": "Summary of 1 & 2", "compacted_count": 2},
+        ),
+    ]
+    msgs = derive_messages(events)
+    assert len(msgs) == 2
+    assert (
+        "[Conversation summary up to checkpoint]:\nSummary of 1 & 2"
+        in msgs[0]["content"]
+    )
+    assert msgs[1]["content"] == "Kept 3"
+
+
 def test_session_derive_messages_method() -> None:
     """Verifies session.derive_messages() forwards to derive_messages."""
     session = Session(session_id="test")
