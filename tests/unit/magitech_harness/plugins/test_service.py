@@ -48,6 +48,7 @@ async def test_plugin_service_discover_and_mount_file(tmp_path: Path) -> None:
 
     assert fiber.state == FiberState.ACTIVE
     assert service.get_plugin("mock-plugin") is not None
+    assert "mock-plugin" in service.mounted_plugins
     assert service.get_plugin("nonexistent") is None
 
     plugins = service.list_plugins()

@@ -152,6 +152,11 @@ class PluginService(Service):
             _, fiber = mounted
             await fiber.dispose()
 
+    @property
+    def mounted_plugins(self) -> dict[str, tuple[PluginManifest, Fiber]]:
+        """Returns a snapshot dictionary of currently mounted plugins."""
+        return dict(self._mounted_plugins)
+
     def get_plugin(self, name: str) -> tuple[PluginManifest, Fiber] | None:
         """Returns the manifest and fiber for a mounted plugin, or None.
 
