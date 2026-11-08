@@ -32,5 +32,7 @@ class PluginManifest(BaseModel):
     types: list[str] = Field(default_factory=list)
     python_deps: list[str] = Field(default_factory=list)
     hooks: list[str] = Field(default_factory=list)
+    requires_services: list[str] = Field(default_factory=list)
+    recommended_plugins: list[str] = Field(default_factory=list)
     enabled: bool = True
     path: Path | None = None
