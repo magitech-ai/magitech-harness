@@ -36,6 +36,8 @@ def test_plugin_manifest_defaults() -> None:
     assert manifest.types == []
     assert manifest.python_deps == []
     assert manifest.hooks == []
+    assert manifest.requires_services == []
+    assert manifest.recommended_plugins == []
     assert manifest.enabled is True
 
 
