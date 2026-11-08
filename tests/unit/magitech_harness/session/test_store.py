@@ -81,3 +81,67 @@ def test_session_load_nonexistent_or_empty(tmp_path: Path) -> None:
     s2 = Session.load(empty_file)
     assert s2.session_id == "empty"
     assert s2.events == []
+
+
+def test_derive_messages_with_compaction() -> None:
+    """Verifies that derive_messages folds prior history into compaction summary checkpoint."""
+    events = [
+        SessionEvent(
+            id="1",
+            session_id="s",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "Initial task"},
+        ),
+        SessionEvent(
+            id="2",
+            session_id="s",
+            type=EventType.ASSISTANT_MESSAGE,
+            payload={"text": "Step 1 done"},
+        ),
+        SessionEvent(
+            id="3",
+            session_id="s",
+            type=EventType.COMPACTION,
+            payload={"summary": "Initial task: Step 1 is done."},
+        ),
+        SessionEvent(
+            id="4",
+            session_id="s",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "Now step 2"},
+        ),
+        SessionEvent(
+            id="5",
+            session_id="s",
+            type=EventType.ASSISTANT_MESSAGE,
+            payload={"text": "Step 2 done"},
+        ),
+    ]
+
+    msgs = derive_messages(events)
+    assert len(msgs) == 3
+    assert msgs[0]["role"] == "user"
+    assert (
+        msgs[0]["content"]
+        == "[Conversation summary up to checkpoint]:\nInitial task: Step 1 is done."
+    )
+    assert msgs[1]["role"] == "user"
+    assert msgs[1]["content"] == "Now step 2"
+    assert msgs[2]["role"] == "assistant"
+    assert msgs[2]["content"] == "Step 2 done"
+
+
+def test_session_derive_messages_method() -> None:
+    """Verifies session.derive_messages() forwards to derive_messages."""
+    session = Session(session_id="test")
+    session.append(
+        SessionEvent(
+            id="1",
+            session_id="test",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "hello"},
+        )
+    )
+    msgs = session.derive_messages()
+    assert len(msgs) == 1
+    assert msgs[0]["content"] == "hello"

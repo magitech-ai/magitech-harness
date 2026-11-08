@@ -4,6 +4,7 @@ from magitech_harness.session.events import (
     ToolCallData,
     ToolResultData,
 )
+from magitech_harness.session.pairing import is_tool_pairing_balanced
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session, derive_messages
 
@@ -15,4 +16,5 @@ __all__ = [
     "ToolCallData",
     "ToolResultData",
     "derive_messages",
+    "is_tool_pairing_balanced",
 ]

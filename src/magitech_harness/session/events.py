@@ -20,6 +20,7 @@ class EventType(str, Enum):
     ASSISTANT_MESSAGE = "assistant/message"
     TOOL_CALL = "tool/call"
     TOOL_RESULT = "tool/result"
+    COMPACTION = "session/compaction"
 
 
 class ToolCallData(BaseModel):

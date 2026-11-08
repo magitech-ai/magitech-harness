@@ -24,6 +24,7 @@ from magitech_harness.session.events import (
     ToolCallData,
     ToolResultData,
 )
+from magitech_harness.session.pairing import is_tool_pairing_balanced
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session, derive_messages
 from magitech_harness.shell.service import LocalShellService
@@ -94,5 +95,6 @@ __all__ = [
     "create_harness",
     "define_tool",
     "derive_messages",
+    "is_tool_pairing_balanced",
     "parse_model_slug",
 ]

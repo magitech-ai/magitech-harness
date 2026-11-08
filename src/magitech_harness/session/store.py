@@ -16,9 +16,28 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
 
     Adheres to: Model-visible ⟺ Logged.
     """
+    latest_compaction: SessionEvent | None = None
+    latest_compaction_idx = -1
+    for i, ev in enumerate(events):
+        if ev.type == EventType.COMPACTION:
+            latest_compaction = ev
+            latest_compaction_idx = i
+
     messages: list[dict[str, Any]] = []
 
-    for ev in events:
+    if latest_compaction is not None:
+        summary = latest_compaction.payload.get("summary", "")
+        messages.append(
+            {
+                "role": "user",
+                "content": f"[Conversation summary up to checkpoint]:\n{summary}",
+            }
+        )
+        slice_events = events[latest_compaction_idx + 1 :]
+    else:
+        slice_events = events
+
+    for ev in slice_events:
         if ev.type == EventType.USER_MESSAGE:
             messages.append(
                 {
