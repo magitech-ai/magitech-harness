@@ -2,9 +2,9 @@
 
 import pytest
 from anima import Context, EventMode
+
 from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.llm.service import LLMService, MockLLMProvider
-from magitech_harness.llm.types import ModelResponse
 from magitech_harness.session.events import EventType, ToolCallData
 from magitech_harness.session.service import SessionService
 
@@ -18,7 +18,8 @@ async def test_agent_loop_single_step_no_tools() -> None:
     ctx.plugin(AgentLoopService)
     await ctx.flush()
 
-    mock_llm: MockLLMProvider = ctx.llm.provider
+    mock_llm = MockLLMProvider()
+    ctx.llm.register_provider("mock", mock_llm)
     mock_llm.queue_response(text="Direct answer")
 
     session = ctx.sessions.create("sess_1")
@@ -66,8 +67,8 @@ async def test_agent_loop_pre_step_reject_short_circuit() -> None:
 @pytest.mark.asyncio
 async def test_agent_loop_max_steps_termination() -> None:
     """Verifies that reaching max_steps terminates the loop even if tool calls continue."""
-    from magitech_harness.tools.service import ToolService
     from magitech_harness.tools.definition import define_tool
+    from magitech_harness.tools.service import ToolService
 
     ctx = Context()
     ctx.plugin(SessionService)
@@ -80,7 +81,8 @@ async def test_agent_loop_max_steps_termination() -> None:
         define_tool(name="ping", description="ping", execute=lambda args: "pong")
     )
 
-    mock_llm: MockLLMProvider = ctx.llm.provider
+    mock_llm = MockLLMProvider()
+    ctx.llm.register_provider("mock", mock_llm)
     # Queue infinite tool calls
     for i in range(10):
         mock_llm.queue_response(

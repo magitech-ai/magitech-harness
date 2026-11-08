@@ -1,8 +1,10 @@
 """Unit tests for SystemPromptService."""
 
 import asyncio
+
 import pytest
 from anima import Context
+
 from magitech_harness.system_prompt.service import SystemPromptService
 
 

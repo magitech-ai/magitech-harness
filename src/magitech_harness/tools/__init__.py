@@ -3,6 +3,6 @@ from magitech_harness.tools.service import ToolService
 
 __all__ = [
     "Tool",
-    "define_tool",
     "ToolService",
+    "define_tool",
 ]

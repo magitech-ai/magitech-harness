@@ -16,7 +16,9 @@ def test_model_response_defaults() -> None:
 def test_model_response_with_tool_calls() -> None:
     """Verifies ModelResponse with tool calls."""
     tc = ToolCallData(call_id="call_99", name="grep", arguments={"pattern": "test"})
-    resp = ModelResponse(text="Searching...", tool_calls=[tc], finish_reason="tool_calls")
+    resp = ModelResponse(
+        text="Searching...", tool_calls=[tc], finish_reason="tool_calls"
+    )
     assert resp.text == "Searching..."
     assert len(resp.tool_calls) == 1
     assert resp.tool_calls[0].name == "grep"

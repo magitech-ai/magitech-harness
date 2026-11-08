@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from anima import Context, Disposer, EventMode, Service
+
+from anima import Context, Disposer, Service
+
 from magitech_harness.session.events import ToolCallData, ToolResultData
 from magitech_harness.tools.definition import Tool
 
@@ -81,11 +83,11 @@ class ToolService(Service):
                 is_error=False,
             )
         except Exception as e:
-            logger.exception("Error executing tool %s: %s", tool_call.name, e)
+            logger.exception("Error executing tool %s", tool_call.name)
             result = ToolResultData(
                 call_id=tool_call.call_id,
                 name=tool_call.name,
-                content=f"Execution error: {str(e)}",
+                content=f"Execution error: {e!s}",
                 is_error=True,
             )
 

@@ -1,7 +1,13 @@
 """Unit tests for SessionEvent and related event models."""
 
 import time
-from magitech_harness.session.events import EventType, SessionEvent, ToolCallData, ToolResultData
+
+from magitech_harness.session.events import (
+    EventType,
+    SessionEvent,
+    ToolCallData,
+    ToolResultData,
+)
 
 
 def test_tool_call_data_serialization() -> None:
@@ -15,7 +21,9 @@ def test_tool_call_data_serialization() -> None:
 
 def test_tool_result_data_serialization() -> None:
     """Verifies ToolResultData serialization and error flags."""
-    res = ToolResultData(call_id="call_1", name="bash", content="output", is_error=False)
+    res = ToolResultData(
+        call_id="call_1", name="bash", content="output", is_error=False
+    )
     assert not res.is_error
     assert res.content == "output"
 

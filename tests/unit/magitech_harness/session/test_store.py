@@ -1,6 +1,7 @@
 """Unit tests for Session and derive_messages projection."""
 
 from pathlib import Path
+
 from magitech_harness.session.events import EventType, SessionEvent
 from magitech_harness.session.store import Session, derive_messages
 
@@ -8,17 +9,21 @@ from magitech_harness.session.store import Session, derive_messages
 def test_derive_messages_ignores_unknown_and_handles_roles() -> None:
     """Verifies that derive_messages correctly projects user, assistant, and tool messages."""
     events = [
+        SessionEvent(id="1", session_id="s", type=EventType.TURN_START, payload={}),
         SessionEvent(
-            id="1", session_id="s", type=EventType.TURN_START, payload={}
-        ),
-        SessionEvent(
-            id="2", session_id="s", type=EventType.USER_MESSAGE, payload={"text": "hello"}
+            id="2",
+            session_id="s",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "hello"},
         ),
         SessionEvent(
             id="3",
             session_id="s",
             type=EventType.ASSISTANT_MESSAGE,
-            payload={"text": "I can help", "tool_calls": [{"call_id": "c1", "name": "test", "arguments": {}}]},
+            payload={
+                "text": "I can help",
+                "tool_calls": [{"call_id": "c1", "name": "test", "arguments": {}}],
+            },
         ),
         SessionEvent(
             id="4",

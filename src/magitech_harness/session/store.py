@@ -7,22 +7,25 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+
 from magitech_harness.session.events import EventType, SessionEvent
 
 
 def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
     """Deterministically reconstruct model-visible conversation history from session log.
-    
+
     Adheres to: Model-visible ⟺ Logged.
     """
     messages: list[dict[str, Any]] = []
 
     for ev in events:
         if ev.type == EventType.USER_MESSAGE:
-            messages.append({
-                "role": "user",
-                "content": ev.payload.get("text", ""),
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": ev.payload.get("text", ""),
+                }
+            )
         elif ev.type == EventType.ASSISTANT_MESSAGE:
             msg: dict[str, Any] = {
                 "role": "assistant",
@@ -45,14 +48,16 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
                 ]
             messages.append(msg)
         elif ev.type == EventType.TOOL_RESULT:
-            messages.append({
-                "role": "tool",
-                "tool_call_id": ev.payload.get("call_id"),
-                "name": ev.payload.get("name"),
-                "content": json.dumps(ev.payload.get("content"))
-                if not isinstance(ev.payload.get("content"), str)
-                else ev.payload.get("content"),
-            })
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": ev.payload.get("call_id"),
+                    "name": ev.payload.get("name"),
+                    "content": json.dumps(ev.payload.get("content"))
+                    if not isinstance(ev.payload.get("content"), str)
+                    else ev.payload.get("content"),
+                }
+            )
 
     return messages
 

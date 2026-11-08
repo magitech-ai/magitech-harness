@@ -1,17 +1,12 @@
-import pytest
 from pathlib import Path
-from anima import Context, EventMode
+
+import pytest
+from anima import EventMode
+
 from magitech_harness import (
-    AgentLoopService,
     EventType,
-    LLMService,
-    LocalShellService,
     MockLLMProvider,
-    ModelResponse,
-    SessionService,
-    SystemPromptService,
     ToolCallData,
-    ToolService,
     create_harness,
     define_tool,
 )
@@ -20,7 +15,7 @@ from magitech_harness import (
 @pytest.mark.asyncio
 async def test_full_turn_with_tool_call(tmp_path: Path):
     # 1. Boot harness
-    ctx = create_harness(storage_dir=tmp_path)
+    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
     await ctx.flush()
 
     # Verify all 6 capability seams are active
@@ -56,10 +51,12 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
     # 3. Configure mock LLM responses for multi-step turn:
     # Step 1: LLM returns tool_call "multiply" (a=6, b=7)
     # Step 2: LLM returns final text answer "The answer is 42."
-    mock_llm: MockLLMProvider = ctx.llm.provider
+    mock_llm: MockLLMProvider = ctx.llm.active_provider
     mock_llm.queue_response(
         text="Let me calculate that for you.",
-        tool_calls=[ToolCallData(call_id="call_1", name="multiply", arguments={"a": 6, "b": 7})],
+        tool_calls=[
+            ToolCallData(call_id="call_1", name="multiply", arguments={"a": 6, "b": 7})
+        ],
     )
     mock_llm.queue_response(
         text="The answer is 42.",
@@ -110,7 +107,7 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_waterfall_guard_pre_step_veto(tmp_path: Path):
-    ctx = create_harness(storage_dir=tmp_path)
+    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
     await ctx.flush()
 
     # Install a security plugin via waterfall hook on agent/pre-step
@@ -140,6 +137,6 @@ async def test_shell_service_execution(tmp_path: Path):
     ctx = create_harness(storage_dir=tmp_path)
     await ctx.flush()
 
-    code, stdout, stderr = await ctx.shell.run("echo 'Magitech Rocks'")
+    code, stdout, _stderr = await ctx.shell.run("echo 'Magitech Rocks'")
     assert code == 0
     assert "Magitech Rocks" in stdout

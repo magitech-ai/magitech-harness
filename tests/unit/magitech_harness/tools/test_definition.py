@@ -1,6 +1,7 @@
 """Unit tests for Tool and define_tool."""
 
 import pytest
+
 from magitech_harness.tools.definition import Tool, define_tool
 
 
@@ -42,7 +43,11 @@ def test_tool_to_schema_variations() -> None:
         name="my_tool",
         description="Complex tool",
         parameters={
-            "query": {"type": "string", "description": "Search query", "required": True},
+            "query": {
+                "type": "string",
+                "description": "Search query",
+                "required": True,
+            },
             "limit": {"type": "integer", "description": "Max items"},
             "simple_flag": "A boolean flag description",
         },
@@ -58,4 +63,7 @@ def test_tool_to_schema_variations() -> None:
     assert params["type"] == "object"
     assert "query" in params["required"]
     assert "limit" not in params["required"]
-    assert params["properties"]["simple_flag"]["description"] == "A boolean flag description"
+    assert (
+        params["properties"]["simple_flag"]["description"]
+        == "A boolean flag description"
+    )

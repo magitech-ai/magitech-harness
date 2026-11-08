@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
+
 from anima import Context, Service
+
 from magitech_harness.session.events import EventType, SessionEvent
 from magitech_harness.session.store import Session
 
@@ -22,9 +24,7 @@ class SessionService(Service):
     def create(self, session_id: str | None = None) -> Session:
         sid = session_id or str(uuid.uuid4())
         storage_path = (
-            self.base_storage_dir / f"{sid}.jsonl"
-            if self.base_storage_dir
-            else None
+            self.base_storage_dir / f"{sid}.jsonl" if self.base_storage_dir else None
         )
         session = Session(session_id=sid, storage_path=storage_path)
         self._active_sessions[sid] = session
@@ -33,7 +33,9 @@ class SessionService(Service):
     def get(self, session_id: str) -> Session | None:
         return self._active_sessions.get(session_id)
 
-    def log_event(self, session: Session, event_type: EventType, payload: dict) -> SessionEvent:
+    def log_event(
+        self, session: Session, event_type: EventType, payload: dict
+    ) -> SessionEvent:
         event = SessionEvent(
             id=str(uuid.uuid4()),
             session_id=session.session_id,

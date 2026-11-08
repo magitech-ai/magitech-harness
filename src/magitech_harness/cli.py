@@ -7,7 +7,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from pathlib import Path
+
 from magitech_harness import create_harness, define_tool
 
 
@@ -15,7 +15,9 @@ async def main_async() -> None:
     parser = argparse.ArgumentParser(
         description="Magitech Harness: Composable Agent Runtime by Magitech"
     )
-    parser.add_argument("prompt", nargs="?", help="Prompt to run through the agent loop")
+    parser.add_argument(
+        "prompt", nargs="?", help="Prompt to run through the agent loop"
+    )
     parser.add_argument(
         "--storage",
         default=".sessions",
@@ -31,6 +33,16 @@ async def main_async() -> None:
     ctx = create_harness(storage_dir=args.storage)
     await ctx.flush()
 
+    if args.profile:
+        from anima.loader import load_profile
+
+        load_profile(ctx, args.profile)
+        await ctx.flush()
+    if not ctx.llm.providers:
+        from magitech_harness.llm.service import MockLLMProvider
+
+        ctx.llm.register_provider("mock", MockLLMProvider())
+
     # Register an example custom tool
     def add_numbers(tool_args: dict) -> int:
         return int(tool_args.get("a", 0)) + int(tool_args.get("b", 0))
@@ -40,8 +52,16 @@ async def main_async() -> None:
             name="add",
             description="Add two numbers together.",
             parameters={
-                "a": {"type": "integer", "description": "First number", "required": True},
-                "b": {"type": "integer", "description": "Second number", "required": True},
+                "a": {
+                    "type": "integer",
+                    "description": "First number",
+                    "required": True,
+                },
+                "b": {
+                    "type": "integer",
+                    "description": "Second number",
+                    "required": True,
+                },
             },
             execute=add_numbers,
         )

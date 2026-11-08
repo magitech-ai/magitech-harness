@@ -1,7 +1,9 @@
 """Unit tests for SessionService."""
 
 from pathlib import Path
+
 from anima import Context
+
 from magitech_harness.session.events import EventType
 from magitech_harness.session.service import SessionService
 
@@ -10,7 +12,10 @@ def test_session_service_create_get_and_log(tmp_path: Path) -> None:
     """Verifies SessionService lifecycle, event logging, and session lookup."""
     ctx = Context()
     events_broadcast = []
-    ctx.on("session/event", lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)))
+    ctx.on(
+        "session/event",
+        lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
+    )
 
     service = SessionService(ctx, base_storage_dir=tmp_path)
     session = service.create("test_id")

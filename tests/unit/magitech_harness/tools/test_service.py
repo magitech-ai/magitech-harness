@@ -2,6 +2,7 @@
 
 import pytest
 from anima import Context, EventMode
+
 from magitech_harness.session.events import ToolCallData
 from magitech_harness.tools.definition import define_tool
 from magitech_harness.tools.service import ToolService
@@ -34,7 +35,10 @@ async def test_tool_service_execute_tool_not_found() -> None:
     ctx = Context()
     service = ToolService(ctx)
     results_emitted = []
-    ctx.on("tools/result", lambda call, res: results_emitted.append((call.name, res.is_error)))
+    ctx.on(
+        "tools/result",
+        lambda call, res: results_emitted.append((call.name, res.is_error)),
+    )
 
     call_data = ToolCallData(call_id="call_x", name="nonexistent", arguments={})
     res = await service.execute(call_data)
@@ -53,7 +57,9 @@ async def test_tool_service_execute_exception_handling() -> None:
     def crashing_tool(args):
         raise ValueError("Division by zero in tool")
 
-    service.register(define_tool(name="crash", description="Crashes", execute=crashing_tool))
+    service.register(
+        define_tool(name="crash", description="Crashes", execute=crashing_tool)
+    )
 
     call_data = ToolCallData(call_id="c_err", name="crash", arguments={})
     res = await service.execute(call_data)
@@ -92,6 +98,8 @@ async def test_tool_service_waterfall_pre_and_post_execute() -> None:
     ctx.on("tools/pre-execute", pre_hook, mode=EventMode.WATERFALL)
     ctx.on("tools/post-execute", post_hook, mode=EventMode.WATERFALL)
 
-    res = await service.execute(ToolCallData(call_id="c1", name="echo", arguments={"msg": "hello"}))
+    res = await service.execute(
+        ToolCallData(call_id="c1", name="echo", arguments={"msg": "hello"})
+    )
     assert not res.is_error
     assert res.content == "post_pre_hello"

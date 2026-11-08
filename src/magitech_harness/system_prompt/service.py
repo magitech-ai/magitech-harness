@@ -5,7 +5,8 @@ SystemPromptService (ctx.system_prompt): Dynamic prompt assembly.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable
+from collections.abc import Callable
+
 from anima import Context, Disposer, Service
 
 
@@ -16,9 +17,7 @@ class SystemPromptService(Service):
         super().__init__(ctx, "system_prompt")
         self._sections: dict[str, Callable[[], str] | str] = {}
 
-    def register_section(
-        self, name: str, section: Callable[[], str] | str
-    ) -> Disposer:
+    def register_section(self, name: str, section: Callable[[], str] | str) -> Disposer:
         """Register a dynamic prompt section."""
         self._sections[name] = section
 
@@ -32,7 +31,7 @@ class SystemPromptService(Service):
     async def render(self) -> str:
         """Assemble all sections into final system prompt string."""
         rendered: list[str] = []
-        for name, sec in self._sections.items():
+        for sec in self._sections.values():
             if callable(sec):
                 res = sec()
                 if inspect.isawaitable(res):

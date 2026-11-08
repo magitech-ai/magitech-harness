@@ -2,6 +2,7 @@
 
 import pytest
 from anima import Context
+
 from magitech_harness.shell.service import LocalShellService
 from magitech_harness.tools.service import ToolService
 
@@ -18,7 +19,9 @@ async def test_shell_service_run_and_bash_tool() -> None:
     assert ctx.tools.get("bash") is not None
 
     # Execute bash tool directly
-    res = await ctx.shell._execute_bash_tool({"command": "echo 'hello stdout' && echo 'error stderr' >&2"})
+    res = await ctx.shell._execute_bash_tool(
+        {"command": "echo 'hello stdout' && echo 'error stderr' >&2"}
+    )
     assert "hello stdout" in res
     assert "STDERR:\nerror stderr" in res
     assert "[Exit code: 0]" in res
@@ -33,6 +36,6 @@ async def test_shell_service_without_tools() -> None:
     """Verifies LocalShellService operates when ToolService is absent."""
     ctx = Context()
     service = LocalShellService(ctx)
-    code, stdout, stderr = await service.run("echo test")
+    code, stdout, _stderr = await service.run("echo test")
     assert code == 0
     assert "test" in stdout

@@ -1,15 +1,16 @@
-"""
-AgentLoopService (ctx.agent_loop): Turn and Step execution engine.
-Implements the PyHarness turn execution state machine.
+"""AgentLoopService (ctx.agent_loop): Turn and Step execution engine.
+Implements the Magitech Harness turn execution state machine.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import ClassVar
+
 from anima import Context, Service
-from magitech_harness.session.events import EventType, ToolCallData
+
+from magitech_harness.session.events import EventType
 from magitech_harness.session.store import Session
 
 logger = logging.getLogger("harness.agent")
@@ -19,7 +20,7 @@ class AgentLoopService(Service):
     """Service managing multi-step agent turns, tool loops, and session logs."""
 
     # Explicitly inject dependencies
-    inject = ["sessions", "llm"]
+    inject: ClassVar[list[str]] = ["sessions", "llm"]
 
     def __init__(self, ctx: Context) -> None:
         super().__init__(ctx, "agent_loop")
@@ -72,7 +73,9 @@ class AgentLoopService(Service):
                 )
 
                 if pre_step_decision.get("action") == "reject":
-                    logger.warning("Step %d rejected by pre-step waterfall hook", step_index)
+                    logger.warning(
+                        "Step %d rejected by pre-step waterfall hook", step_index
+                    )
                     break
 
                 # 5. Assemble prompt & tools
@@ -82,9 +85,7 @@ class AgentLoopService(Service):
                     else ""
                 )
                 tool_schemas = (
-                    self.ctx.tools.get_schemas()
-                    if self.ctx.has("tools")
-                    else []
+                    self.ctx.tools.get_schemas() if self.ctx.has("tools") else []
                 )
 
                 # 6. Reconstruct messages deterministically from session log
