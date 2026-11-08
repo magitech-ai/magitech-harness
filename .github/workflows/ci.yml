@@ -16,7 +16,7 @@ jobs:
         with:
           repository: magitech-ai/anima
           path: anima
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.ORG_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Checkout magitech-harness
         uses: actions/checkout@v4
