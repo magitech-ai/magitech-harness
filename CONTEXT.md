@@ -40,7 +40,23 @@ _Avoid_: Pruning, truncation, context clearing
 A verified index in a session event log where historical events can be summarized without severing tool call and tool result pairs.
 _Avoid_: Split index, boundary
 
-### Execution & Control
+**Tool Pairing**:
+The balanced correspondence between an assistant tool invocation event and its ensuing tool result event.
+_Avoid_: Tool correlation, call linkage
+
+### Execution & User Interface
+
+**Launcher**:
+The entry point command-line bootstrapper that parses profile arguments, populates argument snapshots, and initializes root context.
+_Avoid_: Runner, executor, binary
+
+**Slash Command**:
+A user-initiated directive beginning with `/` intercepted by the REPL or loop prior to model dispatch.
+_Avoid_: Magic command, prompt escape, macro
+
+**Tool Card**:
+A visual terminal presentation rendering the pending, active, completed, or failed state of a tool execution.
+_Avoid_: Tool box, output panel, widget
 
 **Abort Signal**:
 A cooperative cancellation handle passed into streaming turns and tool runs to signal requested interruption.
