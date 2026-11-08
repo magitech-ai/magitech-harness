@@ -30,6 +30,7 @@ class AgentLoopService(Service):
         session: Session,
         user_input: str,
         *,
+        model: str | None = None,
         max_steps: int = 10,
     ) -> str:
         """Run an agent turn to completion across multiple steps."""
@@ -96,6 +97,7 @@ class AgentLoopService(Service):
                     messages=messages,
                     tools=tool_schemas if tool_schemas else None,
                     system_prompt=system_prompt if system_prompt else None,
+                    model=model,
                 )
 
                 # 8. Log assistant response
