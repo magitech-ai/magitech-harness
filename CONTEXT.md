@@ -14,6 +14,10 @@ _Avoid_: Framework, orchestrator, daemon
 A durable, append-only chronological record of interaction events between users, models, and tools.
 _Avoid_: Conversation, chat, thread
 
+**Sub-Session**:
+A durable, append-only session log recorded under `subsessions/` dedicated to a sub-agent's execution history.
+_Avoid_: Child thread, sub-log, child session
+
 **Turn**:
 A single unit of conversational execution starting with user input and resolving through reasoning, tool calls, and model response.
 _Avoid_: Step, interaction, prompt
@@ -43,6 +47,20 @@ _Avoid_: Split index, boundary
 **Tool Pairing**:
 The balanced correspondence between an assistant tool invocation event and its ensuing tool result event.
 _Avoid_: Tool correlation, call linkage
+
+### Multi-Agent & Execution
+
+**Sub-Agent**:
+A scoped, delegated agent execution instance that performs tasks and communicates with a parent agent.
+_Avoid_: Child agent, slave agent, worker
+
+**Execution Backend**:
+The abstraction mediating subprocess execution and filesystem operations across local, containerized, or sandboxed environments.
+_Avoid_: Shell runner, execution environment, runner
+
+**Tool Context**:
+The internal runtime parameters injected into a tool handler at execution time and hidden from model schemas.
+_Avoid_: Tool state, execution payload
 
 ### Execution & User Interface
 
