@@ -78,7 +78,11 @@ class AgentLoopService(Service):
                 # 4. agent/pre-step waterfall (opportunity to guard, rewrite, or reject)
                 pre_step_decision = await self.ctx.waterfall(
                     "agent/pre-step",
-                    {"action": "continue", "step_index": step_index},
+                    {
+                        "action": "continue",
+                        "step_index": step_index,
+                        "session": session,
+                    },
                     default_handler=lambda dec: dec,
                 )
 
@@ -220,7 +224,11 @@ class AgentLoopService(Service):
 
                 pre_step_decision = await self.ctx.waterfall(
                     "agent/pre-step",
-                    {"action": "continue", "step_index": step_index},
+                    {
+                        "action": "continue",
+                        "step_index": step_index,
+                        "session": session,
+                    },
                     default_handler=lambda dec: dec,
                 )
 
