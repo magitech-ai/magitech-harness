@@ -46,7 +46,7 @@ class LLMProvider(Protocol):
         """
         ...
 
-    async def stream(
+    def stream(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,

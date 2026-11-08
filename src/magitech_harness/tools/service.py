@@ -26,7 +26,7 @@ class ToolService(Service):
         """Register a tool. Attaches disposer as an effect to active plugin."""
         self._registry[tool.name] = tool
 
-        def _unregister():
+        def _unregister() -> None:
             if tool.name in self._registry:
                 del self._registry[tool.name]
 

@@ -21,7 +21,7 @@ class SystemPromptService(Service):
         """Register a dynamic prompt section."""
         self._sections[name] = section
 
-        def _unregister():
+        def _unregister() -> None:
             if name in self._sections:
                 del self._sections[name]
 
