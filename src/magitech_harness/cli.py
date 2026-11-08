@@ -121,6 +121,12 @@ async def run_repl(
 
     reader = input_fn or (lambda: input("mth> "))
 
+    def _make_sigint_handler(sig: AbortSignal) -> Any:
+        def _handler() -> None:
+            sig.abort("SIGINT")
+
+        return _handler
+
     while True:
         try:
             line = await asyncio.to_thread(reader)
@@ -139,6 +145,17 @@ async def run_repl(
             continue
 
         signal = AbortSignal()
+        loop = asyncio.get_running_loop()
+        sig_installed = False
+
+        try:
+            import signal as py_signal
+
+            loop.add_signal_handler(py_signal.SIGINT, _make_sigint_handler(signal))
+            sig_installed = True
+        except (NotImplementedError, RuntimeError, AttributeError):
+            pass
+
         try:
             async for ev in ctx.agent_loop.stream_turn(
                 dispatcher.session, line, model=dispatcher.model, signal=signal
@@ -150,12 +167,22 @@ async def run_repl(
                 elif ev["type"] == "tool_end":
                     status = "ERROR" if ev.get("is_error") else "OK"
                     out_fn(f"\n✔️ [{status}] {ev['name']} -> {ev['result']}")
+                elif ev["type"] == "usage":
+                    pass
                 else:
                     out_fn("\n")
         except AbortError:
             out_fn("\n[Turn cancelled by user]")
         except Exception as e:  # noqa: BLE001
             out_fn(f"\n[Error during turn: {e}]")
+        finally:
+            if sig_installed:
+                try:
+                    import signal as py_signal
+
+                    loop.remove_signal_handler(py_signal.SIGINT)
+                except (RuntimeError, ValueError, OSError):
+                    pass
 
 
 def build_parser() -> argparse.ArgumentParser:

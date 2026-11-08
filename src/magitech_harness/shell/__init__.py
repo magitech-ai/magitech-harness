@@ -1,3 +1,5 @@
-from magitech_harness.shell.service import LocalShellService
+"""Shell service providing execution of subprocess commands."""
 
-__all__ = ["LocalShellService"]
+from magitech_harness.shell.service import LocalShellService, ShellResult
+
+__all__ = ["LocalShellService", "ShellResult"]

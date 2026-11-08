@@ -43,3 +43,5 @@ class SessionEvent(BaseModel):
     timestamp: float = Field(default_factory=time.time)
     payload: dict[str, Any] = Field(default_factory=dict)
     ignorable: bool = False
+    schema_version: int = 1
+    seq: int = 0

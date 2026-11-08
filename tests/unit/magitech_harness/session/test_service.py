@@ -77,6 +77,11 @@ def test_session_service_load_list_and_delete(tmp_path: Path) -> None:
     # 6. Load nonexistent
     assert service.load("sess_missing") is None
 
+    # Cold load with repair_on_open
+    s_corrupt = tmp_path / "sess_corrupt.jsonl"
+    s_corrupt.write_text('{"bad json\n', encoding="utf-8")
+    assert service.load("sess_corrupt", repair_on_open=True) is not None
+
     # 7. Delete s1 (both active and on disk)
     assert service.delete("sess_1") is True
     assert service.get("sess_1") is None

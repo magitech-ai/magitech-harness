@@ -15,7 +15,7 @@ from anima.events import Disposer
 
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.llm.slug import parse_model_slug
-from magitech_harness.llm.types import ModelChunk, ModelResponse
+from magitech_harness.llm.types import ModelChunk, ModelResponse, UsageData
 from magitech_harness.session.events import ToolCallData
 
 
@@ -67,7 +67,10 @@ class MockLLMProvider:
         self.call_history: list[dict[str, Any]] = []
 
     def queue_response(
-        self, text: str = "", tool_calls: list[ToolCallData] | None = None
+        self,
+        text: str = "",
+        tool_calls: list[ToolCallData] | None = None,
+        usage: UsageData | None = None,
     ) -> None:
         """Queues a mock response to be yielded by generate."""
         self.responses.append(
@@ -75,6 +78,7 @@ class MockLLMProvider:
                 text=text,
                 tool_calls=tool_calls or [],
                 finish_reason="tool_calls" if tool_calls else "stop",
+                usage=usage or UsageData(),
             )
         )
 
@@ -115,12 +119,21 @@ class MockLLMProvider:
                 text=resp.text,
                 tool_calls=[],
                 finish_reason=None if resp.tool_calls else resp.finish_reason,
+                usage=resp.usage,
             )
         if resp.tool_calls:
             yield ModelChunk(
                 text="",
                 tool_calls=resp.tool_calls,
                 finish_reason=resp.finish_reason,
+                usage=resp.usage,
+            )
+        if not resp.text and not resp.tool_calls:
+            yield ModelChunk(
+                text="",
+                tool_calls=[],
+                finish_reason=resp.finish_reason,
+                usage=resp.usage,
             )
 
 

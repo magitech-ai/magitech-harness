@@ -217,6 +217,15 @@ async def test_mock_llm_provider_stream_direct_and_abort() -> None:
     assert chunks[0].text == ""
     assert len(chunks[0].tool_calls) == 1
 
+    # Empty text and empty tool_calls branch
+    p_empty = MockLLMProvider()
+    p_empty.queue_response(text="", tool_calls=[])
+    chunks_empty = []
+    async for chunk in p_empty.stream(messages=[]):
+        chunks_empty.append(chunk)
+    assert len(chunks_empty) == 1
+    assert chunks_empty[0].text == ""
+
     # Now test abort on direct stream
     signal = AbortSignal()
     signal.abort()

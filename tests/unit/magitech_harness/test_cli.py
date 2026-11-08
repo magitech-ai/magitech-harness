@@ -1,8 +1,10 @@
 """Unit tests for magitech_harness CLI entrypoint and interactive REPL."""
 
+import asyncio
 import sys
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar
+from unittest.mock import patch
 
 import pytest
 from anima import Context, EventMode
@@ -148,6 +150,107 @@ async def test_run_repl_interactive_stream_and_tools() -> None:
     assert any("Tool Start" in line for line in out_lines)
     assert any("Tool Complete" in line or "OK" in line for line in out_lines)
     assert any("Final answer" in line for line in out_lines)
+
+
+@pytest.mark.asyncio
+async def test_run_repl_signal_handler_unsupported_and_usage_event() -> None:
+    """Verifies run_repl when loop.add_signal_handler raises NotImplementedError and handles usage events."""
+    ctx = create_harness(mock_provider=True)
+    await ctx.flush()
+
+    async def mock_stream_turn(session, prompt, **kwargs):
+        yield {"type": "usage", "usage": {"total_tokens": 100}}
+        yield {"type": "chunk", "text": "streamed reply"}
+
+    ctx.agent_loop.stream_turn = mock_stream_turn
+
+    inputs = ["hello", "/exit"]
+    input_idx = 0
+
+    def mock_input() -> str:
+        nonlocal input_idx
+        res = inputs[input_idx]
+        input_idx += 1
+        return res
+
+    out_lines = []
+
+    def mock_out(*args, **kwargs) -> None:
+        out_lines.append(" ".join(str(a) for a in args))
+
+    # Mock loop.add_signal_handler to raise NotImplementedError
+    loop = asyncio.get_running_loop()
+    with patch.object(loop, "add_signal_handler", side_effect=NotImplementedError):
+        await run_repl(ctx, input_fn=mock_input, out_fn=mock_out)
+
+    assert any("streamed reply" in line for line in out_lines)
+
+
+@pytest.mark.asyncio
+async def test_run_repl_remove_signal_handler_exception() -> None:
+    """Verifies run_repl handles exception when loop.remove_signal_handler fails."""
+    ctx = create_harness(mock_provider=True)
+    await ctx.flush()
+
+    async def mock_stream_turn(session, prompt, **kwargs):
+        yield {"type": "chunk", "text": "ok"}
+
+    ctx.agent_loop.stream_turn = mock_stream_turn
+
+    inputs = ["test", "/exit"]
+    input_idx = 0
+
+    def mock_input() -> str:
+        nonlocal input_idx
+        res = inputs[input_idx]
+        input_idx += 1
+        return res
+
+    loop = asyncio.get_running_loop()
+    with patch.object(loop, "remove_signal_handler", side_effect=RuntimeError("fail")):
+        await run_repl(ctx, input_fn=mock_input, out_fn=lambda *a, **k: None)
+
+
+@pytest.mark.asyncio
+async def test_run_repl_sigint_handler_invocation() -> None:
+    """Verifies that the registered SIGINT handler invokes sig.abort('SIGINT')."""
+    ctx = create_harness(mock_provider=True)
+    await ctx.flush()
+
+    handler_ref: list[Any] = []
+
+    def mock_add_signal_handler(sig_num: Any, callback: Any) -> None:
+        handler_ref.append(callback)
+
+    async def mock_stream_turn(session: Any, prompt: Any, **kwargs: Any) -> Any:
+        if handler_ref:
+            handler_ref[0]()
+        sig = kwargs.get("signal")
+        if sig:
+            sig.throw_if_aborted()
+        yield {"type": "chunk", "text": "never reached"}
+
+    ctx.agent_loop.stream_turn = mock_stream_turn  # type: ignore[assignment]
+
+    inputs = ["cancel turn", "/exit"]
+    input_idx = 0
+
+    def mock_input() -> str:
+        nonlocal input_idx
+        res = inputs[input_idx]
+        input_idx += 1
+        return res
+
+    out_lines: list[str] = []
+    loop = asyncio.get_running_loop()
+    with patch.object(loop, "add_signal_handler", side_effect=mock_add_signal_handler):
+        await run_repl(
+            ctx,
+            input_fn=mock_input,
+            out_fn=lambda *a, **k: out_lines.append(" ".join(str(x) for x in a)),
+        )
+
+    assert any("Turn cancelled by user" in line for line in out_lines)
 
 
 @pytest.mark.asyncio

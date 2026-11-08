@@ -5,6 +5,7 @@ from anima import Context, EventMode
 
 from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.llm.service import LLMService, MockLLMProvider
+from magitech_harness.llm.types import UsageData
 from magitech_harness.session.events import EventType, ToolCallData
 from magitech_harness.session.service import SessionService
 
@@ -126,6 +127,36 @@ async def test_agent_loop_stream_turn_single_step() -> None:
     assert EventType.USER_MESSAGE in types
     assert EventType.ASSISTANT_MESSAGE in types
     assert EventType.TURN_END in types
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_stream_turn_with_usage() -> None:
+    """Verifies stream_turn yields usage event and persists usage telemetry."""
+    ctx = Context()
+    ctx.plugin(SessionService)
+    ctx.plugin(LLMService)
+    ctx.plugin(AgentLoopService)
+    await ctx.flush()
+
+    mock_llm = MockLLMProvider()
+    ctx.llm.register_provider("mock", mock_llm)
+    mock_llm.queue_response(
+        text="With usage",
+        usage=UsageData(prompt_tokens=10, completion_tokens=20, total_tokens=30),
+    )
+
+    session = ctx.sessions.create("sess_usage")
+    yielded = []
+    async for ev in ctx.agent_loop.stream_turn(session, "Prompt with usage"):
+        yielded.append(ev)
+
+    types = [y["type"] for y in yielded]
+    assert "chunk" in types
+    assert "usage" in types
+    assert "turn_end" in types
+
+    asst_msg = next(e for e in session.events if e.type == EventType.ASSISTANT_MESSAGE)
+    assert asst_msg.payload["usage"]["total_tokens"] == 30
 
 
 @pytest.mark.asyncio
