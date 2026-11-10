@@ -5,7 +5,7 @@ description = "Magitech Harness: Composable Agent Runtime by Magitech"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anima",
+    "anima>=0.1,<0.2",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
 ]
