@@ -140,9 +140,10 @@ class MockLLMProvider:
 class LLMService(Service):
     """Service managing LLM execution, provider registries, and waterfall hooks."""
 
-    def __init__(self, ctx: Context, provider: LLMProvider | None = None) -> None:
+    def __init__(self, ctx: Context, config: dict | None = None) -> None:
         """Initializes LLMService on the given context."""
         super().__init__(ctx, "llm")
+        provider = (config or {}).get("provider")
         self._providers: dict[str, LLMProvider] = {}
         self._active_provider_name: str | None = None
 

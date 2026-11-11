@@ -34,10 +34,10 @@ def calculate_argument_digest(arguments: dict[str, Any]) -> str:
 class ApprovalService(Service):
     """Centralized approval broker managing mutex-serialized authorization requests."""
 
-    def __init__(self, ctx: Context, default_verdict: bool = False) -> None:
+    def __init__(self, ctx: Context, config: dict | None = None) -> None:
         super().__init__(ctx, "approvals")
         self._lock = asyncio.Lock()
-        self._default_verdict = default_verdict
+        self._default_verdict = bool((config or {}).get("default_verdict", False))
         self._handler: Callable[[ApprovalRequest], Awaitable[bool]] | None = None
         self._cache: dict[str, bool] = {}
 

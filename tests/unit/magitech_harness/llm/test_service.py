@@ -98,7 +98,7 @@ async def test_llm_service_initial_provider_and_active_fallback() -> None:
     """Verifies passing provider to LLMService constructor and active fallback on unregister."""
     ctx = Context()
     initial_p = MockLLMProvider()
-    service = LLMService(ctx, provider=initial_p)
+    service = LLMService(ctx, {"provider": initial_p})
     assert service.get_provider("default") is initial_p
     assert service.active_provider is initial_p
 

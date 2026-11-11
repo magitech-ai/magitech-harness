@@ -31,7 +31,7 @@ def test_calculate_argument_digest_canonical_json() -> None:
 async def test_approval_service_default_verdict_and_setter() -> None:
     """Verifies default verdict behavior and property setter."""
     ctx = Context()
-    service = ApprovalService(ctx, default_verdict=False)
+    service = ApprovalService(ctx, {"default_verdict": False})
     assert not service.default_verdict
 
     verdict = await service.request_approval("bash", {"command": "rm -rf /"})

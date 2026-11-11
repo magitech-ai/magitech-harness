@@ -17,7 +17,7 @@ def test_session_service_create_get_and_log(tmp_path: Path) -> None:
         lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
     )
 
-    service = SessionService(ctx, base_storage_dir=tmp_path)
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
     session = service.create("test_id")
     assert session.session_id == "test_id"
     assert session.storage_path == tmp_path / "test_id.jsonl"
@@ -46,7 +46,7 @@ def test_session_service_create_without_base_dir() -> None:
 def test_session_service_load_list_and_delete(tmp_path: Path) -> None:
     """Verifies loading persisted sessions, listing session IDs, and deleting sessions."""
     ctx = Context()
-    service = SessionService(ctx, base_storage_dir=tmp_path)
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
 
     # 1. Create and persist session 1
     s1 = service.create("sess_1")

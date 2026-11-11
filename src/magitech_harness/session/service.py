@@ -5,7 +5,6 @@ SessionService (ctx.sessions): Service for session management.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 from anima import Context, Service
 
@@ -16,9 +15,9 @@ from magitech_harness.session.store import Session
 class SessionService(Service):
     """Service providing durable session storage and event broadcasting."""
 
-    def __init__(self, ctx: Context, base_storage_dir: Path | None = None) -> None:
+    def __init__(self, ctx: Context, config: dict | None = None) -> None:
         super().__init__(ctx, "sessions")
-        self.base_storage_dir = base_storage_dir
+        self.base_storage_dir = (config or {}).get("base_storage_dir")
         self._active_sessions: dict[str, Session] = {}
 
     def create(self, session_id: str | None = None) -> Session:
