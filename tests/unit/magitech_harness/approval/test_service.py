@@ -73,17 +73,17 @@ async def test_approval_service_custom_handler() -> None:
 async def test_approval_service_waterfall_override() -> None:
     """Verifies waterfall hook interception of approval requests."""
     ctx = Context()
-    ctx.plugin(ApprovalService)
+    ctx.use(ApprovalService)
     await ctx.flush()
 
     assert ctx.has("approvals")
 
-    async def guard_plugin(req: ApprovalRequest, next_fn):
+    async def guard_component(req: ApprovalRequest, next_fn):
         if req.tool_name == "safe_tool":
             return True
         return await next_fn(req)
 
-    ctx.on("approval/request", guard_plugin, mode=EventMode.WATERFALL)
+    ctx.on("approval/request", guard_component, mode=EventMode.WATERFALL)
 
     v_safe = await ctx.approvals.request_approval("safe_tool", {"action": "read"})
     assert v_safe is True

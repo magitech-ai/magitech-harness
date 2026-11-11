@@ -23,7 +23,7 @@ An immutable structured record appended to a session log representing a state tr
 _Avoid_: Log line, message, action
 
 **Profile**:
-A declarative configuration bundle that specifies the set of plugins to load for an application run.
+A declarative configuration bundle that specifies the set of components to load for an application run.
 _Avoid_: Preset, blueprint, config file
 
 ### Context & Compaction

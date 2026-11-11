@@ -110,7 +110,7 @@ async def test_waterfall_guard_pre_step_veto(tmp_path: Path):
     ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
     await ctx.flush()
 
-    # Install a security plugin via waterfall hook on agent/pre-step
+    # Install a security component via waterfall hook on agent/pre-step
     async def security_guard(decision: dict, next_fn):
         if decision.get("step_index") == 1:
             return {"action": "reject", "reason": "blocked by policy"}

@@ -24,7 +24,7 @@ from magitech_harness.tools.service import ToolService
 async def test_shell_service_run(tmp_path: Path) -> None:
     """Verifies shell execution returns code, stdout, and stderr, respecting cwd."""
     ctx = Context()
-    ctx.plugin(LocalShellService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     assert ctx.has("shell")
@@ -54,8 +54,8 @@ async def test_shell_service_run(tmp_path: Path) -> None:
 async def test_shell_service_does_not_register_tools() -> None:
     """Verifies LocalShellService strictly acts as an execution backend with zero domain tools."""
     ctx = Context()
-    ctx.plugin(ToolService)
-    ctx.plugin(LocalShellService)
+    ctx.use(ToolService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     assert ctx.has("shell")
@@ -96,7 +96,7 @@ async def test_shell_result_attributes_and_indexing() -> None:
 async def test_shell_bounded_reading() -> None:
     """Verifies bounded reading truncates large streams retaining head and tail."""
     ctx = Context()
-    ctx.plugin(LocalShellService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     # Generate 1000 lines of numbers
@@ -122,7 +122,7 @@ async def test_read_bounded_stream_none() -> None:
 async def test_shell_timeout_and_tree_kill() -> None:
     """Verifies command execution timeout terminates child process tree."""
     ctx = Context()
-    ctx.plugin(LocalShellService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     res = await ctx.shell.run("sleep 5", timeout_seconds=0.1)
@@ -134,7 +134,7 @@ async def test_shell_timeout_and_tree_kill() -> None:
 async def test_shell_abort_signal_pre_aborted() -> None:
     """Verifies shell execution exits immediately if AbortSignal is pre-aborted."""
     ctx = Context()
-    ctx.plugin(LocalShellService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     sig = AbortSignal()
@@ -150,7 +150,7 @@ async def test_shell_abort_signal_pre_aborted() -> None:
 async def test_shell_abort_signal_dynamic() -> None:
     """Verifies shell execution aborts mid-flight when signal triggers."""
     ctx = Context()
-    ctx.plugin(LocalShellService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     sig = AbortSignal()
@@ -228,7 +228,7 @@ async def test_read_bounded_stream_exact_and_small_tail() -> None:
 async def test_shell_run_returncode_none_and_no_pid() -> None:
     """Verifies fallback when proc.returncode is None and proc.pid is None."""
     ctx = Context()
-    ctx.plugin(LocalShellService)
+    ctx.use(LocalShellService)
     await ctx.flush()
 
     class FakeProc:

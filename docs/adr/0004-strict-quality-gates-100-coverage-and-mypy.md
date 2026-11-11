@@ -18,5 +18,5 @@ We enforce zero-tolerance quality gates across all codebase layers:
 ## Consequences
 
 - Every newly added module, branch, and edge-case error path must have a corresponding hermetic test before merging.
-- Static typing ensures protocol conformance between core service interfaces and marketplace plugins.
+- Static typing ensures protocol conformance between core service interfaces and marketplace components.
 - Eliminates technical debt and prevents regressions at compile and test time.

@@ -80,7 +80,7 @@ async def test_repl_dispatcher_all_commands(tmp_path: Path) -> None:
     assert await dispatcher.dispatch("/compact") is False
     assert any("no compactable range found" in line for line in out_lines)
 
-    # /compact when compaction plugin reports compacted
+    # /compact when compaction component reports compacted
     async def mock_compact(payload, next_fn):
         return {"compacted": True, "summary": "Folded 5 events"}
 
@@ -338,39 +338,41 @@ async def test_main_async_session_commands(tmp_path: Path, capsys) -> None:
 
 
 @pytest.mark.asyncio
-async def test_main_async_plugin_command(tmp_path: Path, capsys, monkeypatch) -> None:
-    """Verifies main_async with 'plugin list' subcommand."""
-    from magitech_harness.plugins.manifest import PluginManifest
+async def test_main_async_component_command(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """Verifies main_async with 'component list' subcommand."""
+    from magitech_harness.components.manifest import ComponentManifest
 
-    # Test when plugins are mounted
+    # Test when components are mounted
     old_create = create_harness
 
     def mock_create(*args, **kwargs):
         c = old_create(*args, **kwargs)
-        manifest = PluginManifest(
-            name="test-listed-plugin",
+        manifest = ComponentManifest(
+            name="test-listed-component",
             version="1.2.3",
             entry_point="dummy:apply",
         )
 
-        class ExtraPlugin:
-            inject: ClassVar[list[str]] = ["plugins"]
+        class ExtraComponent:
+            inject: ClassVar[list[str]] = ["components"]
 
             def __init__(self, ctx: Context) -> None:
-                ctx.plugins._mounted_plugins["test-listed-plugin"] = (
+                ctx.components._mounted_components["test-listed-component"] = (
                     manifest,
                     None,
                 )
 
-        c.plugin(ExtraPlugin)
+        c.use(ExtraComponent)
         return c
 
     monkeypatch.setattr("magitech_harness.cli.create_harness", mock_create)
 
-    await main_async(["plugin", "list"])
+    await main_async(["component", "list"])
     captured = capsys.readouterr().out
-    assert "Loaded plugins" in captured
-    assert "test-listed-plugin (1.2.3)" in captured
+    assert "Loaded components" in captured
+    assert "test-listed-component (1.2.3)" in captured
 
 
 @pytest.mark.asyncio
@@ -380,18 +382,18 @@ async def test_main_async_profile_and_default_repl(tmp_path: Path, monkeypatch) 
 
     dummy_pkg = types.ModuleType("dummy_provider_pkg")
 
-    class DummyProviderPlugin:
+    class DummyProviderComponent:
         inject: ClassVar[list[str]] = ["llm"]
 
         def __init__(self, c):
             c.llm.register_provider("dummy_p", MockLLMProvider())
 
-    dummy_pkg.DummyProviderPlugin = DummyProviderPlugin
+    dummy_pkg.DummyProviderComponent = DummyProviderComponent
     monkeypatch.setitem(sys.modules, "dummy_provider_pkg", dummy_pkg)
 
     profile_file = tmp_path / "profile.yaml"
     profile_file.write_text(
-        "['dummy_provider_pkg:DummyProviderPlugin']", encoding="utf-8"
+        "['dummy_provider_pkg:DummyProviderComponent']", encoding="utf-8"
     )
 
     repl_started = []

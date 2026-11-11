@@ -1,5 +1,5 @@
 """CLI entry point and interactive multi-turn REPL for magitech-harness.
-Strictly adheres to: Everything is a Plugin.
+Strictly adheres to: Everything is a Component.
 """
 
 from __future__ import annotations
@@ -198,7 +198,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--profile",
-        help="Optional YAML profile path to customize loaded plugins",
+        help="Optional YAML profile path to customize loaded components",
     )
     parser.add_argument(
         "--model",
@@ -223,10 +223,12 @@ def build_parser() -> argparse.ArgumentParser:
     show_p = session_sub.add_parser("show", help="Show session events")
     show_p.add_argument("session_id", help="Session ID to inspect")
 
-    # plugin subcommand
-    plugin_parser = subparsers.add_parser("plugin", help="Inspect and manage plugins")
-    plugin_sub = plugin_parser.add_subparsers(dest="plugin_command")
-    plugin_sub.add_parser("list", help="List installed/loaded plugins")
+    # component subcommand
+    component_parser = subparsers.add_parser(
+        "component", help="Inspect and manage components"
+    )
+    component_sub = component_parser.add_subparsers(dest="component_command")
+    component_sub.add_parser("list", help="List installed/loaded components")
 
     return parser
 
@@ -275,10 +277,10 @@ async def main_async(argv: list[str] | None = None) -> None:
             for s in sessions:
                 print(f"  - {s}")
 
-    elif cmd == "plugin":
-        plugins = ctx.plugins.mounted_plugins
-        print(f"Loaded plugins ({len(plugins)}):")
-        for manifest, _fiber in plugins.values():
+    elif cmd == "component":
+        components = ctx.components.mounted_components
+        print(f"Loaded components ({len(components)}):")
+        for manifest, _fiber in components.values():
             print(f"  - {manifest.name} ({manifest.version})")
 
     else:

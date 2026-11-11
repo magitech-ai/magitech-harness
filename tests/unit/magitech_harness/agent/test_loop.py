@@ -14,9 +14,9 @@ from magitech_harness.session.service import SessionService
 async def test_agent_loop_single_step_no_tools() -> None:
     """Verifies a 1-step turn when the LLM returns plain text with no tool calls."""
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     mock_llm = MockLLMProvider()
@@ -42,9 +42,9 @@ async def test_agent_loop_single_step_no_tools() -> None:
 async def test_agent_loop_pre_step_reject_short_circuit() -> None:
     """Verifies that pre-step waterfall veto immediately stops the turn."""
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     async def guard(decision: dict, next_fn):
@@ -72,10 +72,10 @@ async def test_agent_loop_max_steps_termination() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(ToolService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(ToolService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     ctx.tools.register(
@@ -103,9 +103,9 @@ async def test_agent_loop_max_steps_termination() -> None:
 async def test_agent_loop_stream_turn_single_step() -> None:
     """Verifies stream_turn yielding token chunks for a single step turn."""
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     mock_llm = MockLLMProvider()
@@ -133,9 +133,9 @@ async def test_agent_loop_stream_turn_single_step() -> None:
 async def test_agent_loop_stream_turn_with_usage() -> None:
     """Verifies stream_turn yields usage event and persists usage telemetry."""
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     mock_llm = MockLLMProvider()
@@ -166,10 +166,10 @@ async def test_agent_loop_stream_turn_with_tool_calls() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(ToolService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(ToolService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     ctx.tools.register(
@@ -222,9 +222,9 @@ async def test_agent_loop_abort_signal_cancellation() -> None:
     from magitech_harness.agent.cancellation import AbortError, AbortSignal
 
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     mock_llm = MockLLMProvider()
@@ -247,9 +247,9 @@ async def test_agent_loop_abort_signal_cancellation() -> None:
 async def test_agent_loop_stream_turn_pre_step_reject() -> None:
     """Verifies that pre-step waterfall veto in stream_turn stops execution."""
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     async def guard(decision: dict, next_fn):
@@ -273,10 +273,10 @@ async def test_agent_loop_stream_turn_max_steps_termination() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(ToolService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(ToolService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     ctx.tools.register(
@@ -308,10 +308,10 @@ async def test_agent_loop_signal_active_during_tool_execution() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
-    ctx.plugin(SessionService)
-    ctx.plugin(LLMService)
-    ctx.plugin(ToolService)
-    ctx.plugin(AgentLoopService)
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(ToolService)
+    ctx.use(AgentLoopService)
     await ctx.flush()
 
     ctx.tools.register(

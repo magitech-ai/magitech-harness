@@ -9,9 +9,9 @@ Many agent harnesses bundle built-in domain tools (e.g. filesystem manipulators,
 
 ## Decision
 
-We enforce the principle "Everything is a Plugin":
+We enforce the principle "Everything is a Component":
 1. `magitech-harness` contains zero built-in domain tools and zero built-in model providers.
-2. Services such as `LocalShellService` (`ctx.shell`) act strictly as internal execution infrastructure for plugins, and never register themselves as tools onto `ctx.tools`.
+2. Services such as `LocalShellService` (`ctx.shell`) act strictly as internal execution infrastructure for components, and never register themselves as tools onto `ctx.tools`.
 3. All domain tools (`fs-tool`, `bash-tool`), guardrails (`truncation-guard`, `compaction-guard`), and model providers (`openrouter-provider`, `pollinations-provider`) reside exclusively in the `mth-plugins` marketplace repository.
 4. The core harness defines only the service protocols (`LLMProvider`, `ToolDefinition`, `ToolService`, `LLMService`).
 
@@ -19,4 +19,4 @@ We enforce the principle "Everything is a Plugin":
 
 - The core runtime engine is lightweight, decoupled, and has minimal external dependencies.
 - Tools and model providers can be versioned, tested, and upgraded independently in the marketplace without modifying the engine.
-- Out of the box, the engine requires at least one model provider plugin to execute turns.
+- Out of the box, the engine requires at least one model provider component to execute turns.

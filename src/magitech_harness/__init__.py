@@ -16,6 +16,9 @@ from magitech_harness.approval.service import (
     ApprovalService,
     calculate_argument_digest,
 )
+from magitech_harness.components.layers import ConfigLayer, LayerResolutionService
+from magitech_harness.components.manifest import ComponentManifest
+from magitech_harness.components.service import ComponentService
 from magitech_harness.llm.service import (
     LLMProvider,
     LLMService,
@@ -24,9 +27,6 @@ from magitech_harness.llm.service import (
 )
 from magitech_harness.llm.slug import parse_model_slug
 from magitech_harness.llm.types import ModelChunk, ModelResponse, UsageData
-from magitech_harness.plugins.layers import ConfigLayer, LayerResolutionService
-from magitech_harness.plugins.manifest import PluginManifest
-from magitech_harness.plugins.service import PluginService
 from magitech_harness.session.events import (
     EventType,
     SessionEvent,
@@ -61,25 +61,25 @@ def create_harness(
     base_path = Path(storage_dir) if storage_dir else None
 
     # Mount core capability seams
-    ctx.plugin(SessionService, base_storage_dir=base_path)
-    ctx.plugin(SystemPromptService)
-    ctx.plugin(ToolService)
-    ctx.plugin(LLMService)
-    ctx.plugin(LocalShellService)
-    ctx.plugin(ApprovalService)
-    ctx.plugin(LayerResolutionService)
-    ctx.plugin(AgentLoopService)
-    ctx.plugin(PluginService)
+    ctx.use(SessionService, base_storage_dir=base_path)
+    ctx.use(SystemPromptService)
+    ctx.use(ToolService)
+    ctx.use(LLMService)
+    ctx.use(LocalShellService)
+    ctx.use(ApprovalService)
+    ctx.use(LayerResolutionService)
+    ctx.use(AgentLoopService)
+    ctx.use(ComponentService)
 
     if mock_provider:
 
-        class _MockProviderPlugin:
+        class _MockProviderComponent:
             inject: ClassVar[list[str]] = ["llm"]
 
             def __init__(self, c: Context) -> None:
                 c.llm.register_provider("mock", MockLLMProvider())
 
-        ctx.plugin(_MockProviderPlugin)
+        ctx.use(_MockProviderComponent)
 
     return ctx
 
@@ -90,6 +90,8 @@ __all__ = [
     "AgentLoopService",
     "ApprovalRequest",
     "ApprovalService",
+    "ComponentManifest",
+    "ComponentService",
     "ConfigLayer",
     "EventType",
     "LLMProvider",
@@ -100,8 +102,6 @@ __all__ = [
     "ModelChunk",
     "ModelResponse",
     "NoProviderError",
-    "PluginManifest",
-    "PluginService",
     "Session",
     "SessionEvent",
     "SessionService",

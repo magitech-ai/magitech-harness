@@ -24,7 +24,7 @@ async def test_llm_service_no_provider_raises_error() -> None:
     ctx = Context()
     service = LLMService(ctx)
     with pytest.raises(
-        NoProviderError, match="No active LLM provider plugin registered"
+        NoProviderError, match="No active LLM provider component registered"
     ):
         await service.call(messages=[{"role": "user", "content": "hi"}])
 
@@ -75,7 +75,7 @@ async def test_llm_service_register_named_provider_and_routing() -> None:
 async def test_llm_service_waterfall_interception() -> None:
     """Verifies that llm/call waterfall middleware can intercept and modify LLM output."""
     ctx = Context()
-    ctx.plugin(LLMService)
+    ctx.use(LLMService)
     await ctx.flush()
 
     mock_llm = MockLLMProvider()
@@ -154,7 +154,7 @@ async def test_llm_service_stream_no_provider_raises() -> None:
     ctx = Context()
     service = LLMService(ctx)
     with pytest.raises(
-        NoProviderError, match="No active LLM provider plugin registered"
+        NoProviderError, match="No active LLM provider component registered"
     ):
         async for _ in service.stream(messages=[{"role": "user", "content": "hi"}]):
             pass

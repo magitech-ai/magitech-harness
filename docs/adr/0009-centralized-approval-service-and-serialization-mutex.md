@@ -10,7 +10,7 @@ Accepted
 In agentic architectures with concurrent subagents, background tasks, or multi-step tool calls, authorization checks introduce concurrency hazards:
 1. **Terminal / Stdin Scrambling**: Multiple concurrent tasks requesting user confirmation simultaneously produce interleaved terminal output and race conditions over `stdin`.
 2. **Payload Discrepancies**: If approval decisions are bound only to tool names rather than exact payload contents, an approval granted for a benign command could be exploited to run a destructive command under the same tool name.
-3. **Decoupling Mechanics from Policies**: The core engine must serialize I/O and verify payload identity without embedding opinionated approval policies (which belong in marketplace guard plugins).
+3. **Decoupling Mechanics from Policies**: The core engine must serialize I/O and verify payload identity without embedding opinionated approval policies (which belong in marketplace guard components).
 
 ## Decision
 1. **Approval Broker Substrate (`ctx.approvals`)**:
@@ -23,9 +23,9 @@ In agentic architectures with concurrent subagents, background tasks, or multi-s
    - Hashed via `sha256` to produce a `sha256:<hex>` digest.
    - Verdicts cached or remembered are strictly bound to identical argument digests.
 4. **Waterfall Decoupling**:
-   `request_approval` routes through `ctx.waterfall("approval/request", req, default_handler=...)`, allowing policy guard plugins (e.g. `approval-guard`) to audit, auto-approve, or prompt the user.
+   `request_approval` routes through `ctx.waterfall("approval/request", req, default_handler=...)`, allowing policy guard components (e.g. `approval-guard`) to audit, auto-approve, or prompt the user.
 
 ## Consequences
 - **Positive**: Prevents terminal I/O collisions across concurrent subagents and background tasks.
 - **Positive**: Strict payload hashing prevents verdict confusion attacks across disparate tool arguments.
-- **Positive**: The engine remains completely unopinionated; approval policies are isolated to marketplace plugins.
+- **Positive**: The engine remains completely unopinionated; approval policies are isolated to marketplace components.

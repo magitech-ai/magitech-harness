@@ -5,9 +5,9 @@
 - **Zero Ancestral Mentions Rule**: Absolute prohibition against naming ancestral or upstream projects/brands anywhere in code, tests, docstrings, commits, or documentation.
 - **Repository Role & Separation of Concerns**:
   - `magitech-harness` is the host runtime substrate and agent turn engine powered by `anima`.
-  - **Everything is a Plugin**: Contains **zero built-in domain tools** and **zero built-in model providers**.
+  - **Everything is a Component**: Contains **zero built-in domain tools** and **zero built-in model providers**.
   - All domain tools, model providers, guardrails, and compaction policies reside in `mth-plugins`.
-- **Capability Seam Symmetry**: Every extensible feature consists of a **Service Definition** (protocol), **Service Provider** (plugin implementation), and **Consumer** (turn loop or REPL).
+- **Capability Seam Symmetry**: Every extensible feature consists of a **Service Definition** (protocol), **Service Provider** (component implementation), and **Consumer** (turn loop or REPL).
 - **Session Event-Sourcing Invariants**:
   - **Model-Visible ⟺ Logged**: Any data or prompt fragment that reaches an LLM request must be reconstructable from the session event log. A new model-visible input requires an explicit session event.
   - **Append-Only History**: The raw session log is immutable and append-only. Compaction checkpoints fold historical context for model projection (`derive_messages`), preserving the full event trace.

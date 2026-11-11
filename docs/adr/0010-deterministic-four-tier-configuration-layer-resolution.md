@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 In the `.agents` protocol, configuration, skills, agent profiles, and extensions reside across multiple filesystem tiers. Prior architectures suffered from three critical vulnerabilities:
-1. **Divergent Resolution Paths**: Different subsystems (plugin loaders, prompt resolvers, tool loaders) implemented custom resolution heuristics, causing extensions to install successfully in one path but fail to load in another.
+1. **Divergent Resolution Paths**: Different subsystems (component loaders, prompt resolvers, tool loaders) implemented custom resolution heuristics, causing extensions to install successfully in one path but fail to load in another.
 2. **Untrusted Ambient CWD Execution**: Automatically probing `Path.cwd() / ".agents"` when running in an arbitrary directory allowed untrusted repositories to execute arbitrary code or inject prompts on startup.
 3. **Multi-Tenancy & Fleet Policy Gaps**: Inability to separate machine-level enterprise fleet baselines (`/etc/magitech`) from user-level developer preferences (`~/.agents`).
 
@@ -28,6 +28,6 @@ In the `.agents` protocol, configuration, skills, agent profiles, and extensions
    - `find_all`: Queries in base-to-highest order (`global -> user -> agent -> project`), enabling layered configuration stacking.
 
 ## Consequences
-- **Positive**: Eliminates resolution divergence across all plugins, skills, steering docs, and profiles.
+- **Positive**: Eliminates resolution divergence across all components, skills, steering docs, and profiles.
 - **Positive**: Eliminates ambient directory hijacking by enforcing explicit project binding.
 - **Positive**: Provides enterprise and container fleet customization via `$MAGITECH_GLOBAL_DIR`.

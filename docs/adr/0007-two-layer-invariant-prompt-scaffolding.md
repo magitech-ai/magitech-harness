@@ -16,7 +16,7 @@ We establish the **Two-Layer Invariant Scaffolding Pattern** anchored by `System
    - `Environment`: Platform OS, machine architecture, working directory, and current UTC timestamp.
    - `Project Context`: Dynamically discovered and injected from project and workspace `AGENTS.md` steering files.
    - `Skills & Guidelines`: Summaries of discoverable skills and operational rules.
-3. Plugins and services contribute sections to Layer 2 dynamically using `ctx.system_prompt.add_section(title, content) -> Disposer`.
+3. Components and services contribute sections to Layer 2 dynamically using `ctx.system_prompt.add_section(title, content) -> Disposer`.
 
 ## Consequences
 
