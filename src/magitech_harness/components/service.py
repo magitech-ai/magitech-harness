@@ -1,6 +1,6 @@
-"""PluginService (ctx.plugins): Discovery and mounting of portable Magitech plugins.
+"""ComponentService (ctx.components): Discovery and mounting of portable Magitech components.
 
-This service manages the discovery, lifecycle, and status tracking of plugins
+This service manages the discovery, lifecycle, and status tracking of components
 within the Anima context.
 """
 
@@ -14,15 +14,15 @@ from pathlib import Path
 from typing import Any
 
 from anima import Context, Fiber, Service
-from anima.loader import resolve_plugin_target
+from anima.loader import resolve_component_target
 from pydantic import ValidationError
 
-from magitech_harness.plugins.manifest import PluginManifest
+from magitech_harness.components.manifest import ComponentManifest
 
-logger = logging.getLogger("magitech.plugins")
+logger = logging.getLogger("magitech.components")
 
 
-def _entry_file(file_part: str, manifest: PluginManifest) -> Path | None:
+def _entry_file(file_part: str, manifest: ComponentManifest) -> Path | None:
     """Return the file an entry-point file part names, if it exists.
 
     Checks the manifest directory first, then the path as given.
@@ -35,7 +35,7 @@ def _entry_file(file_part: str, manifest: PluginManifest) -> Path | None:
 
 
 def _split_entry_point(
-    target_str: str, manifest: PluginManifest
+    target_str: str, manifest: ComponentManifest
 ) -> tuple[str, str | None]:
     """Split an entry point into (file part, attr name).
 
@@ -51,17 +51,17 @@ def _split_entry_point(
     return target_str, None
 
 
-def resolve_entry_point(manifest: PluginManifest) -> Any:
-    """Resolves a plugin target from manifest entry_point.
+def resolve_entry_point(manifest: ComponentManifest) -> Any:
+    """Resolves a component target from manifest entry_point.
 
     Supports both file paths (relative to manifest.path or absolute)
     and standard Python module import paths.
 
     Args:
-        manifest: PluginManifest defining entry_point and optional path.
+        manifest: ComponentManifest defining entry_point and optional path.
 
     Returns:
-        Callable, class, or module target suitable for Context.plugin().
+        Callable, class, or module target suitable for Context.use().
 
     Raises:
         ImportError: If the entry point file or module cannot be imported.
@@ -74,7 +74,7 @@ def resolve_entry_point(manifest: PluginManifest) -> Any:
 
     if file_path is not None:
         clean_name = manifest.name.replace("-", "_").replace(".", "_")
-        mod_name = f"magitech_plugins_{clean_name}"
+        mod_name = f"magitech_components_{clean_name}"
         spec = importlib.util.spec_from_file_location(mod_name, file_path)
         if spec is None or spec.loader is None:
             raise ImportError(f"Cannot load module spec from {file_path}")
@@ -90,41 +90,39 @@ def resolve_entry_point(manifest: PluginManifest) -> Any:
             return getattr(mod, attr_name)
         if hasattr(mod, "apply"):
             return mod.apply
-        if hasattr(mod, "plugin"):
-            return mod.plugin
         raise AttributeError(
-            f"Plugin entry point in '{file_path}' must define 'apply(ctx)' or 'plugin(ctx)' "
+            f"Component entry point in '{file_path}' must define 'apply(ctx)' "
             f"or specify an attribute via 'file.py:function_name'"
         )
 
-    return resolve_plugin_target(target_str)
+    return resolve_component_target(target_str)
 
 
-class PluginService(Service):
-    """Service managing discovery and mounting of portable plugins."""
+class ComponentService(Service):
+    """Service managing discovery and mounting of portable components."""
 
     def __init__(self, ctx: Context) -> None:
-        """Initializes PluginService on the context."""
-        super().__init__(ctx, "plugins")
-        self._mounted_plugins: dict[str, tuple[PluginManifest, Fiber]] = {}
+        """Initializes ComponentService on the context."""
+        super().__init__(ctx, "components")
+        self._mounted_components: dict[str, tuple[ComponentManifest, Fiber]] = {}
 
-    def discover(self, directory: Path | str) -> list[PluginManifest]:
-        """Discovers all valid plugins within a given directory.
+    def discover(self, directory: Path | str) -> list[ComponentManifest]:
+        """Discovers all valid components within a given directory.
 
         Scans immediate subdirectories for a ``manifest.json`` file,
-        validating each against the PluginManifest schema.
+        validating each against the ComponentManifest schema.
 
         Args:
             directory: Root directory path to scan.
 
         Returns:
-            List of successfully validated PluginManifest instances.
+            List of successfully validated ComponentManifest instances.
         """
         dir_path = Path(directory)
         if not dir_path.exists() or not dir_path.is_dir():
             return []
 
-        discovered: list[PluginManifest] = []
+        discovered: list[ComponentManifest] = []
         for child in sorted(dir_path.iterdir()):
             if child.is_dir():
                 manifest_file = child / "manifest.json"
@@ -133,69 +131,69 @@ class PluginService(Service):
                         content = manifest_file.read_text(encoding="utf-8")
                         data = json.loads(content)
                         data["path"] = child
-                        manifest = PluginManifest.model_validate(data)
+                        manifest = ComponentManifest.model_validate(data)
                         discovered.append(manifest)
                     except (json.JSONDecodeError, ValidationError, OSError) as e:
                         logger.warning(
-                            "Skipping invalid plugin manifest at %s: %s",
+                            "Skipping invalid component manifest at %s: %s",
                             manifest_file,
                             e,
                         )
         return discovered
 
-    def mount_plugin(self, manifest: PluginManifest, **config: Any) -> Fiber:
-        """Mounts a validated plugin manifest into the Anima context.
+    def mount_component(self, manifest: ComponentManifest, **config: Any) -> Fiber:
+        """Mounts a validated component manifest into the Anima context.
 
         Args:
-            manifest: The plugin manifest specification.
-            **config: Configuration kwargs to pass to the plugin.
+            manifest: The component manifest specification.
+            **config: Configuration kwargs to pass to the component.
 
         Returns:
             The loaded Anima Fiber instance.
         """
         target = resolve_entry_point(manifest)
-        fiber = self.ctx.plugin(target, **config)
-        self._mounted_plugins[manifest.name] = (manifest, fiber)
+        fiber = self.ctx.use(target, **config)
+        self._mounted_components[manifest.name] = (manifest, fiber)
 
         def _unregister() -> None:
-            self._mounted_plugins.pop(manifest.name, None)
+            self._mounted_components.pop(manifest.name, None)
 
         fiber.effects.append(_unregister)
         return fiber
 
-    async def unmount_plugin(self, name: str) -> None:
-        """Unmounts and disposes a currently mounted plugin by name.
+    async def unmount_component(self, name: str) -> None:
+        """Unmounts and disposes a currently mounted component by name.
 
         Args:
-            name: Unique name of the plugin to unmount.
+            name: Unique name of the component to unmount.
         """
-        mounted = self._mounted_plugins.get(name)
+        mounted = self._mounted_components.get(name)
         if mounted is not None:
             _, fiber = mounted
             await fiber.dispose()
 
     @property
-    def mounted_plugins(self) -> dict[str, tuple[PluginManifest, Fiber]]:
-        """Returns a snapshot dictionary of currently mounted plugins."""
-        return dict(self._mounted_plugins)
+    def mounted_components(self) -> dict[str, tuple[ComponentManifest, Fiber]]:
+        """Returns a snapshot dictionary of currently mounted components."""
+        return dict(self._mounted_components)
 
-    def get_plugin(self, name: str) -> tuple[PluginManifest, Fiber] | None:
-        """Returns the manifest and fiber for a mounted plugin, or None.
+    def get_component(self, name: str) -> tuple[ComponentManifest, Fiber] | None:
+        """Returns the manifest and fiber for a mounted component, or None.
 
         Args:
-            name: Unique name of the plugin.
+            name: Unique name of the component.
 
         Returns:
-            Tuple of (PluginManifest, Fiber) or None if not mounted.
+            Tuple of (ComponentManifest, Fiber) or None if not mounted.
         """
-        return self._mounted_plugins.get(name)
+        return self._mounted_components.get(name)
 
     def load_directory(self, directory: Path | str, **config: Any) -> list[Fiber]:
-        """Discovers and mounts all enabled plugins found in directory.
+        """Discovers and mounts all enabled components found in directory.
 
         Args:
-            directory: Root directory path containing plugin folders.
-            **config: Shared kwargs to pass to mounted plugins.
+            directory: Root directory path containing component folders.
+            **config: Shared kwargs to pass to mounted components.
 
         Returns:
             List of successfully mounted Fiber instances.
@@ -204,14 +202,14 @@ class PluginService(Service):
         fibers: list[Fiber] = []
         for manifest in manifests:
             if manifest.enabled:
-                fiber = self.mount_plugin(manifest, **config)
+                fiber = self.mount_component(manifest, **config)
                 fibers.append(fiber)
         return fibers
 
-    def list_plugins(self) -> list[dict[str, Any]]:
-        """Returns a list of status summaries for all currently mounted plugins."""
+    def list_components(self) -> list[dict[str, Any]]:
+        """Returns a list of status summaries for all currently mounted components."""
         result: list[dict[str, Any]] = []
-        for name, (manifest, fiber) in self._mounted_plugins.items():
+        for name, (manifest, fiber) in self._mounted_components.items():
             result.append(
                 {
                     "name": name,

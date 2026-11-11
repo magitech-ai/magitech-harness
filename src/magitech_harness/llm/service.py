@@ -20,11 +20,11 @@ from magitech_harness.session.events import ToolCallData
 
 
 class NoProviderError(RuntimeError):
-    """Raised when an LLM call is attempted without an active provider plugin."""
+    """Raised when an LLM call is attempted without an active provider component."""
 
 
 class LLMProvider(Protocol):
-    """Protocol that any model provider plugin must implement."""
+    """Protocol that any model provider component must implement."""
 
     async def generate(
         self,
@@ -151,7 +151,7 @@ class LLMService(Service):
             self.register_provider("default", provider)
 
     def register_provider(self, name: str, provider: LLMProvider) -> Disposer:
-        """Registers a named model provider plugin.
+        """Registers a named model provider component.
 
         Args:
             name: Unique slug identifier for the provider (e.g. 'openrouter').
@@ -240,8 +240,8 @@ class LLMService(Service):
 
         if target_provider is None:
             raise NoProviderError(
-                "No active LLM provider plugin registered. Please install or configure "
-                "a provider plugin (e.g. 'mth plugin install openrouter') or specify one "
+                "No active LLM provider component registered. Please install or configure "
+                "a provider component (e.g. 'mth component install openrouter') or specify one "
                 "in your profile.yaml."
             )
 
@@ -283,8 +283,8 @@ class LLMService(Service):
 
         if target_provider is None:
             raise NoProviderError(
-                "No active LLM provider plugin registered. Please install or configure "
-                "a provider plugin (e.g. 'mth plugin install openrouter') or specify one "
+                "No active LLM provider component registered. Please install or configure "
+                "a provider component (e.g. 'mth component install openrouter') or specify one "
                 "in your profile.yaml."
             )
 

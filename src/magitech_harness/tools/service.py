@@ -23,7 +23,7 @@ class ToolService(Service):
         self._registry: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> Disposer:
-        """Register a tool. Attaches disposer as an effect to active plugin."""
+        """Register a tool. Attaches disposer as an effect to active component."""
         self._registry[tool.name] = tool
 
         def _unregister() -> None:

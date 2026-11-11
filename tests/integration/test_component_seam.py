@@ -1,4 +1,4 @@
-"""Integration test for portable plugin seam in Magitech Harness."""
+"""Integration test for portable component seam in Magitech Harness."""
 
 from __future__ import annotations
 
@@ -13,19 +13,19 @@ from magitech_harness.session.events import ToolCallData
 
 
 @pytest.mark.asyncio
-async def test_plugin_seam_full_lifecycle(tmp_path: Path) -> None:
+async def test_component_seam_full_lifecycle(tmp_path: Path) -> None:
     """Verifies end-to-end discovery, mounting, tool execution, and waterfall middleware."""
     # 1. Create harness with offline mock provider
     ctx = create_harness(mock_provider=True)
     await ctx.flush()
 
-    assert ctx.has("plugins")
+    assert ctx.has("components")
     assert ctx.has("tools")
     assert ctx.has("llm")
 
-    # 2. Create tool plugin directory on disk with manifest.json
-    tool_plugin_dir = tmp_path / "custom_math"
-    tool_plugin_dir.mkdir()
+    # 2. Create tool component directory on disk with manifest.json
+    tool_component_dir = tmp_path / "custom_math"
+    tool_component_dir.mkdir()
 
     tool_code = (
         "from magitech_harness.tools.definition import define_tool\n"
@@ -39,23 +39,23 @@ async def test_plugin_seam_full_lifecycle(tmp_path: Path) -> None:
         "    ctx.tools.register(tool)\n"
         "apply.inject = ['tools']\n"
     )
-    (tool_plugin_dir / "plugin.py").write_text(tool_code, encoding="utf-8")
+    (tool_component_dir / "component.py").write_text(tool_code, encoding="utf-8")
 
     tool_manifest_data = {
         "name": "custom-math",
         "version": "1.0.0",
-        "description": "Math operations plugin",
-        "entry_point": "plugin.py:apply",
+        "description": "Math operations component",
+        "entry_point": "component.py:apply",
         "types": ["Tool"],
         "enabled": True,
     }
-    (tool_plugin_dir / "manifest.json").write_text(
+    (tool_component_dir / "manifest.json").write_text(
         json.dumps(tool_manifest_data), encoding="utf-8"
     )
 
-    # 3. Create guardrail / waterfall plugin on disk
-    guard_plugin_dir = tmp_path / "custom_guard"
-    guard_plugin_dir.mkdir()
+    # 3. Create guardrail / waterfall component on disk
+    guard_component_dir = tmp_path / "custom_guard"
+    guard_component_dir.mkdir()
 
     guard_code = (
         "def apply(ctx):\n"
@@ -65,30 +65,30 @@ async def test_plugin_seam_full_lifecycle(tmp_path: Path) -> None:
         "    ctx.on('tools/post-execute', _post_exec)\n"
         "apply.inject = ['tools']\n"
     )
-    (guard_plugin_dir / "plugin.py").write_text(guard_code, encoding="utf-8")
+    (guard_component_dir / "component.py").write_text(guard_code, encoding="utf-8")
 
     guard_manifest_data = {
         "name": "custom-guard",
         "version": "1.0.0",
         "description": "Output verification middleware",
-        "entry_point": "plugin.py:apply",
+        "entry_point": "component.py:apply",
         "types": ["Guard"],
         "enabled": True,
     }
-    (guard_plugin_dir / "manifest.json").write_text(
+    (guard_component_dir / "manifest.json").write_text(
         json.dumps(guard_manifest_data), encoding="utf-8"
     )
 
-    # 4. Discover plugins via PluginService
-    manifests = ctx.plugins.discover(tmp_path)
+    # 4. Discover components via ComponentService
+    manifests = ctx.components.discover(tmp_path)
     assert len(manifests) == 2
     manifest_map = {m.name: m for m in manifests}
     assert "custom-math" in manifest_map
     assert "custom-guard" in manifest_map
 
-    # 5. Mount plugins into context
-    fiber_math = ctx.plugins.mount_plugin(manifest_map["custom-math"])
-    fiber_guard = ctx.plugins.mount_plugin(manifest_map["custom-guard"])
+    # 5. Mount components into context
+    fiber_math = ctx.components.mount_component(manifest_map["custom-math"])
+    fiber_guard = ctx.components.mount_component(manifest_map["custom-guard"])
     await ctx.flush()
 
     assert fiber_math.state == FiberState.ACTIVE
@@ -106,10 +106,10 @@ async def test_plugin_seam_full_lifecycle(tmp_path: Path) -> None:
     # Post-execute waterfall from custom-guard modified output
     assert add_res.content == "[verified: 42]"
 
-    # 7. Unmount custom plugins and verify clean removal
-    await ctx.plugins.unmount_plugin("custom-math")
-    assert ctx.plugins.get_plugin("custom-math") is None
+    # 7. Unmount custom components and verify clean removal
+    await ctx.components.unmount_component("custom-math")
+    assert ctx.components.get_component("custom-math") is None
     assert ctx.tools.get("add") is None
 
-    await ctx.plugins.unmount_plugin("custom-guard")
-    assert ctx.plugins.get_plugin("custom-guard") is None
+    await ctx.components.unmount_component("custom-guard")
+    assert ctx.components.get_component("custom-guard") is None

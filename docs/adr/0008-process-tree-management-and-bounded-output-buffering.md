@@ -10,7 +10,7 @@ Accepted
 In agentic runtimes, subprocess execution is a primary operational vulnerability:
 1. **Orphan / Zombie Subprocesses**: When a shell command spawns child processes (e.g. `npm run dev`, `find`, or background compilers) and is cancelled or times out, terminating only the parent process leaves detached descendant processes running indefinitely, leaking file locks, CPU, and ports.
 2. **Memory Exhaustion (OOM)**: Commands that dump enormous output streams (e.g. `cat /dev/urandom` or scanning huge directories) will consume unbounded memory if collected naively into memory before return, crashing the entire harness process.
-3. **Execution Seam Integrity**: The host engine must own low-level OS process management without exposing model-facing tools, leaving tool schema presentation and disk spilling to marketplace plugins.
+3. **Execution Seam Integrity**: The host engine must own low-level OS process management without exposing model-facing tools, leaving tool schema presentation and disk spilling to marketplace components.
 
 ## Decision
 1. **Process Group Isolation**:

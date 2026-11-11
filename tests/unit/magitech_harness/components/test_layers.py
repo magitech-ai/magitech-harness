@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from anima import Context
 
-from magitech_harness.plugins.layers import LayerResolutionService
+from magitech_harness.components.layers import LayerResolutionService
 
 
 def test_layer_resolution_defaults(tmp_path: Path) -> None:

@@ -13,10 +13,10 @@ We decouple application launching into a lightweight profile bootstrapper:
 1. The `mth` CLI binary parses only launcher-level configuration (`--profile <name>`, `--patch <file>`).
 2. It captures all remaining unparsed arguments into an immutable dictionary on the root Anima context (`ctx.cmdline_args`).
 3. It wires fail-loud process shutdown hooks into `ctx.app_exit` and resolves the target profile.
-4. The interactive multi-turn REPL is itself implemented as an Anima plugin, loaded by the profile, which reads `ctx.cmdline_args` to configure model selection, session resumption, and prompt options.
+4. The interactive multi-turn REPL is itself implemented as an Anima component, loaded by the profile, which reads `ctx.cmdline_args` to configure model selection, session resumption, and prompt options.
 
 ## Consequences
 
 - The launcher binary remains thin and decoupled from specific UI or terminal dependencies.
 - Headless, automated, or embedded applications use the exact same launcher substrate without starting a terminal REPL.
-- Command-line argument semantics for inner features are owned by the profile and plugins that consume them.
+- Command-line argument semantics for inner features are owned by the profile and components that consume them.

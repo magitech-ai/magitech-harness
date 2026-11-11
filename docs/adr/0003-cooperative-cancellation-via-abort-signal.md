@@ -19,4 +19,4 @@ We introduce an explicit cooperative cancellation mechanism using `AbortSignal`:
 
 - The interactive host process and REPL never terminate on Ctrl+C during a turn; instead, control cleanly returns to the prompt.
 - Model deltas streamed before interruption are safely recorded in the session log with an interruption marker.
-- Providers and tool plugins must periodically check `signal.aborted` during long-running async iterations.
+- Providers and tool components must periodically check `signal.aborted` during long-running async iterations.
