@@ -36,8 +36,11 @@ async def test_shell_service_run(tmp_path: Path) -> None:
     assert "hello stdout" in stdout
     assert "error stderr" in stderr
 
-    # Command respecting cwd
-    code, stdout, _stderr = await ctx.shell.run("pwd", cwd=tmp_path)
+    # Command respecting cwd (python prints the native cwd on every platform;
+    # the Git Bash `pwd` on Windows prints a POSIX-style path instead)
+    code, stdout, _stderr = await ctx.shell.run(
+        'python3 -c "import os; print(os.getcwd())"', cwd=tmp_path
+    )
     assert code == 0
     assert str(tmp_path.resolve()) in stdout
 
@@ -165,7 +168,10 @@ async def test_shell_abort_signal_dynamic() -> None:
 
 def test_kill_process_tree_posix_exceptions() -> None:
     """Verifies POSIX tree killing handles ProcessLookupError, PermissionError, and generic Exception."""
-    with patch("sys.platform", "linux"), patch("os.getpgid") as mock_getpgid:
+    with (
+        patch("sys.platform", "linux"),
+        patch("os.getpgid", create=True) as mock_getpgid,
+    ):
         mock_getpgid.side_effect = ProcessLookupError()
         _kill_process_tree(999999)
 

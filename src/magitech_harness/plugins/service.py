@@ -22,6 +22,35 @@ from magitech_harness.plugins.manifest import PluginManifest
 logger = logging.getLogger("magitech.plugins")
 
 
+def _entry_file(file_part: str, manifest: PluginManifest) -> Path | None:
+    """Return the file an entry-point file part names, if it exists.
+
+    Checks the manifest directory first, then the path as given.
+    """
+    if manifest.path and (manifest.path / file_part).is_file():
+        return manifest.path / file_part
+    if Path(file_part).is_file():
+        return Path(file_part)
+    return None
+
+
+def _split_entry_point(
+    target_str: str, manifest: PluginManifest
+) -> tuple[str, str | None]:
+    """Split an entry point into (file part, attr name).
+
+    The colon after a Windows drive letter (``C:\\...``) is part of the
+    path, not the attr separator: only split on the last colon when the
+    part before it names an existing file.
+    """
+    if ":" not in target_str:
+        return target_str, None
+    candidate, _, attr_name = target_str.rpartition(":")
+    if _entry_file(candidate, manifest) is not None:
+        return candidate, attr_name
+    return target_str, None
+
+
 def resolve_entry_point(manifest: PluginManifest) -> Any:
     """Resolves a plugin target from manifest entry_point.
 
@@ -39,16 +68,9 @@ def resolve_entry_point(manifest: PluginManifest) -> Any:
         AttributeError: If the specified attribute or default entry point is missing.
     """
     target_str = manifest.entry_point
-    if ":" in target_str:
-        file_part, attr_name = target_str.split(":", 1)
-    else:
-        file_part, attr_name = target_str, None
+    file_part, attr_name = _split_entry_point(target_str, manifest)
 
-    file_path: Path | None = None
-    if manifest.path and (manifest.path / file_part).is_file():
-        file_path = manifest.path / file_part
-    elif Path(file_part).is_file():
-        file_path = Path(file_part)
+    file_path = _entry_file(file_part, manifest)
 
     if file_path is not None:
         clean_name = manifest.name.replace("-", "_").replace(".", "_")
