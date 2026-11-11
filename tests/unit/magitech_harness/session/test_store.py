@@ -2,14 +2,17 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from magitech_harness.session.events import EventType, SessionEvent
 from magitech_harness.session.store import (
     Session,
+    _lock_exclusive,
     _normalize_adjacent_messages,
+    _unlock,
     derive_messages,
 )
 
@@ -127,6 +130,52 @@ def test_session_append_fcntl_fallback(tmp_path: Path) -> None:
         )
         session.append(event)
         assert len(session.events) == 1
+
+
+def _fake_msvcrt() -> SimpleNamespace:
+    """A stub msvcrt recording locking calls (no Windows in the test env)."""
+    return SimpleNamespace(locking=MagicMock(), LK_LOCK=1, LK_UNLCK=0)
+
+
+def test_lock_exclusive_and_unlock_windows_use_msvcrt(tmp_path: Path) -> None:
+    """Verifies the Windows locking path byte-locks offset 0 via msvcrt."""
+    fake_msvcrt = _fake_msvcrt()
+    file_path = tmp_path / "sess_win.jsonl"
+    with (
+        patch("sys.platform", "win32"),
+        patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),
+        open(file_path, "a", encoding="utf-8") as f,
+    ):
+        _lock_exclusive(f)
+        fake_msvcrt.locking.assert_called_once_with(f.fileno(), 1, 1)
+        fake_msvcrt.locking.reset_mock()
+        _unlock(f)
+        fake_msvcrt.locking.assert_called_once_with(f.fileno(), 0, 1)
+
+
+def test_session_append_windows_locking(tmp_path: Path) -> None:
+    """Verifies Session.append locks, writes, and unlocks via msvcrt on Windows."""
+    fake_msvcrt = _fake_msvcrt()
+    file_path = tmp_path / "sess_win_append.jsonl"
+    session = Session(session_id="sess_win", storage_path=file_path)
+    with (
+        patch("sys.platform", "win32"),
+        patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),
+    ):
+        session.append(
+            SessionEvent(
+                id="ev_win",
+                session_id="sess_win",
+                type=EventType.USER_MESSAGE,
+                payload={"text": "windows lock"},
+            )
+        )
+    assert len(session.events) == 1
+    assert fake_msvcrt.locking.call_count == 2
+    lock_call, unlock_call = fake_msvcrt.locking.call_args_list
+    assert lock_call.args[1:] == (1, 1)
+    assert unlock_call.args[1:] == (0, 1)
+    assert "windows lock" in file_path.read_text(encoding="utf-8")
 
 
 def test_session_load_nonexistent_or_empty(tmp_path: Path) -> None:
