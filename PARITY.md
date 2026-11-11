@@ -2,8 +2,8 @@
 
 ## Anima (verified in Phase 0a, 2026-11-10)
 
-- Base ref: `1a9384345024d36711d948f96d217f5d43cb7e56` (PR #12 merge)
-- Reflect-fix commit: `898ac7d1f91308fb1290ce21e96537d48556e915`
+- Base ref: `ab83c6cae1cde2f496a3dc4059cec20eafda22ae` (PR #12 merge)
+- Reflect-fix commit: `d3d13eaaf925daf535f0a31721700d93f3c5d609`
   (branch `phase0a/reflect-fix` in anima; fixes the reflect recursion on
   missing reserved-word attributes — see the anima commit message)
 - Pinned dependency: `anima>=0.1,<0.2` in `pyproject.toml`

@@ -10,7 +10,11 @@ import pytest
 from anima import Context, FiberState
 
 from magitech_harness.plugins.manifest import PluginManifest
-from magitech_harness.plugins.service import PluginService, resolve_entry_point
+from magitech_harness.plugins.service import (
+    PluginService,
+    _split_entry_point,
+    resolve_entry_point,
+)
 
 
 @pytest.mark.asyncio
@@ -63,6 +67,35 @@ async def test_plugin_service_discover_and_mount_file(tmp_path: Path) -> None:
 
     # Unmount nonexistent does nothing
     await service.unmount_plugin("nonexistent")
+
+
+def test_split_entry_point_drive_letter_colon_is_path_not_attr(tmp_path: Path) -> None:
+    """Verifies a Windows drive-letter colon is not treated as the attr separator."""
+    manifest = PluginManifest(
+        name="drive-plugin", version="1.0.0", entry_point="x", path=tmp_path
+    )
+    assert _split_entry_point("C:plugin.py", manifest) == ("C:plugin.py", None)
+    assert _split_entry_point("C:\\Users\\x\\plugin.py", manifest) == (
+        "C:\\Users\\x\\plugin.py",
+        None,
+    )
+
+
+def test_split_entry_point_file_attr_and_module_paths(tmp_path: Path) -> None:
+    """Verifies splitting file:attr and module:attr entry points."""
+    (tmp_path / "plugin.py").write_text("def apply(ctx): pass\n", encoding="utf-8")
+    manifest = PluginManifest(
+        name="split-plugin", version="1.0.0", entry_point="x", path=tmp_path
+    )
+    assert _split_entry_point("plugin.py:custom_apply", manifest) == (
+        "plugin.py",
+        "custom_apply",
+    )
+    assert _split_entry_point("plugin.py", manifest) == ("plugin.py", None)
+    assert _split_entry_point("anima.core:Context", manifest) == (
+        "anima.core:Context",
+        None,
+    )
 
 
 @pytest.mark.asyncio

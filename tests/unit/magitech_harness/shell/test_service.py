@@ -3,6 +3,7 @@
 import asyncio
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -36,8 +37,11 @@ async def test_shell_service_run(tmp_path: Path) -> None:
     assert "hello stdout" in stdout
     assert "error stderr" in stderr
 
-    # Command respecting cwd
-    code, stdout, _stderr = await ctx.shell.run("pwd", cwd=tmp_path)
+    # Command respecting cwd (python prints the native cwd on every platform;
+    # the Git Bash `pwd` on Windows prints a POSIX-style path instead)
+    code, stdout, _stderr = await ctx.shell.run(
+        'python3 -c "import os; print(os.getcwd())"', cwd=tmp_path
+    )
     assert code == 0
     assert str(tmp_path.resolve()) in stdout
 
@@ -163,9 +167,25 @@ async def test_shell_abort_signal_dynamic() -> None:
     assert res.exit_code != 0
 
 
+def test_kill_process_tree_posix_success() -> None:
+    """Verifies POSIX tree killing resolves the group and signals it."""
+    fake_signal = SimpleNamespace(SIGKILL=9)
+    with (
+        patch("sys.platform", "linux"),
+        patch("os.getpgid", create=True, return_value=1234),
+        patch("os.killpg", create=True) as mock_killpg,
+        patch("magitech_harness.shell.service.sys_signal", fake_signal),
+    ):
+        _kill_process_tree(9999)
+        mock_killpg.assert_called_once_with(1234, 9)
+
+
 def test_kill_process_tree_posix_exceptions() -> None:
     """Verifies POSIX tree killing handles ProcessLookupError, PermissionError, and generic Exception."""
-    with patch("sys.platform", "linux"), patch("os.getpgid") as mock_getpgid:
+    with (
+        patch("sys.platform", "linux"),
+        patch("os.getpgid", create=True) as mock_getpgid,
+    ):
         mock_getpgid.side_effect = ProcessLookupError()
         _kill_process_tree(999999)
 

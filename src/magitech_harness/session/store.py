@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 from magitech_harness.session.events import EventType, SessionEvent
 
@@ -119,6 +120,39 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
     return _normalize_adjacent_messages(messages)
 
 
+def _lock_exclusive(f: TextIO) -> None:
+    """Take an exclusive advisory lock on the open session file.
+
+    POSIX uses flock; Windows uses msvcrt byte-range locking on the first
+    byte (the single-byte scheme file-locking libraries use). Both are
+    blocking and exclusive, so concurrent appenders serialize. The lock
+    region is pinned to offset 0 because msvcrt locks from the current
+    file position, which moves after a write.
+    """
+    if sys.platform == "win32":
+        import msvcrt
+
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+
+
+def _unlock(f: TextIO) -> None:
+    """Release the advisory lock taken by _lock_exclusive."""
+    if sys.platform == "win32":
+        import msvcrt
+
+        f.seek(0)
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+
 class Session:
     """A durable, append-only conversation session."""
 
@@ -136,9 +170,7 @@ class Session:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.storage_path, "a", encoding="utf-8") as f:
                 try:
-                    import fcntl
-
-                    fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                    _lock_exclusive(f)
                 except (ImportError, OSError, AttributeError):
                     pass
                 try:
@@ -146,9 +178,7 @@ class Session:
                     f.flush()
                 finally:
                     try:
-                        import fcntl
-
-                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        _unlock(f)
                     except (ImportError, OSError, AttributeError):
                         pass
 
