@@ -1,0 +1,21 @@
+name: CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Lint
+    uses: magitech-ai/.github/.github/workflows/python-ci.yml@main
+    with:
+      python-version: "3.12"
+      checkout-path: "magitech-harness"
+      working-directory: "magitech-harness"
+      pre-commands: |
+        git clone --depth 1 https://github.com/magitech-ai/anima.git anima
