@@ -47,7 +47,7 @@ Built directly on top of **`anima`** ([`https://github.com/magitech-ai/anima`](h
 `magitech-harness` maintains strict **100% statement and 100% branch test coverage**:
 
 ```bash
-cd /mnt/storage/projects/AI/magitech-harness
+cd magitech-harness
 
 # Run all unit and integration tests with coverage enforcement
 uv run pytest
@@ -56,11 +56,11 @@ uv run pytest
 ### Running the CLI
 ```bash
 # Execute an agent turn using the mth CLI
-uv run mth "Calculate 15 * 8"
+uv run mth run "Calculate 15 * 8"
 
 # Or use the aliases
-uv run magitech "Calculate 15 * 8"
-uv run magitech-harness "Calculate 15 * 8"
+uv run magitech run "Calculate 15 * 8"
+uv run magitech-harness run "Calculate 15 * 8"
 ```
 *(Session event logs persist to `.sessions/<session-id>.jsonl`)*
 
