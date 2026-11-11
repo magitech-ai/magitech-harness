@@ -3,6 +3,7 @@
 import asyncio
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -164,6 +165,19 @@ async def test_shell_abort_signal_dynamic() -> None:
 
     assert res.aborted
     assert res.exit_code != 0
+
+
+def test_kill_process_tree_posix_success() -> None:
+    """Verifies POSIX tree killing resolves the group and signals it."""
+    fake_signal = SimpleNamespace(SIGKILL=9)
+    with (
+        patch("sys.platform", "linux"),
+        patch("os.getpgid", create=True, return_value=1234),
+        patch("os.killpg", create=True) as mock_killpg,
+        patch("magitech_harness.shell.service.sys_signal", fake_signal),
+    ):
+        _kill_process_tree(9999)
+        mock_killpg.assert_called_once_with(1234, 9)
 
 
 def test_kill_process_tree_posix_exceptions() -> None:

@@ -178,6 +178,51 @@ def test_session_append_windows_locking(tmp_path: Path) -> None:
     assert "windows lock" in file_path.read_text(encoding="utf-8")
 
 
+def _fake_fcntl() -> SimpleNamespace:
+    """A stub fcntl recording flock calls (drives the POSIX branch on Windows)."""
+    return SimpleNamespace(flock=MagicMock(), LOCK_EX=2, LOCK_UN=8)
+
+
+def test_lock_exclusive_and_unlock_posix_use_fcntl(tmp_path: Path) -> None:
+    """Verifies the POSIX locking path uses flock for lock and unlock."""
+    fake_fcntl = _fake_fcntl()
+    file_path = tmp_path / "sess_posix.jsonl"
+    with (
+        patch("sys.platform", "linux"),
+        patch.dict("sys.modules", {"fcntl": fake_fcntl}),
+        open(file_path, "a", encoding="utf-8") as f,
+    ):
+        _lock_exclusive(f)
+        fake_fcntl.flock.assert_called_once_with(f.fileno(), 2)
+        fake_fcntl.flock.reset_mock()
+        _unlock(f)
+        fake_fcntl.flock.assert_called_once_with(f.fileno(), 8)
+
+
+def test_session_append_lock_failure_is_best_effort(tmp_path: Path) -> None:
+    """Verifies Session.append still persists when locking raises."""
+    fake_msvcrt = SimpleNamespace(
+        locking=MagicMock(side_effect=OSError("lock failed")), LK_LOCK=1, LK_UNLCK=0
+    )
+    file_path = tmp_path / "sess_lock_fail.jsonl"
+    session = Session(session_id="sess_lock_fail", storage_path=file_path)
+    with (
+        patch("sys.platform", "win32"),
+        patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),
+    ):
+        session.append(
+            SessionEvent(
+                id="ev_lock_fail",
+                session_id="sess_lock_fail",
+                type=EventType.USER_MESSAGE,
+                payload={"text": "persisted despite lock failure"},
+            )
+        )
+    assert len(session.events) == 1
+    assert fake_msvcrt.locking.call_count == 2
+    assert "persisted despite lock failure" in file_path.read_text(encoding="utf-8")
+
+
 def test_session_load_nonexistent_or_empty(tmp_path: Path) -> None:
     """Verifies Session.load on nonexistent or empty file."""
     nonexistent = tmp_path / "nonexistent.jsonl"
