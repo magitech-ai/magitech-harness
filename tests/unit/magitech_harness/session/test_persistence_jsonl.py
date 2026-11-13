@@ -245,7 +245,9 @@ def test_lease_release_then_reacquire_and_file_remains(tmp_path: Path) -> None:
     lease = KernelLease.acquire(session_path, "s-1")
     lock_path = session_path / "session.lock"
     assert lock_path.is_file()
-    assert stat_module.S_IMODE(lock_path.stat().st_mode) == 0o600
+    if sys.platform != "win32":
+        # Windows ignores permission bits on creation.
+        assert stat_module.S_IMODE(lock_path.stat().st_mode) == 0o600
     lease.release()
     assert lock_path.is_file()
     lease2 = KernelLease.acquire(session_path, "s-1")
@@ -306,51 +308,46 @@ def test_lease_inode_mismatch_retries_then_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One stale inode check retries; the next attempt takes the lease."""
+    _patch_posix(monkeypatch, _FakeFcntl())
     session_path = _session_path(tmp_path)
     lock_path = session_path / "session.lock"
     monkeypatch.setattr(os, "stat", _stat_fake(lock_path, 1))
-    lease = KernelLease.acquire(session_path, "s-1")
-    lease.release()
+    fd = _acquire_posix(lock_path, "s-1")
+    os.close(fd)
 
 
 def test_lease_inode_mismatch_exhausted_is_owned(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A lock file replaced on every attempt is reported as owned."""
+    _patch_posix(monkeypatch, _FakeFcntl())
     session_path = _session_path(tmp_path)
     lock_path = session_path / "session.lock"
     monkeypatch.setattr(os, "stat", _stat_fake(lock_path, 99))
     with pytest.raises(SessionAlreadyOwnedError):
-        KernelLease.acquire(session_path, "s-1")
+        _acquire_posix(lock_path, "s-1")
 
 
 def test_lease_vanished_lock_file_retries_then_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A lock file that vanishes mid-check retries instead of failing."""
+    _patch_posix(monkeypatch, _FakeFcntl())
     session_path = _session_path(tmp_path)
     lock_path = session_path / "session.lock"
     monkeypatch.setattr(os, "stat", _stat_fake(lock_path, 1, raise_once=True))
-    lease = KernelLease.acquire(session_path, "s-1")
-    lease.release()
+    fd = _acquire_posix(lock_path, "s-1")
+    os.close(fd)
 
 
 def test_lease_posix_lock_error_other_than_contention_propagates(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A non-contention flock failure fails loud, never as owned."""
-    fake = types.ModuleType("fcntl")
-    fake.LOCK_EX = 2
-    fake.LOCK_NB = 4
-    fake.LOCK_UN = 8
-
-    def flock(fd: int, operation: int) -> None:
-        raise OSError(errno.EIO, "flock boom")
-
-    fake.flock = flock  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "fcntl", fake)
+    fake = _FakeFcntl(OSError(errno.EIO, "flock boom"))
+    _patch_posix(monkeypatch, fake)
     with pytest.raises(OSError, match="flock boom"):
-        KernelLease.acquire(_session_path(tmp_path), "s-1")
+        _acquire_posix(_session_path(tmp_path) / "session.lock", "s-1")
 
 
 def test_lease_posix_refuses_windows_platform(
@@ -381,6 +378,28 @@ class _FakeMsvcrt:
 def _patch_windows(monkeypatch: pytest.MonkeyPatch, fake: _FakeMsvcrt) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setitem(sys.modules, "msvcrt", fake)
+
+
+class _FakeFcntl:
+    """Stand-in for the POSIX flock module."""
+
+    LOCK_EX = 2
+    LOCK_NB = 4
+    LOCK_UN = 8
+
+    def __init__(self, error: OSError | None = None) -> None:
+        self.calls: list[tuple[int, int]] = []
+        self.error = error
+
+    def flock(self, fd: int, operation: int) -> None:
+        self.calls.append((fd, operation))
+        if self.error is not None:
+            raise self.error
+
+
+def _patch_posix(monkeypatch: pytest.MonkeyPatch, fake: _FakeFcntl) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setitem(sys.modules, "fcntl", fake)
 
 
 def test_lease_windows_acquire_and_release(tmp_path: Path, monkeypatch) -> None:
@@ -1180,7 +1199,9 @@ def test_handle_append_writes_header_then_rows_and_re_reads_clean(
     handle = _open_handle(tmp_path)
     handle.append(_turn_events())
     path = tmp_path / "s-1" / "session.v4.jsonl"
-    assert stat_module.S_IMODE(path.parent.stat().st_mode) == 0o700
+    if sys.platform != "win32":
+        # Windows ignores permission bits on creation.
+        assert stat_module.S_IMODE(path.parent.stat().st_mode) == 0o700
     result = read_generation(path, recovery="recoverable")
     assert [event.seq for event in result.events] == [0, 1, 2]
     verify_current_generation(path)
@@ -1250,7 +1271,9 @@ def test_handle_flush_materializes_pending_handle(tmp_path: Path) -> None:
     handle.flush()
     path = tmp_path / "s-1" / "session.v4.jsonl"
     assert path.is_file()
-    assert stat_module.S_IMODE(path.parent.stat().st_mode) == 0o700
+    if sys.platform != "win32":
+        # Windows ignores permission bits on creation.
+        assert stat_module.S_IMODE(path.parent.stat().st_mode) == 0o700
     result = read_generation(path, recovery="recoverable")
     assert result.events == []
     assert result.header["id"] == "s-1"

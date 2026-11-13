@@ -280,12 +280,12 @@ def _same_inode(fd: int, lock_path: Path) -> bool:
 
 def _acquire_posix(lock_path: Path, session_id: str) -> int:
     """Take a non-blocking exclusive flock, verifying the locked inode."""
-    import fcntl
-
     if sys.platform == "win32":
         # The flock calls below are POSIX-only; the guard also tells the
         # type checker this body is unreachable on Windows.
         raise RuntimeError("POSIX lease requested on Windows")
+    import fcntl
+
     for _attempt in range(_MAX_LOCK_ATTEMPTS):
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -1010,7 +1010,7 @@ class JsonlSessionHandle(SessionHandle):
         if not self._materialized:
             self._persist_rows_locked([])
             return
-        fd = os.open(self._generation_path, os.O_RDONLY)
+        fd = os.open(self._generation_path, os.O_RDWR)
         try:
             os.fsync(fd)
         finally:
