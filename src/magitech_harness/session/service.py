@@ -43,8 +43,13 @@ from magitech_harness.session.persistence_jsonl import (
     resolve_current_generation,
     session_dir,
 )
+from magitech_harness.session.projection_cache import (
+    ProjectionCacheConfig,
+    SessionProjectionCache,
+)
 from magitech_harness.session.projection_registry import (
     ProjectionHandle,
+    ProjectionSnapshot,
     SessionProjectionRegistry,
 )
 from magitech_harness.session.projections import (
@@ -97,6 +102,7 @@ class SessionService(Service):
         self._persistence: JsonlSessionPersistence | None = None
         self._tracker: JsonlLiveTracker | None = None
         self._tracker_dispose: Callable[[], None] | None = None
+        self._projection_cache: SessionProjectionCache | None = None
         if self.base_storage_dir is not None:
             delay = cfg.get("live_batch_delay", 0.2)
             self._persistence = JsonlSessionPersistence(
@@ -104,6 +110,20 @@ class SessionService(Service):
             )
             self._tracker = JsonlLiveTracker(self._persistence)
             self._tracker_dispose = self._tracker.install(ctx)
+            self._projection_cache = SessionProjectionCache(
+                self._projections,
+                self.base_storage_dir,
+                ProjectionCacheConfig(
+                    write_every_events=cfg.get(
+                        "projection_cache_write_every_events", 200
+                    ),
+                    write_interval_ms=cfg.get(
+                        "projection_cache_write_interval_ms", 5000
+                    ),
+                ),
+                flush_log=self._flush_log_for_cache,
+            )
+            self._projection_cache.install(ctx)
 
     @property
     def store(self) -> SessionStore:
@@ -114,6 +134,31 @@ class SessionService(Service):
     def projections(self) -> SessionProjectionRegistry:
         """The registry driving the five units over committed events."""
         return self._projections
+
+    @property
+    def projection_cache(self) -> SessionProjectionCache | None:
+        """The persisted projection cache, or ``None`` for a memory-only service."""
+        return self._projection_cache
+
+    def _flush_log_for_cache(self, session: Session) -> None:
+        """Synchronous log drain + flush ahead of a cache write.
+
+        The cache calls this between its checkpoint cut and its record
+        write, so the log is durable before the cache row lands. Skipped
+        when the session is no longer live in the store (the detach path:
+        the store entry is already gone) or when no write handle exists
+        yet (the create-point write runs before the persistence handle
+        exists). The restore backstop covers any residual overreach.
+        """
+        if self._store.get(session.session_id) is not session:
+            return
+        # A cache exists only alongside a persistence root, which always
+        # installs the live tracker.
+        assert self._tracker is not None
+        self._tracker.drain_live(session.session_id)
+        handle = self._handles.get(session.session_id)
+        if handle is not None:
+            handle.flush()
 
     def _new_header(self, session_id: str) -> dict[str, Any]:
         """The fresh unseeded header for one new session."""
@@ -231,6 +276,11 @@ class SessionService(Service):
         try:
             event_state, events = handle.read()
             session = self._enter_restored(session_id, handle, event_state, events)
+            cache = self._projection_cache
+            # A persistence root always installs a cache; a memory-only
+            # service returns before this point.
+            assert cache is not None
+            cache.hydrate_prepared(session, list(session.events))
         except Exception:
             handle.close()
             raise
@@ -297,6 +347,37 @@ class SessionService(Service):
         )
         handle.close()
         return session
+
+    def read_projections(self, session_id: str) -> ProjectionSnapshot | None:
+        """Cold-read one session's projections from its complete stored log.
+
+        A live session is read from the registry directly. Otherwise the
+        stored log is opened for read and the cache cold-reads it (seeding
+        from identity-checked rows and writing the refreshed checkpoint
+        back, fail-soft). Returns ``None`` when the session is not stored
+        anywhere, or when no persistence backend is configured.
+        """
+        if session_id in self._active_sessions:
+            return self._projections.snapshot(self._active_sessions[session_id])
+        live = self._store.get(session_id)
+        if live is not None:
+            return self._projections.snapshot(live)
+        if self._persistence is None:
+            return None
+        try:
+            handle = self._persistence.open(session_id, "read")
+        except SessionPersistenceNotFoundError:
+            return None
+        try:
+            _event_state, events = handle.read()
+            cache = self._projection_cache
+            # A persistence root always installs a cache.
+            assert cache is not None
+            return cache.cold_snapshot(
+                handle.header, handle.inherited_event_count, events
+            )
+        finally:
+            handle.close()
 
     def location(self, session_id: str) -> Path | None:
         """The materialized log path for one session, if it has one.
