@@ -62,7 +62,7 @@ def test_session_service_load_list_and_delete(tmp_path: Path) -> None:
     s2_file = tmp_path / "sess_2.jsonl"
     s2_file.write_text(
         '{"type":"session","version":4,"id":"sess_2","createdAt":1000,"isSeeded":false,"delegationDepth":0}\n'
-        '{"type":"user/message","seq":1,"time":100000,"data":{"text":"cold"}}\n',
+        '{"type":"user/message","seq":0,"time":100000,"data":{"text":"cold"},"surfaceOp":"append"}\n',
         encoding="utf-8",
     )
 
@@ -171,3 +171,82 @@ def test_session_service_create_over_historical_file_refuses_log_event(
     assert session.events == []
     assert broadcast == []
     assert file_path.read_bytes() == before
+
+
+def test_session_service_delete_store_only_session(tmp_path: Path) -> None:
+    """Verifies deleting a session that lives in the store but not in
+    the service's active cache still detaches it."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    session = service.store.create("store-only")
+    assert service.get("store-only") is session
+    assert service.delete("store-only") is True
+    assert service.store.get("store-only") is None
+
+
+def test_session_service_store_property() -> None:
+    """Verifies the service exposes the store it shells over."""
+    from magitech_harness.session.store import SessionStore
+
+    ctx = Context()
+    service = SessionService(ctx)
+    assert isinstance(service.store, SessionStore)
+    assert service.store.get("missing") is None
+
+
+def test_session_service_delete_live_session(tmp_path: Path) -> None:
+    """Verifies deleting a live session detaches it and removes its file."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    session = service.create("deletable")
+    service.log_event(session, EventType.USER_MESSAGE, {"text": "hello"})
+    assert (tmp_path / "deletable.jsonl").exists()
+    assert service.delete("deletable") is True
+    assert service.get("deletable") is None
+    assert not (tmp_path / "deletable.jsonl").exists()
+    assert service.delete("deletable") is False
+
+
+def test_session_service_log_event_broadcasts_independent_session(
+    tmp_path: Path,
+) -> None:
+    """Verifies log_event broadcasts for an independent (cold-loaded)
+    session, whose store publication hook is absent."""
+    ctx = Context()
+    events_broadcast: list = []
+    ctx.on(
+        "session/event",
+        lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
+    )
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    created = service.create("cold")
+    service.log_event(created, EventType.USER_MESSAGE, {"text": "first"})
+    assert len(events_broadcast) == 1
+
+    # A fresh service cold-loads the same log: the loaded session has no
+    # publication hook, so log_event must broadcast it itself.
+    service2 = SessionService(ctx, {"base_storage_dir": tmp_path})
+    loaded = service2.load("cold")
+    assert loaded is not None
+    assert loaded._publish_hook is None
+    events_broadcast.clear()
+    service2.log_event(loaded, EventType.USER_MESSAGE, {"text": "second"})
+    assert len(events_broadcast) == 1
+    assert events_broadcast[0] == ("cold", EventType.USER_MESSAGE)
+
+
+def test_session_service_log_event_store_owned_broadcasts_once(
+    tmp_path: Path,
+) -> None:
+    """Verifies a store-owned session's event is broadcast exactly once:
+    through the store hook, not again by the service."""
+    ctx = Context()
+    events_broadcast: list = []
+    ctx.on(
+        "session/event",
+        lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
+    )
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    session = service.create("owned")
+    service.log_event(session, EventType.USER_MESSAGE, {"text": "hello"})
+    assert events_broadcast == [("owned", EventType.USER_MESSAGE)]

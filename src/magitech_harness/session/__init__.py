@@ -1,9 +1,17 @@
 from magitech_harness.session.events import (
+    CORE_EVENT_TYPES,
+    KNOWN_SESSION_EVENT_TYPES,
+    MESSAGE_PROJECTION_EVENT_TYPES,
+    OWNER_EVENT_TYPES,
+    SURFACE_EVENT_TYPES,
     EventType,
     SessionEvent,
     ToolCallData,
     ToolResultData,
+    is_plugin_record_type,
+    snapshot_json_value,
 )
+from magitech_harness.session.fork import build_fork_seed
 from magitech_harness.session.format import (
     CURRENT_FORMAT_VERSION,
     SESSION_FORMAT_CATALOG,
@@ -13,22 +21,67 @@ from magitech_harness.session.format import (
     SessionPersistenceCorruptionError,
 )
 from magitech_harness.session.pairing import is_tool_pairing_balanced
+from magitech_harness.session.repair import (
+    TOOL_NOT_STARTED,
+    TOOL_OUTCOME_UNKNOWN,
+    interrupted_turn_closers,
+    open_turn_closers,
+)
 from magitech_harness.session.service import SessionService
-from magitech_harness.session.store import Session, derive_messages
+from magitech_harness.session.store import (
+    PluginRecord,
+    Session,
+    SessionForkError,
+    SessionPreparation,
+    SessionStore,
+    append_plugin_record,
+    derive_messages,
+    plugin_record_of,
+)
+from magitech_harness.session.surface import (
+    MessageProjection,
+    SurfaceError,
+    SurfaceFoldResult,
+    SurfaceManager,
+    fold_surface,
+)
 
 __all__ = [
+    "CORE_EVENT_TYPES",
     "CURRENT_FORMAT_VERSION",
+    "KNOWN_SESSION_EVENT_TYPES",
+    "MESSAGE_PROJECTION_EVENT_TYPES",
+    "OWNER_EVENT_TYPES",
     "SESSION_FORMAT_CATALOG",
+    "SURFACE_EVENT_TYPES",
+    "TOOL_NOT_STARTED",
+    "TOOL_OUTCOME_UNKNOWN",
     "EventType",
+    "MessageProjection",
+    "PluginRecord",
     "Session",
     "SessionEvent",
+    "SessionForkError",
     "SessionFormatError",
     "SessionFormatUnsupportedError",
     "SessionFormatUnsupportedMigrationError",
     "SessionPersistenceCorruptionError",
+    "SessionPreparation",
     "SessionService",
+    "SessionStore",
+    "SurfaceError",
+    "SurfaceFoldResult",
+    "SurfaceManager",
     "ToolCallData",
     "ToolResultData",
+    "append_plugin_record",
+    "build_fork_seed",
     "derive_messages",
+    "fold_surface",
+    "interrupted_turn_closers",
+    "is_plugin_record_type",
     "is_tool_pairing_balanced",
+    "open_turn_closers",
+    "plugin_record_of",
+    "snapshot_json_value",
 ]

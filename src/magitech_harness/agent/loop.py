@@ -154,7 +154,7 @@ class AgentLoopService(Service):
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": True},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                 else:
@@ -162,7 +162,7 @@ class AgentLoopService(Service):
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": False},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                     break
@@ -319,14 +319,14 @@ class AgentLoopService(Service):
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": True},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                 else:
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": False},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                     break
