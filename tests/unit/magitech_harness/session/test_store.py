@@ -678,6 +678,71 @@ def test_normalize_adjacent_messages_branches() -> None:
     assert len(_normalize_adjacent_messages(msgs_tools)) == 2
 
 
+def test_derive_messages_tool_result_message_shape() -> None:
+    """Verifies tool/result projection reads the tool-role message shape.
+
+    The tool name comes from the matching tool/call event; a result with
+    no matching call projects a null name. Non-text blocks project as
+    JSON; a string content projects as-is.
+    """
+    events = [
+        SessionEvent(
+            id="1",
+            session_id="s",
+            type=EventType.TOOL_CALL,
+            payload={"call_id": "c1", "name": "search"},
+        ),
+        SessionEvent(
+            id="2",
+            session_id="s",
+            type=EventType.TOOL_RESULT,
+            payload={
+                "message": {
+                    "toolCallId": "c1",
+                    "content": [
+                        {"type": "text", "text": "hit"},
+                        {"type": "image", "url": "u"},
+                        {"type": "text", "text": " again"},
+                        "raw",
+                    ],
+                }
+            },
+        ),
+        SessionEvent(
+            id="3",
+            session_id="s",
+            type=EventType.TOOL_CALL,
+            payload={"call_id": 7, "name": "bad"},
+        ),
+        SessionEvent(
+            id="4",
+            session_id="s",
+            type=EventType.TOOL_RESULT,
+            payload={"message": {"toolCallId": "7", "content": "plain"}},
+        ),
+        SessionEvent(
+            id="5",
+            session_id="s",
+            type=EventType.TOOL_RESULT,
+            payload={"message": {"toolCallId": "9", "content": {"k": "v"}}},
+        ),
+    ]
+    msgs = derive_messages(events)
+    assert len(msgs) == 3
+    assert msgs[0]["role"] == "tool"
+    assert msgs[0]["tool_call_id"] == "c1"
+    assert msgs[0]["name"] == "search"
+    assert msgs[0]["content"] == 'hit{"type": "image", "url": "u"} again'
+    assert msgs[1]["role"] == "tool"
+    assert msgs[1]["tool_call_id"] == "7"
+    assert msgs[1]["name"] is None
+    assert msgs[1]["content"] == "plain"
+    assert msgs[2]["role"] == "tool"
+    assert msgs[2]["tool_call_id"] == "9"
+    assert msgs[2]["name"] is None
+    assert msgs[2]["content"] == '{"k": "v"}'
+
+
 def test_session_derive_messages_method() -> None:
     """Verifies session.derive_messages() forwards to derive_messages."""
     session = Session(session_id="test")
@@ -1347,6 +1412,7 @@ def _minimal_payload(type: str) -> dict:
             "message": {
                 "id": "d",
                 "role": "developer",
+                "source": {"kind": "runtime"},
                 "content": [{"type": "text", "text": "x"}],
             },
         }
@@ -1563,6 +1629,193 @@ def test_session_load_refuses_retired_shapes(tmp_path: Path) -> None:
         _write_v4_file(file_path, "retired", rows)
         with pytest.raises(SessionFormatUnsupportedError, match=name.split("/")[0]):
             Session.load(file_path)
+
+
+def test_session_load_refuses_admission_failures(tmp_path: Path) -> None:
+    """Verifies native v4 row admission runs on current-version loads.
+
+    A request/header with a non-record header, a system/message with a
+    non-system role, and a tool/result carrying error metadata without
+    ``message.isError`` are all refused instead of loading silently.
+    """
+    cases = [
+        (
+            "hdrshape",
+            [
+                _v4_row(
+                    "request/header",
+                    0,
+                    {"header": "not-a-record", "reason": {"kind": "initial"}},
+                )
+            ],
+        ),
+        (
+            "sysrole",
+            [
+                _v4_row(
+                    "system/message",
+                    0,
+                    {"message": {"role": "user", "content": "hi"}},
+                    surfaceOp="append",
+                )
+            ],
+        ),
+        (
+            "toolerr",
+            [
+                _v4_row(
+                    "tool/result",
+                    0,
+                    {"error": {"name": "E"}, "message": {"isError": False}},
+                    surfaceOp="append",
+                )
+            ],
+        ),
+    ]
+    for name, rows in cases:
+        file_path = tmp_path / f"admission_{name}.jsonl"
+        _write_v4_file(file_path, name, rows)
+        with pytest.raises(SessionFormatError):
+            Session.load(file_path)
+
+
+def test_session_load_refuses_tool_result_wrapper_blocks(tmp_path: Path) -> None:
+    """Verifies retired tool-result wrappers are refused in every slot.
+
+    The admission check covers assistant/developer/team/title-llm-request/
+    ptc-dispatch/compaction-summary content, not just user/system messages.
+    """
+    block = {"type": "tool-result", "toolCallId": "c1"}
+    cases = [
+        (
+            "assistant",
+            _v4_row(
+                "assistant/message",
+                0,
+                {"message": {"role": "assistant", "content": [block]}},
+                surfaceOp="append",
+            ),
+        ),
+        (
+            "developer",
+            _v4_row(
+                "developer/message",
+                0,
+                {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "d",
+                        "role": "developer",
+                        "source": {"kind": "runtime"},
+                        "content": [block],
+                    },
+                },
+                surfaceOp="append",
+            ),
+        ),
+        (
+            "team",
+            _v4_row(
+                "team/message/queued",
+                0,
+                {"message": {"role": "assistant", "content": [block]}},
+            ),
+        ),
+        (
+            "title",
+            _v4_row(
+                "session/title-llm-request",
+                0,
+                {"messages": [{"role": "assistant", "content": [block]}]},
+            ),
+        ),
+        (
+            "ptc",
+            _v4_row("tool/ptc-dispatch", 0, {"content": [block]}),
+        ),
+        (
+            "compaction",
+            _v4_row(
+                "compaction/summary",
+                0,
+                {"compactionId": "k", "summary": [block]},
+            ),
+        ),
+    ]
+    for name, row in cases:
+        file_path = tmp_path / f"wrapper_{name}.jsonl"
+        _write_v4_file(file_path, name, [row])
+        with pytest.raises(SessionFormatError):
+            Session.load(file_path)
+
+
+def test_session_create_seed_refuses_invalid_event_data() -> None:
+    """Verifies constructor seeds run the same data validation as append.
+
+    A system/message with a user role and a tool/result carrying error
+    metadata without ``message.isError`` are refused at the seed boundary.
+    """
+    bad_system = SessionEvent(
+        id="s:0",
+        session_id="s",
+        type="system/message",
+        timestamp=1000.0,
+        payload={"message": {"role": "user", "content": "hi"}},
+        seq=0,
+        surface_op="append",
+    )
+    with pytest.raises(ValueError, match="system/message role must be system"):
+        Session.create("seedtest", seed=[bad_system])
+    bad_tool = SessionEvent(
+        id="s:0",
+        session_id="s",
+        type="tool/result",
+        timestamp=1000.0,
+        payload={"error": {"name": "E"}, "message": {"isError": False}},
+        seq=0,
+        surface_op="append",
+    )
+    with pytest.raises(ValueError, match="error requires message.isError"):
+        Session.create("seedtest2", seed=[bad_tool])
+
+
+def test_session_append_refuses_admission_failures(tmp_path: Path) -> None:
+    """Verifies append enforces the admission contract: an event that
+    could not be reloaded must not be appended in the first place.
+    """
+    session = Session(session_id="append-admission", storage_path=tmp_path / "a.jsonl")
+    with pytest.raises(ValueError, match="fails v4 admission"):
+        session.append(
+            "developer/message",
+            {"message": {"role": "developer", "content": []}},
+            surface_op="append",
+        )
+    with pytest.raises(ValueError, match="fails v4 admission"):
+        session.append(
+            "tool/result",
+            {
+                "call_id": "c1",
+                "name": "t",
+                "content": "ok",
+                "message": {
+                    "role": "tool",
+                    "toolCallId": "c1",
+                    "content": [{"type": "text", "text": "ok"}],
+                },
+            },
+            surface_op="append",
+        )
+    with pytest.raises(ValueError, match="fails v4 admission"):
+        session.append(
+            "user/message",
+            {
+                "role": "user",
+                "id": "m",
+                "content": [{"type": "tool-result", "toolCallId": "c1"}],
+            },
+            surface_op="append",
+        )
 
 
 def test_session_create_snapshots_seed_while_from_restore_adopts() -> None:

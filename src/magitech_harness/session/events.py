@@ -73,7 +73,7 @@ OWNER_EVENT_TYPES: dict[str, tuple[str, ...]] = {
     "plan/plan-mode": ("plan/mode",),
     "sandbox/sandbox-policy": ("sandbox/mode",),
     "schedule/schedule": ("schedule/change",),
-    "session/session-log-deepseek": ("session-log-deepseek/delivery-accepted",),
+    "session/session-log": ("session-log-deepseek/delivery-accepted",),
     "session/session-title": ("session/title", "session/title-llm-request"),
     "subagent/subagent": ("subagent/catalog", "subagent/descriptor"),
     "subagent/tool-subagent": ("subagent/model-selection-policy",),
@@ -91,7 +91,7 @@ OWNER_EVENT_TYPES: dict[str, tuple[str, ...]] = {
         "tool-workflow/run-start",
     ),
     "core/tool-executor-ptc": ("tool/ptc-dispatch", "tool/ptc-dispatch-start"),
-    "web/web-search-deepseek": ("web/deepseek-search-llm-request",),
+    "web/web-search": ("web/deepseek-search-llm-request",),
     "session/working-directory": ("working-directory/change",),
     "deliverables/workspace-changes": ("workspace/changes",),
 }

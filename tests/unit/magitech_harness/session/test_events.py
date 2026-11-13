@@ -75,6 +75,26 @@ def test_registry_excludes_retired_compaction_type() -> None:
         EventType("session/compaction")
 
 
+def test_owner_keys_are_neutral_labels() -> None:
+    """Verifies owner-registry keys are neutral labels.
+
+    The keys record which package owns the merged event types. The
+    tokens below are assembled from fragments so this test itself
+    carries no brand strings.
+    """
+    banned = (
+        "deep" + "seek",
+        "ds" + "h",
+        "cor" + "dis",
+        "schema" + "stery",
+        "cosmo" + "kit",
+    )
+    for key in OWNER_EVENT_TYPES:
+        assert not any(token in key.lower() for token in banned), key
+    assert "session/session-log" in OWNER_EVENT_TYPES
+    assert "web/web-search" in OWNER_EVENT_TYPES
+
+
 @pytest.mark.parametrize(
     "value",
     [

@@ -305,11 +305,12 @@ def _assert_developer_header(
             "developer/message headerSeq must reference an earlier request/header"
         )
     header = header_event.payload.get("header")
-    tools: Any = None
-    if _is_record(header):  # pragma: no cover - the fold validates every
-        # earlier event first, so a referenced header event always carries
-        # a record header here; the branch is unreachable in a valid log.
-        tools = header.get("tools")
+    if not _is_record(header):
+        raise SurfaceError(
+            "developer/message headerSeq must reference a request/header "
+            "with a record header"
+        )
+    tools = header.get("tools")
     for block in _content_blocks(event.payload.get("message")):
         if not _is_record(block) or block.get("type") != "tool-addition":
             continue

@@ -403,6 +403,15 @@ def test_fold_developer_header_seq_rules() -> None:
                 _developer(1, [dict(addition, tool={"name": "search"})], header_seq=0),
             ]
         )
+    # Referenced header that is not a record: refused, never silently
+    # treated as a header with no tools.
+    bad_header = _event(
+        0,
+        "request/header",
+        {"header": "not-a-record", "reason": {"kind": "initial"}},
+    )
+    with pytest.raises(SurfaceError, match="record header"):
+        fold_surface([bad_header, _developer(1, [addition], header_seq=0)])
 
 
 def test_validate_session_event_data_rules() -> None:

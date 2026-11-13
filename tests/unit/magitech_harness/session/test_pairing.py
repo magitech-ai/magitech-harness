@@ -68,6 +68,32 @@ def test_pairing_multiple_tool_calls() -> None:
     assert is_tool_pairing_balanced(events, 2) is True
 
 
+def test_pairing_message_shaped_tool_result() -> None:
+    """Verifies pairing matches a tool-role message result to its call."""
+    events = [
+        _event(
+            EventType.ASSISTANT_MESSAGE,
+            {
+                "text": None,
+                "tool_calls": [{"call_id": "c1", "name": "search", "arguments": {}}],
+            },
+        ),
+        _event(
+            EventType.TOOL_RESULT,
+            {
+                "message": {
+                    "toolCallId": "c1",
+                    "content": [{"type": "text", "text": "hit"}],
+                }
+            },
+        ),
+    ]
+    # At index 0 (assistant called tool, result not yet included): unbalanced.
+    assert is_tool_pairing_balanced(events, 0) is False
+    # At index 1 (message-shaped tool result included): balanced.
+    assert is_tool_pairing_balanced(events, 1) is True
+
+
 def test_pairing_bounds() -> None:
     events = [_event(EventType.USER_MESSAGE, {"text": "hi"})]
     # Negative index

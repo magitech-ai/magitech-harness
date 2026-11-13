@@ -32,6 +32,7 @@ from magitech_harness.session.format import (
     SessionFormatUnsupportedError,
     SessionFormatUnsupportedMigrationError,
     SessionPersistenceCorruptionError,
+    assert_v4_row_admission,
     create_session_format_catalog_with_children,
     decode_envelope_row,
     encode_envelope_event,
@@ -108,6 +109,7 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
             latest_compaction_idx = i
 
     messages: list[dict[str, Any]] = []
+    tool_names: dict[str, str] = {}
 
     if latest_compaction is not None:
         summary = latest_compaction.payload.get("summary", "")
@@ -130,7 +132,12 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
         slice_events = events
 
     for ev in slice_events:
-        if ev.type == EventType.USER_MESSAGE:
+        if ev.type == EventType.TOOL_CALL:
+            call_id = ev.payload.get("call_id")
+            name = ev.payload.get("name")
+            if isinstance(call_id, str) and isinstance(name, str):
+                tool_names[call_id] = name
+        elif ev.type == EventType.USER_MESSAGE:
             messages.append(
                 {
                     "role": "user",
@@ -159,16 +166,48 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
                 ]
             messages.append(msg)
         elif ev.type == EventType.TOOL_RESULT:
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": ev.payload.get("call_id"),
-                    "name": ev.payload.get("name"),
-                    "content": json.dumps(ev.payload.get("content"))
-                    if not isinstance(ev.payload.get("content"), str)
-                    else ev.payload.get("content"),
-                }
-            )
+            message = ev.payload.get("message")
+            if isinstance(message, dict):
+                # Admission-shaped result: a tool-role message whose
+                # content blocks carry the result text. The tool name is
+                # not on the result; it is recovered from the matching
+                # tool/call event seen earlier in the log.
+                blocks = message.get("content")
+                if isinstance(blocks, list):
+                    parts = []
+                    for block in blocks:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            parts.append(str(block.get("text", "")))
+                        elif isinstance(block, dict):
+                            parts.append(json.dumps(block))
+                    content = "".join(parts)
+                elif isinstance(blocks, str):
+                    content = blocks
+                else:
+                    content = json.dumps(blocks)
+                call_id = message.get("toolCallId")
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "name": tool_names.get(call_id)
+                        if isinstance(call_id, str)
+                        else None,
+                        "content": content,
+                    }
+                )
+            else:
+                # Legacy flat shape, kept readable for older logs.
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": ev.payload.get("call_id"),
+                        "name": ev.payload.get("name"),
+                        "content": json.dumps(ev.payload.get("content"))
+                        if not isinstance(ev.payload.get("content"), str)
+                        else ev.payload.get("content"),
+                    }
+                )
 
     return _normalize_adjacent_messages(messages)
 
@@ -389,6 +428,18 @@ class Session:
                         f"seed event at index {index} has seq {candidate.seq} "
                         f"(expected {index}); seed must be contiguous from 0"
                     )
+                # A seed is a persistence/replay boundary: the same
+                # event-data validation `append` enforces applies here,
+                # so a bad seed cannot construct a live log that no
+                # persistence backend could store.
+                try:
+                    validate_session_event_data(
+                        candidate, f"seed {candidate.type} at index {index}"
+                    )
+                except SurfaceError as error:
+                    raise ValueError(
+                        f"invalid seed event at index {index}: {error}"
+                    ) from error
                 try:
                     self._surface_manager.validate_next(candidate)
                 except SurfaceError as error:
@@ -662,6 +713,33 @@ class Session:
         validate_session_event_data(
             candidate, f'session event "{type_value}" at seq {candidate.seq}'
         )
+        # The append contract is the admission contract: an event that
+        # could not be reloaded must not be appended. The row is the
+        # exact physical shape the log persists.
+        row: dict[str, Any] = {
+            "type": candidate.type,
+            "seq": candidate.seq,
+            "time": int(candidate.timestamp * 1000),
+            "data": data_snapshot,
+            **({"ignorable": True} if candidate.ignorable else {}),
+            **(
+                {"surfaceOp": candidate.surface_op}
+                if candidate.surface_op is not None
+                else {}
+            ),
+            **(
+                {"sourceEventSeqs": candidate.source_event_seqs}
+                if candidate.source_event_seqs is not None
+                else {}
+            ),
+        }
+        try:
+            assert_v4_row_admission(row, KNOWN_SESSION_EVENT_TYPES)
+        except (SessionFormatError, SessionFormatUnsupportedMigrationError) as error:
+            raise ValueError(
+                f'session event "{type_value}" at seq {candidate.seq} '
+                f"fails v4 admission: {error}"
+            ) from error
         self._commit(candidate, entry)
         return candidate
 
@@ -884,6 +962,11 @@ def _to_session_event(
                 f"{json.dumps(event_type)}; this build cannot load it "
                 f"(raw log: {storage_path})"
             )
+    # Native v4 row admission runs on every loaded row, current-version
+    # and migrated alike — the same admission the v4 decoder applies.
+    # It runs after the retired-shape and vocabulary checks above so
+    # their refusal errors are preserved.
+    assert_v4_row_admission(event, KNOWN_SESSION_EVENT_TYPES)
     seq = require_count(event.get("seq"), f"session event {event_type} seq")
     data = event.get("data")
     return SessionEvent(
