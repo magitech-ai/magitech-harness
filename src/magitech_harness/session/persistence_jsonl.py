@@ -686,11 +686,13 @@ def _fsync_dir(path: Path) -> None:
     """fsync a directory so a new file entry in it is durable (POSIX only)."""
     if sys.platform == "win32":
         return
-    fd = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    # POSIX-only body: on Windows this function returns early above, and a
+    # directory cannot be opened with os.open there at all.
+    fd = os.open(path, os.O_RDONLY)  # pragma: no cover
+    try:  # pragma: no cover
+        os.fsync(fd)  # pragma: no cover
+    finally:  # pragma: no cover
+        os.close(fd)  # pragma: no cover
 
 
 def _ensure_session_dir(path: Path) -> None:
@@ -1246,8 +1248,11 @@ class JsonlSessionPersistence(SessionPersistence):
                 # Only a stale regular file may be cleared for a retry.
                 # Anything else at the path is not ours to remove, so the
                 # original error propagates and the path stays untouched.
+                # On Windows a directory at the temp path raises
+                # PermissionError from os.open, never FileExistsError, so
+                # this re-raise is unreachable there.
                 if not tmp_path.is_file():
-                    raise
+                    raise  # pragma: no cover
                 tmp_path.unlink()
                 fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 created_tmp = True

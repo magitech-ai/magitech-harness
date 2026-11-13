@@ -350,6 +350,16 @@ def test_lease_posix_lock_error_other_than_contention_propagates(
         _acquire_posix(_session_path(tmp_path) / "session.lock", "s-1")
 
 
+def test_lease_posix_contention_is_owned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A POSIX lock conflict reports the session as already owned."""
+    fake = _FakeFcntl(OSError(errno.EAGAIN, "locked"))
+    _patch_posix(monkeypatch, fake)
+    with pytest.raises(SessionAlreadyOwnedError):
+        _acquire_posix(_session_path(tmp_path) / "session.lock", "s-1")
+
+
 def test_lease_posix_refuses_windows_platform(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -428,6 +438,18 @@ def test_lease_windows_other_lock_error_propagates(tmp_path: Path, monkeypatch) 
     _patch_windows(monkeypatch, fake)
     with pytest.raises(OSError, match="locking boom"):
         KernelLease.acquire(_session_path(tmp_path), "s-1")
+
+
+def test_lease_posix_acquire_and_release(tmp_path: Path, monkeypatch) -> None:
+    """The POSIX path locks non-blocking and unlocks on release."""
+    fake = _FakeFcntl()
+    _patch_posix(monkeypatch, fake)
+    session_path = _session_path(tmp_path)
+    lease = KernelLease.acquire(session_path, "s-1")
+    assert fake.calls == [(lease._fd, _FakeFcntl.LOCK_EX | _FakeFcntl.LOCK_NB)]
+    lease.release()
+    assert fake.calls[-1][1] == _FakeFcntl.LOCK_UN
+    assert (session_path / "session.lock").is_file()
 
 
 # ---------------------------------------------------------------------------
