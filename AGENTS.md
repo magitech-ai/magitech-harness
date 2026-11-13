@@ -3,13 +3,6 @@
 ## 1. Core Architecture & Invariants
 
 - **Zero Ancestral Mentions Rule**: Absolute prohibition against naming ancestral or upstream projects/brands anywhere in code, tests, docstrings, commits, or documentation.
-  - **Frozen wire-value carve-out (approved 2026-11-13):** exactly these five frozen wire values are allowed, ONLY as string literals matched against on-disk v0–v3 session-log data — never as identifiers, names, or documentation prose:
-    - `session-log-deepseek/delivery-accepted`
-    - `web/deepseek-search-llm-request`
-    - `@deepseek-ai/dsh-system-prompt`
-    - `dsh-compaction-basic`
-    - `dsh-session-title-llm`
-    Renaming any of them would break byte-equivalent migration of v0–v3 logs. Any additional value of this kind must be flagged by the scrub check and approved explicitly before landing.
 - **Repository Role & Separation of Concerns**:
   - `magitech-harness` is the host runtime substrate and agent turn engine powered by `anima`.
   - **Everything is a Component**: Contains **zero built-in domain tools** and **zero built-in model providers**.
