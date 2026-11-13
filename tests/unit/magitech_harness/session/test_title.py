@@ -486,17 +486,11 @@ def test_current_route() -> None:
     _, service = _service()
     session = service.create("s1")
     assert current_route(session) is None
+    # A header record without a config mapping carries no route.
     service.log_event(
         session,
         EventType.REQUEST_HEADER,
-        {"header": {"config": {}}, "reason": "initial"},
-    )
-    assert current_route(session) is None
-    # A header record without a config mapping carries no route either.
-    service.log_event(
-        session,
-        EventType.REQUEST_HEADER,
-        {"header": {}, "reason": "initial"},
+        {"header": {}, "reason": {"kind": "start"}},
     )
     assert current_route(session) is None
     _header(session, service, provider="prov", model="mod")
@@ -987,7 +981,7 @@ async def test_header_without_route_keeps_pending() -> None:
     service.log_event(
         session,
         EventType.REQUEST_HEADER,
-        {"header": {"config": {}}, "reason": "initial"},
+        {"header": {}, "reason": {"kind": "start"}},
     )
     await _pump()
     assert provider.requests == []
@@ -1530,3 +1524,19 @@ async def test_llm_stream_listener_ignores_after_dispose() -> None:
         chunks.append(chunk)
     assert chunks
     assert service.title_service.get(session) is None
+
+
+def test_route_from_header_variants() -> None:
+    """Verifies route extraction from header records, branch by branch."""
+    from magitech_harness.session.title import _route_from_header
+
+    assert _route_from_header({"config": {"provider": "p", "model": "m"}}) == {
+        "provider": "p",
+        "model": "m",
+    }
+    assert _route_from_header({"config": {}}) is None
+    assert _route_from_header({"config": {"provider": "p", "model": ""}}) is None
+    assert _route_from_header({"config": {"provider": "", "model": "m"}}) is None
+    assert _route_from_header({"config": "not-a-record"}) is None
+    assert _route_from_header("not-a-record") is None
+    assert _route_from_header({}) is None

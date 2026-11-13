@@ -15,6 +15,7 @@ republished through the backend.
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import json
 import logging
@@ -57,170 +58,38 @@ from magitech_harness.session.repair import (
     interrupted_turn_closers,
     open_turn_closers,
 )
+from magitech_harness.session.request_header import fold_request_header
 from magitech_harness.session.surface import (
     MessageProjection,
     SurfaceError,
     SurfaceManager,
+    derive_event_message,
     fold_surface,
     validate_session_event_data,
 )
+from magitech_harness.session.tool_history import ToolHistoryProjection
 
 logger = logging.getLogger("harness.session")
 
-#: The retired fake-compaction type. ``derive_messages`` still folds it
-#: until the message-projection rewrite (P2-6) deletes that read path;
-#: it is not a known event type and can no longer be appended or loaded.
-_RETIRED_COMPACTION_TYPE = "session/compaction"
 
-
-def _normalize_adjacent_messages(
-    messages: list[dict[str, Any]],
+def derive_messages(
+    events: list[SessionEvent],
+    projections: list[MessageProjection] | None = None,
 ) -> list[dict[str, Any]]:
-    """Merges adjacent messages with identical roles to satisfy strict model provider APIs."""
-    if not messages:
-        return []
+    """Project current model-visible messages from a session log.
 
-    normalized: list[dict[str, Any]] = []
-    for msg in messages:
-        if not normalized:
-            normalized.append(dict(msg))
-            continue
-
-        prev = normalized[-1]
-        if (
-            prev.get("role") == msg.get("role")
-            and msg.get("role") in ("user", "system", "assistant")
-            and "tool_calls" not in prev
-            and "tool_calls" not in msg
-        ):
-            c1 = prev.get("content")
-            c2 = msg.get("content")
-            s1 = str(c1) if c1 is not None else ""
-            s2 = str(c2) if c2 is not None else ""
-            if s1 and s2:
-                prev["content"] = f"{s1}\n\n{s2}"
-            else:
-                prev["content"] = s1 or s2
-        else:
-            normalized.append(dict(msg))
-
-    return normalized
-
-
-def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
-    """Deterministically reconstruct model-visible conversation history from session log.
-
-    Adheres to: Model-visible ⟺ Logged.
+    Pure function over the surface fold: one derived message per
+    surface node that projects non-None, in surface order. No merging,
+    no synthesis, no slicing. The returned messages are detached
+    copies of the stored messages; the caller may mutate them freely.
     """
-    latest_compaction: SessionEvent | None = None
-    latest_compaction_idx = -1
-    for i, ev in enumerate(events):
-        if ev.type == _RETIRED_COMPACTION_TYPE:
-            latest_compaction = ev
-            latest_compaction_idx = i
-
+    fold = fold_surface(events, projections)
     messages: list[dict[str, Any]] = []
-    tool_names: dict[str, str] = {}
-
-    if latest_compaction is not None:
-        summary = latest_compaction.payload.get("summary", "")
-        messages.append(
-            {
-                "role": "user",
-                "content": f"[Conversation summary up to checkpoint]:\n{summary}",
-            }
-        )
-        compacted_count = latest_compaction.payload.get("compacted_count")
-        if compacted_count is not None:
-            slice_events = [
-                ev
-                for ev in events[compacted_count:]
-                if ev.type != _RETIRED_COMPACTION_TYPE
-            ]
-        else:
-            slice_events = events[latest_compaction_idx + 1 :]
-    else:
-        slice_events = events
-
-    for ev in slice_events:
-        if ev.type == EventType.TOOL_CALL:
-            call_id = ev.payload.get("call_id")
-            name = ev.payload.get("name")
-            if isinstance(call_id, str) and isinstance(name, str):
-                tool_names[call_id] = name
-        elif ev.type == EventType.USER_MESSAGE:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": ev.payload.get("text", ""),
-                }
-            )
-        elif ev.type == EventType.ASSISTANT_MESSAGE:
-            msg: dict[str, Any] = {
-                "role": "assistant",
-                "content": ev.payload.get("text", "") or None,
-            }
-            tool_calls = ev.payload.get("tool_calls")
-            if tool_calls:
-                msg["tool_calls"] = [
-                    {
-                        "id": tc["call_id"],
-                        "type": "function",
-                        "function": {
-                            "name": tc["name"],
-                            "arguments": json.dumps(tc["arguments"])
-                            if isinstance(tc["arguments"], dict)
-                            else str(tc["arguments"]),
-                        },
-                    }
-                    for tc in tool_calls
-                ]
-            messages.append(msg)
-        elif ev.type == EventType.TOOL_RESULT:
-            message = ev.payload.get("message")
-            if isinstance(message, dict):
-                # Admission-shaped result: a tool-role message whose
-                # content blocks carry the result text. The tool name is
-                # not on the result; it is recovered from the matching
-                # tool/call event seen earlier in the log.
-                blocks = message.get("content")
-                if isinstance(blocks, list):
-                    parts = []
-                    for block in blocks:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            parts.append(str(block.get("text", "")))
-                        elif isinstance(block, dict):
-                            parts.append(json.dumps(block))
-                    content = "".join(parts)
-                elif isinstance(blocks, str):
-                    content = blocks
-                else:
-                    content = json.dumps(blocks)
-                call_id = message.get("toolCallId")
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "name": tool_names.get(call_id)
-                        if isinstance(call_id, str)
-                        else None,
-                        "content": content,
-                    }
-                )
-            else:
-                # Legacy flat shape, kept readable for older logs.
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": ev.payload.get("call_id"),
-                        "name": ev.payload.get("name"),
-                        "content": json.dumps(ev.payload.get("content"))
-                        if not isinstance(ev.payload.get("content"), str)
-                        else ev.payload.get("content"),
-                    }
-                )
-
-    return _normalize_adjacent_messages(messages)
+    for seq in fold.nodes:
+        message = derive_event_message(events[seq], fold.projected_messages)
+        if message is not None:
+            messages.append(copy.deepcopy(message))
+    return messages
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +200,21 @@ class Session:
         self.session_id = session_id
         self.events: list[SessionEvent] = []
         self._surface_manager = SurfaceManager(self.events, projections)
+        # Incremental request-fold watermarks: each fold consumes only
+        # events appended since its last read, starting from 0 so a
+        # restored log (including inherited events) folds exactly like
+        # the offline fold on first read.
+        self._header_fold: dict[str, Any] | None = None
+        self._header_fold_seq: int = 0
+        self._context_fold: dict[str, Any] | None = None
+        self._context_fold_seq: int = 0
+        self._tool_history_projection = ToolHistoryProjection()
+        self._tool_history_seq: int = 0
+        # Cached derived messages, invalidated by a surface
+        # content-generation bump (a replace or projection change).
+        self._derived: list[dict[str, Any]] = []
+        self._derived_nodes: int = 0
+        self._derived_generation: int = 0
         self._appending = False
         self._detached = False
         self._attachment: _StoreAttachment | None = None
@@ -640,7 +524,9 @@ class Session:
             source_event_seqs=metadata_snapshot.get("sourceEventSeqs"),
         )
         validate_session_event_data(
-            candidate, f'session event "{type_value}" at seq {candidate.seq}'
+            candidate,
+            f'session event "{type_value}" at seq {candidate.seq}',
+            strict=True,
         )
         # The append contract is the admission contract: an event that
         # could not be reloaded must not be appended. The row is the
@@ -723,8 +609,66 @@ class Session:
                     entry.detach()
 
     def derive_messages(self) -> list[dict[str, Any]]:
-        """Project current model-visible messages from event log."""
-        return derive_messages(self.events)
+        """Project current model-visible messages from the event log.
+
+        Cached on the live session: pure tail growth costs O(new
+        nodes); a content-generation bump rebuilds from scratch. The
+        returned messages are read-only cached copies: callers must
+        not mutate them.
+        """
+        nodes = self._surface_manager.nodes
+        generation = self._surface_manager.content_generation
+        if generation != self._derived_generation:
+            self._derived = []
+            self._derived_nodes = 0
+            self._derived_generation = generation
+        for seq in nodes[self._derived_nodes :]:
+            message = self._surface_manager.derive_event_message(self.events[seq])
+            if message is not None:
+                self._derived.append(copy.deepcopy(message))
+        self._derived_nodes = len(nodes)
+        return list(self._derived)
+
+    def request_header(self) -> dict[str, Any] | None:
+        """The latest folded request header, or ``None`` before any header.
+
+        Incrementally maintained: each header event is folded once.
+        The returned header is a detached copy.
+        """
+        self._header_fold = fold_request_header(
+            self.events[self._header_fold_seq :], from_=self._header_fold
+        )
+        self._header_fold_seq = len(self.events)
+        return (
+            copy.deepcopy(self._header_fold) if self._header_fold is not None else None
+        )
+
+    def request_context(self) -> dict[str, Any] | None:
+        """The latest logged request context, or ``None`` before any context.
+
+        Incrementally maintained; the returned context is a detached copy.
+        """
+        for event in self.events[self._context_fold_seq :]:
+            if event.type == "request/context":
+                self._context_fold = copy.deepcopy(event.payload)
+        self._context_fold_seq = len(self.events)
+        return (
+            copy.deepcopy(self._context_fold)
+            if self._context_fold is not None
+            else None
+        )
+
+    def tool_history(self) -> dict[str, Any]:
+        """The current tool-history snapshot for request projection."""
+        for event in self.events[self._tool_history_seq :]:
+            self._tool_history_projection.apply(event)
+        self._tool_history_seq = len(self.events)
+        return self._tool_history_projection.snapshot()
+
+    @property
+    def surface_content_generation(self) -> int:
+        """The surface fold's content generation (append/replace signal)."""
+        return self._surface_manager.content_generation
 
     def surface_nodes(self) -> list[int]:
         """Current surface event sequences in model-visible order."""

@@ -19,6 +19,8 @@ from magitech_harness.session.events import (
     SURFACE_EVENT_TYPES,
     SessionEvent,
 )
+from magitech_harness.session.request_header import REQUEST_HEADER_REASONS
+from magitech_harness.session.tool_history import tool_name
 
 
 class SurfaceError(ValueError):
@@ -93,13 +95,22 @@ def _content_blocks(message: Any) -> list[Any]:
     return []
 
 
-def validate_session_event_data(event: SessionEvent, subject: str) -> None:
+def validate_session_event_data(
+    event: SessionEvent, subject: str, *, strict: bool = False
+) -> None:
     """Reject noncanonical payload fields for one event.
 
     Covers request-header empty-field and retired ``header.system``
     rules, developer-role/tool-change rules, the developer ``source.kind
     === 'plugin'`` refusal, and tool-error consistency. Does not
     validate complete event payloads or embedded provider streams.
+
+    ``strict`` gates the checks that only a fresh write must satisfy:
+    an assistant message's model-source attribution (kind, provider,
+    model). Restored logs predate that attribution on assistant
+    sources, so the seed/restore path leaves it unenforced; the load
+    layer enforces it for file rows, and :meth:`Session.append`
+    always validates strictly.
     """
     data = event.payload
     if event.type in SURFACE_EVENT_TYPES and _is_record(data):
@@ -179,6 +190,135 @@ def validate_session_event_data(event: SessionEvent, subject: str) -> None:
         defaults = header.get("adapterDefaults")
         if _is_record(defaults) and len(defaults) == 0:
             raise SurfaceError(f"{subject} must omit empty adapterDefaults")
+        # The migration's own husk header (empty header, legacy start
+        # reason) carries no config to validate; it is grandfathered
+        # here exactly as in the load layer.
+        if header == {} and data.get("reason") == {"kind": "start"}:
+            return
+        config = header.get("config")
+        if (
+            not _is_record(config)
+            or not isinstance(config.get("provider"), str)
+            or not config["provider"]
+            or not isinstance(config.get("model"), str)
+            or not config["model"]
+        ):
+            raise SurfaceError(
+                f"{subject} header config requires a nonempty provider and model"
+            )
+        reasoning_effort = config.get("reasoningEffort")
+        if reasoning_effort is not None and (
+            not isinstance(reasoning_effort, str) or not reasoning_effort
+        ):
+            raise SurfaceError(
+                f"{subject} header config reasoningEffort must be a nonempty string"
+            )
+        if (
+            not isinstance(data.get("reason"), str)
+            or data.get("reason") not in REQUEST_HEADER_REASONS
+        ):
+            raise SurfaceError(
+                f"{subject} reason must be one of {sorted(REQUEST_HEADER_REASONS)}"
+            )
+        if "startsSeries" in data and data["startsSeries"] is not True:
+            raise SurfaceError(f"{subject} startsSeries must be true when present")
+        if defaults is not None:
+            if not _is_record(defaults):
+                raise SurfaceError(f"{subject} adapterDefaults must be an object")
+            for key in defaults:
+                if key not in ("reasoningEffort", "maxTokens"):
+                    raise SurfaceError(
+                        f"{subject} adapterDefaults carries unknown key {key!r}"
+                    )
+            for marker in ("reasoningEffort", "maxTokens"):
+                if marker in defaults and defaults[marker] is not True:
+                    raise SurfaceError(
+                        f"{subject} adapterDefaults {marker} must be true when present"
+                    )
+                if defaults.get(marker) is True and marker not in config:
+                    raise SurfaceError(
+                        f"{subject} adapterDefaults {marker} requires config {marker}"
+                    )
+        tools = header.get("tools")
+        if tools is not None:
+            if not isinstance(tools, list):
+                raise SurfaceError(f"{subject} header tools must be an array")
+            for tool in tools:
+                if not _is_record(tool):
+                    raise SurfaceError(f"{subject} header tools must be objects")
+                if "deferLoading" in tool and tool["deferLoading"] is not True:
+                    raise SurfaceError(
+                        f"{subject} header tool deferLoading must be true when present"
+                    )
+    if event.type == "request/context":
+        if (
+            not isinstance(data.get("provider"), str)
+            or not data["provider"]
+            or not isinstance(data.get("model"), str)
+            or not data["model"]
+        ):
+            raise SurfaceError(
+                f"{subject} request/context requires a nonempty provider and model"
+            )
+        context_window = data.get("contextWindow")
+        if context_window is not None and (
+            isinstance(context_window, bool)
+            or not isinstance(context_window, int)
+            or context_window <= 0
+            or context_window > 2**53 - 1
+        ):
+            raise SurfaceError(
+                f"{subject} request/context contextWindow must be a positive "
+                "safe integer when present"
+            )
+        if "systemPromptUpdate" in data and data["systemPromptUpdate"] != "in-history":
+            raise SurfaceError(
+                f"{subject} request/context systemPromptUpdate must be "
+                '"in-history" when present'
+            )
+    if event.type in ("assistant/message", "assistant/attempt"):
+        for field in ("turn", "step"):
+            if not _is_event_seq(data.get(field)):
+                raise SurfaceError(
+                    f"{subject} {field} must be a non-negative safe integer"
+                )
+        if not isinstance(data.get("stream"), list):
+            raise SurfaceError(f"{subject} stream must be an array")
+        if event.type == "assistant/message":
+            if "tool_calls" in data:
+                raise SurfaceError(
+                    f"{subject} assistant/message must not carry tool_calls"
+                )
+            if "interrupted" in data and data["interrupted"] is not True:
+                raise SurfaceError(f"{subject} interrupted must be true when present")
+            message = data.get("message")
+            source = message.get("source") if _is_record(message) else None
+            if (
+                not _is_record(message)
+                or not isinstance(message.get("id"), str)
+                or not message["id"]
+                or message.get("role") != "assistant"
+                or not isinstance(message.get("content"), list)
+            ):
+                raise SurfaceError(
+                    f"{subject} assistant/message requires an identified model message"
+                )
+            # Source attribution is a fresh-write requirement only:
+            # restored logs predate it (the golden fixtures and the
+            # migration both carry sourceless or unattributed assistant
+            # messages), and file loads enforce it in the load layer.
+            if strict and (
+                not _is_record(source)
+                or source.get("kind") != "model"
+                or not isinstance(source.get("provider"), str)
+                or not source["provider"]
+                or not isinstance(source.get("model"), str)
+                or not source["model"]
+            ):
+                raise SurfaceError(
+                    f"{subject} assistant/message requires a model source "
+                    "with provider and model"
+                )
     elif event.type == "tool/result":
         if not _is_record(data):
             # Payload is always a dict: pydantic enforces it at
@@ -286,6 +426,30 @@ def _assert_source_event_references(
         )
 
 
+def _complete_tool_definition(schema: Any) -> bool:
+    """Whether one envelope tool schema carries a complete definition.
+
+    Header tools are envelope schemas; the definition lives on the
+    nested function object, not at the top level.
+    """
+    function = schema.get("function") if isinstance(schema, dict) else None
+    if not isinstance(function, dict):
+        return False
+    return isinstance(function.get("description"), str) and isinstance(
+        function.get("parameters"), dict
+    )
+
+
+def _envelope_tool_name(tool: Any) -> str | None:
+    """The name of one envelope tool schema, or ``None`` when unnamed."""
+    if not isinstance(tool, dict):
+        return None
+    try:
+        return tool_name(tool)
+    except ValueError:
+        return None
+
+
 def _assert_developer_header(
     event: SessionEvent, events: list[SessionEvent], base_seq: int
 ) -> None:
@@ -315,7 +479,11 @@ def _assert_developer_header(
         if not _is_record(block) or block.get("type") != "tool-addition":
             continue
         definitions = (
-            [tool for tool in tools if tool.get("name") == block.get("toolName")]
+            [
+                tool
+                for tool in tools
+                if _envelope_tool_name(tool) == block.get("toolName")
+            ]
             if isinstance(tools, list)
             else []
         )
@@ -325,18 +493,21 @@ def _assert_developer_header(
                 f"name exactly one tool in headerSeq {header_seq}"
             )
         definition = definitions[0]
-        if not isinstance(definition.get("description"), str) or not _is_record(
-            definition.get("parameters")
-        ):
+        if not _complete_tool_definition(definition):
             raise SurfaceError(
                 f'developer/message tool-addition "{block.get("toolName")}" '
                 f"requires a complete tool definition in headerSeq {header_seq}"
             )
-        if "deferLoading" in definition and definition["deferLoading"] is not True:
-            raise SurfaceError(
-                "developer/message referenced tool deferLoading must be true "
-                "when present"
-            )
+        for holder in (definition, definition.get("function")):
+            if (
+                isinstance(holder, dict)
+                and "deferLoading" in holder
+                and holder["deferLoading"] is not True
+            ):
+                raise SurfaceError(
+                    "developer/message referenced tool deferLoading must be true "
+                    "when present"
+                )
 
 
 def _deep_equal_json(left: Any, right: Any) -> bool:

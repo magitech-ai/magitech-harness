@@ -90,10 +90,13 @@ from magitech_harness.session.format import (
     assert_v3_event_admission,
     assert_v3_header,
     assert_v3_structural_row,
+    assert_v4_assistant_settlement_data,
     assert_v4_developer_data,
     assert_v4_fork_result,
     assert_v4_header,
     assert_v4_message_sources,
+    assert_v4_request_context_data,
+    assert_v4_request_header_data,
     assert_v4_retired_syntax,
     assert_v4_row_admission,
     assert_v4_source_row_admission,
@@ -8726,3 +8729,432 @@ def test_migrate_v3_event_content_identity_branches() -> None:
 def test_lift_tool_result_non_user_message() -> None:
     row = _tool_result_row()
     assert lift_tool_result(row) is row
+
+
+# ---------------------------------------------------------------------------
+# P2-6 request reconstruction: load-layer admission
+# ---------------------------------------------------------------------------
+
+
+def _request_header_row(data: dict | None = None, **overrides: object) -> dict:
+    row: dict = {
+        "type": "request/header",
+        "seq": 0,
+        "time": 100,
+        "data": data
+        if data is not None
+        else {
+            "header": {"config": {"provider": "p", "model": "m"}},
+            "reason": "initial",
+        },
+    }
+    row.update(overrides)
+    return row
+
+
+def test_assert_v4_request_header_data_valid_rows_pass() -> None:
+    """Verifies well-formed request/header rows pass load admission."""
+    assert_v4_request_header_data(_request_header_row())
+    for reason in ("initial", "resume", "change", "series"):
+        assert_v4_request_header_data(
+            _request_header_row(
+                {
+                    "header": {"config": {"provider": "p", "model": "m"}},
+                    "reason": reason,
+                }
+            )
+        )
+    assert_v4_request_header_data(
+        _request_header_row(
+            {
+                "header": {
+                    "config": {
+                        "provider": "p",
+                        "model": "m",
+                        "reasoningEffort": "high",
+                        "maxTokens": 100,
+                    },
+                    "adapterDefaults": {
+                        "reasoningEffort": True,
+                        "maxTokens": True,
+                    },
+                    "tools": [
+                        {
+                            "type": "function",
+                            "deferLoading": True,
+                            "function": {"name": "a"},
+                        }
+                    ],
+                },
+                "reason": "initial",
+                "startsSeries": True,
+            }
+        )
+    )
+    # The migration's husk header is grandfathered.
+    assert_v4_request_header_data(
+        _request_header_row({"header": {}, "reason": {"kind": "start"}})
+    )
+    # Rows of other types and non-object rows are not this function's business.
+    assert_v4_request_header_data({"type": "turn/start", "seq": 0, "data": {}})
+    assert_v4_request_header_data("not-a-row")
+    assert_v4_request_header_data(
+        {"type": "request/header", "seq": 0, "data": "not-an-object"}
+    )
+    assert_v4_request_header_data(
+        _request_header_row({"header": "not-an-object", "reason": "initial"})
+    )
+
+
+def test_assert_v4_request_header_data_bad_rows_raise() -> None:
+    """Verifies malformed request/header rows are refused at load."""
+    bad: list[tuple[dict, str]] = [
+        (
+            _request_header_row({"header": {"config": {}}, "reason": "initial"}),
+            "requires a config with a nonempty provider and model",
+        ),
+        (
+            _request_header_row(
+                {"header": {"config": {"provider": "p"}}, "reason": "initial"}
+            ),
+            "requires a config with a nonempty provider and model",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m", "reasoningEffort": 3}
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "config reasoningEffort must be a nonempty string",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {"config": {"provider": "p", "model": "m"}},
+                    "reason": "bogus",
+                }
+            ),
+            "reason must be one of",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {"config": {"provider": "p", "model": "m"}},
+                    "reason": {"kind": "initial"},
+                }
+            ),
+            "reason must be one of",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {"config": {"provider": "p", "model": "m"}},
+                    "reason": "initial",
+                    "startsSeries": False,
+                }
+            ),
+            "startsSeries must be true",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m"},
+                        "adapterDefaults": "yes",
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "adapterDefaults must be an object",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m"},
+                        "adapterDefaults": {"unknown": True},
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "carries unknown key",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m"},
+                        "adapterDefaults": {"reasoningEffort": False},
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "must be true when present",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m"},
+                        "adapterDefaults": {"maxTokens": True},
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "requires config maxTokens",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {"config": {"provider": "p", "model": "m"}, "tools": {}},
+                    "reason": "initial",
+                }
+            ),
+            "header tools must be an array",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m"},
+                        "tools": ["not-an-object"],
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "header tools must be objects",
+        ),
+        (
+            _request_header_row(
+                {
+                    "header": {
+                        "config": {"provider": "p", "model": "m"},
+                        "tools": [{"type": "function", "deferLoading": False}],
+                    },
+                    "reason": "initial",
+                }
+            ),
+            "header tool deferLoading must be true",
+        ),
+    ]
+    for row, match in bad:
+        with pytest.raises(SessionFormatError, match=match):
+            assert_v4_request_header_data(row)
+
+
+def _request_context_row(data: dict | None = None) -> dict:
+    return {
+        "type": "request/context",
+        "seq": 0,
+        "time": 100,
+        "data": data if data is not None else {"provider": "p", "model": "m"},
+    }
+
+
+def test_assert_v4_request_context_data() -> None:
+    """Verifies request/context rows pass or fail load admission."""
+    assert_v4_request_context_data(_request_context_row())
+    assert_v4_request_context_data(
+        _request_context_row(
+            {
+                "provider": "p",
+                "model": "m",
+                "contextWindow": 4096,
+                "systemPromptUpdate": "in-history",
+            }
+        )
+    )
+    assert_v4_request_context_data({"type": "turn/start", "seq": 0, "data": {}})
+    assert_v4_request_context_data(
+        {"type": "request/context", "seq": 0, "data": "not-an-object"}
+    )
+    bad: list[tuple[dict, str]] = [
+        (_request_context_row({"provider": "", "model": "m"}), "nonempty provider"),
+        (_request_context_row({"provider": "p", "model": ""}), "nonempty provider"),
+        (
+            _request_context_row({"provider": "p", "model": "m", "contextWindow": 0}),
+            "contextWindow must be a positive safe integer",
+        ),
+        (
+            _request_context_row({"provider": "p", "model": "m", "contextWindow": 1.5}),
+            "contextWindow must be a positive safe integer",
+        ),
+        (
+            _request_context_row(
+                {"provider": "p", "model": "m", "systemPromptUpdate": "replace"}
+            ),
+            'systemPromptUpdate must be "in-history"',
+        ),
+    ]
+    for row, match in bad:
+        with pytest.raises(SessionFormatError, match=match):
+            assert_v4_request_context_data(row)
+
+
+def _settlement_row(type: str = "assistant/message", data: dict | None = None) -> dict:
+    return {
+        "type": type,
+        "seq": 0,
+        "time": 100,
+        "data": data
+        if data is not None
+        else {
+            "turn": 1,
+            "step": 1,
+            "message": {
+                "id": "a",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+                "source": {"kind": "model", "provider": "p", "model": "m"},
+            },
+            "stream": [],
+        },
+    }
+
+
+def test_assert_v4_assistant_settlement_data() -> None:
+    """Verifies assistant settlement rows pass or fail load admission."""
+    assert_v4_assistant_settlement_data(_settlement_row())
+    assert_v4_assistant_settlement_data(
+        _settlement_row("assistant/attempt", {"turn": 1, "step": 1, "stream": []})
+    )
+    # A source without provider/model is grandfathered at load.
+    assert_v4_assistant_settlement_data(
+        _settlement_row(
+            data={
+                "turn": 1,
+                "step": 1,
+                "message": {
+                    "id": "a",
+                    "role": "assistant",
+                    "content": [],
+                    "source": {"kind": "model"},
+                },
+                "stream": [],
+            }
+        )
+    )
+    assert_v4_assistant_settlement_data({"type": "turn/start", "seq": 0, "data": {}})
+    assert_v4_assistant_settlement_data(
+        {"type": "assistant/message", "seq": 0, "data": "not-an-object"}
+    )
+    message = _settlement_row()["data"]["message"]
+    bad: list[tuple[dict, str]] = [
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": "not-an-object",
+                    "stream": [],
+                }
+            ),
+            "requires a message object",
+        ),
+        (
+            _settlement_row(
+                data={"turn": -1, "step": 1, "message": message, "stream": []}
+            ),
+            "turn must be a non-negative safe integer",
+        ),
+        (
+            _settlement_row(
+                data={"turn": 1, "step": 1.5, "message": message, "stream": []}
+            ),
+            "step must be a non-negative safe integer",
+        ),
+        (
+            _settlement_row(
+                data={"turn": 1, "step": 1, "message": message, "stream": {}}
+            ),
+            "stream must be an array",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": message,
+                    "stream": [],
+                    "tool_calls": [],
+                }
+            ),
+            "must not carry tool_calls",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": message,
+                    "stream": [],
+                    "interrupted": False,
+                }
+            ),
+            "interrupted must be true",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": {**message, "id": ""},
+                    "stream": [],
+                }
+            ),
+            "requires an identified model message",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": {**message, "role": "user"},
+                    "stream": [],
+                }
+            ),
+            "requires an identified model message",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": {**message, "content": "hi"},
+                    "stream": [],
+                }
+            ),
+            "requires an identified model message",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": {**message, "source": {"kind": "user"}},
+                    "stream": [],
+                }
+            ),
+            "requires an identified model message",
+        ),
+        (
+            _settlement_row(
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        **message,
+                        "source": {"kind": "model", "provider": "p"},
+                    },
+                    "stream": [],
+                }
+            ),
+            "requires a nonempty provider and model",
+        ),
+    ]
+    for row, match in bad:
+        with pytest.raises(SessionFormatError, match=match):
+            assert_v4_assistant_settlement_data(row)

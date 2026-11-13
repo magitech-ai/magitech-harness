@@ -259,11 +259,7 @@ def current_route(session: Session) -> dict[str, str] | None:
     Folds the latest ``request/header`` event; a header without a
     provider/model pair yields no route.
     """
-    for event in reversed(session.events):
-        if event.type != "request/header":
-            continue
-        return _route_from_header(event.payload.get("header"))
-    return None
+    return _route_from_header(session.request_header())
 
 
 # ---------------------------------------------------------------------------
