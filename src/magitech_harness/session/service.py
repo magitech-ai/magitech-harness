@@ -39,7 +39,9 @@ from magitech_harness.session.persistence_jsonl import (
     JsonlSessionHandle,
     JsonlSessionPersistence,
     find_session_dir,
+    generation_filename,
     resolve_current_generation,
+    session_dir,
 )
 from magitech_harness.session.store import Session, SessionStore
 
@@ -278,6 +280,29 @@ class SessionService(Service):
             return None
         resolved = resolve_current_generation(directory)
         return resolved[1] if resolved is not None else None
+
+    def session_path(self, session_id: str) -> Path:
+        """The current-generation log path for one session.
+
+        A session created but not yet written has no file on disk;
+        the path returned is the generation file its first write will
+        use. Raises ``SessionPersistenceNotFoundError`` for an unknown
+        id, or when no persistence backend is configured.
+        """
+        if self.base_storage_dir is None:
+            raise SessionPersistenceNotFoundError(session_id)
+        directory = find_session_dir(self.base_storage_dir, session_id)
+        if directory is not None:
+            resolved = resolve_current_generation(directory)
+            if resolved is not None:
+                return resolved[1]
+            return directory / generation_filename(CURRENT_FORMAT_VERSION)
+        handle = self._handles.get(session_id)
+        if handle is None:
+            raise SessionPersistenceNotFoundError(session_id)
+        return session_dir(
+            self.base_storage_dir, handle.header.get("cwd"), session_id
+        ) / generation_filename(CURRENT_FORMAT_VERSION)
 
     def list_sessions(self) -> list[str]:
         """Returns a sorted list of all active and persisted session IDs."""

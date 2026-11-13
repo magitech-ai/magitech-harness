@@ -11,6 +11,7 @@ from anima import Context
 
 from magitech_harness.session.events import EventType
 from magitech_harness.session.format import (
+    CURRENT_FORMAT_VERSION,
     SessionFormatUnsupportedError,
     SessionPersistenceCorruptionError,
     session_format_log_filename,
@@ -18,6 +19,7 @@ from magitech_harness.session.format import (
 from magitech_harness.session.persistence import (
     SessionAlreadyExistsError,
     SessionAlreadyOwnedError,
+    SessionPersistenceNotFoundError,
 )
 from magitech_harness.session.persistence_jsonl import (
     find_session_dir,
@@ -133,6 +135,58 @@ def test_session_service_create_duplicate_raises(tmp_path: Path) -> None:
     service.create("dup")
     with pytest.raises(ValueError, match="already exists"):
         service.create("dup")
+
+
+def test_session_service_session_path_after_create(tmp_path: Path) -> None:
+    """Verifies session_path names the first-write generation before any event."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service.create("fresh")
+    path = service.session_path("fresh")
+    assert path == session_dir(tmp_path, None, "fresh") / session_format_log_filename(
+        CURRENT_FORMAT_VERSION
+    )
+    assert path.is_relative_to(tmp_path)
+    assert path.suffix == ".jsonl"
+    assert not path.exists()
+
+
+@pytest.mark.asyncio
+async def test_session_service_session_path_after_appends(tmp_path: Path) -> None:
+    """Verifies session_path resolves the current generation once written."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    session = service.create("written")
+    service.log_event(session, EventType.USER_MESSAGE, {"text": "first"})
+    await service.flush(session)
+    path = service.session_path("written")
+    assert path.exists()
+    assert path == service.location("written")
+    # A fresh service with no live handle resolves the same file.
+    service2 = SessionService(Context(), {"base_storage_dir": tmp_path})
+    assert service2.session_path("written") == path
+
+
+def test_session_service_session_path_empty_dir(tmp_path: Path) -> None:
+    """Verifies session_path names the first-write generation for a bare dir."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    directory = session_dir(tmp_path, None, "bare")
+    directory.mkdir(parents=True)
+    assert service.session_path("bare") == directory / session_format_log_filename(
+        CURRENT_FORMAT_VERSION
+    )
+
+
+def test_session_service_session_path_unknown_raises(tmp_path: Path) -> None:
+    """Verifies session_path raises NotFound for unknown ids and memory-only."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    with pytest.raises(SessionPersistenceNotFoundError):
+        service.session_path("unknown")
+    memory_only = SessionService(Context())
+    with pytest.raises(SessionPersistenceNotFoundError):
+        memory_only.session_path("unknown")
 
 
 @pytest.mark.asyncio
