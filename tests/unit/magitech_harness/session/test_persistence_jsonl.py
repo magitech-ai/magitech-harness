@@ -38,6 +38,7 @@ from magitech_harness.session.persistence_jsonl import (
     SessionPersistenceNotFoundError,
     SessionPersistenceSnapshot,
     SessionReadOnlyError,
+    _acquire_posix,
     _migration_event_row,
     encode_segment,
     find_session_dir,
@@ -350,6 +351,15 @@ def test_lease_posix_lock_error_other_than_contention_propagates(
     monkeypatch.setitem(sys.modules, "fcntl", fake)
     with pytest.raises(OSError, match="flock boom"):
         KernelLease.acquire(_session_path(tmp_path), "s-1")
+
+
+def test_lease_posix_refuses_windows_platform(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The POSIX lease refuses to run when the platform is Windows."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(RuntimeError, match="POSIX lease"):
+        _acquire_posix(_session_path(tmp_path) / "session.lock", "s-1")
 
 
 class _FakeMsvcrt:
@@ -2444,11 +2454,60 @@ def test_service_open_write_temp_path_blocked_keeps_source(tmp_path: Path) -> No
     target = session_path / "session.v4.jsonl"
     tmp_dir = session_path / f"session.v4.jsonl.tmp-{os.getpid()}"
     tmp_dir.mkdir()
-    with pytest.raises(IsADirectoryError):
+    # The errno differs by platform (a directory may surface as a file
+    # existing, a directory, or a denied write); the contract is only
+    # that publication fails loud and touches nothing it did not create.
+    with pytest.raises(OSError):
         svc.open("s-1", "write")
     assert source.exists()
     assert not target.exists()
+    assert tmp_dir.is_dir()
     tmp_dir.rmdir()
+    handle = svc.open("s-1", "write")
+    assert target.is_file()
+    assert not source.exists()
+    handle.close()
+
+
+def test_service_open_write_temp_path_symlink_keeps_source(tmp_path: Path) -> None:
+    """A temp path blocked by a symlink fails loud; the link stays."""
+    svc = _persistence(tmp_path)
+    root = tmp_path / "root"
+    session_path = root / "_no-cwd" / "s-1"
+    source = _write_historical_log(root)
+    target = session_path / "session.v4.jsonl"
+    blocker = session_path / "blocker"
+    blocker.mkdir()
+    tmp_link = session_path / f"session.v4.jsonl.tmp-{os.getpid()}"
+    os.symlink(blocker, tmp_link, target_is_directory=True)
+    with pytest.raises(OSError):
+        svc.open("s-1", "write")
+    assert source.exists()
+    assert not target.exists()
+    assert tmp_link.is_symlink()
+    tmp_link.unlink()
+    handle = svc.open("s-1", "write")
+    assert target.is_file()
+    assert not source.exists()
+    handle.close()
+
+
+def test_service_open_write_target_blocked_cleans_temp_keeps_source(
+    tmp_path: Path,
+) -> None:
+    """A blocked target fails publication; the temp file is removed."""
+    svc = _persistence(tmp_path)
+    root = tmp_path / "root"
+    session_path = root / "_no-cwd" / "s-1"
+    source = _write_historical_log(root)
+    target = session_path / "session.v4.jsonl"
+    target.mkdir()
+    with pytest.raises(OSError):
+        svc.open("s-1", "write")
+    assert source.exists()
+    assert target.is_dir()
+    assert not list(session_path.glob("*.tmp-*"))
+    target.rmdir()
     handle = svc.open("s-1", "write")
     assert target.is_file()
     assert not source.exists()

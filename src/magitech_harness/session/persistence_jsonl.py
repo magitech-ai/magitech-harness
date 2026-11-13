@@ -282,6 +282,10 @@ def _acquire_posix(lock_path: Path, session_id: str) -> int:
     """Take a non-blocking exclusive flock, verifying the locked inode."""
     import fcntl
 
+    if sys.platform == "win32":
+        # The flock calls below are POSIX-only; the guard also tells the
+        # type checker this body is unreachable on Windows.
+        raise RuntimeError("POSIX lease requested on Windows")
     for _attempt in range(_MAX_LOCK_ATTEMPTS):
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
@@ -1233,12 +1237,20 @@ class JsonlSessionPersistence(SessionPersistence):
             for event in result.events
         ]
         expected_digest = self._prefix_digest(result.events, session_id)
+        created_tmp = False
         try:
             try:
                 fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                created_tmp = True
             except FileExistsError:
+                # Only a stale regular file may be cleared for a retry.
+                # Anything else at the path is not ours to remove, so the
+                # original error propagates and the path stays untouched.
+                if not tmp_path.is_file():
+                    raise
                 tmp_path.unlink()
                 fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                created_tmp = True
             with os.fdopen(fd, "wb") as handle:
                 handle.write(header_line)
                 for line in event_lines:
@@ -1248,11 +1260,8 @@ class JsonlSessionPersistence(SessionPersistence):
             os.replace(tmp_path, target_path)
             _fsync_dir(directory)
         except BaseException:
-            try:
+            if created_tmp:
                 tmp_path.unlink(missing_ok=True)
-            except OSError:
-                # Best-effort cleanup; the write error is the one that matters.
-                pass
             raise
         try:
             verified = verify_current_generation(target_path)
