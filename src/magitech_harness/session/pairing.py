@@ -33,7 +33,14 @@ def is_tool_pairing_balanced(events: list[SessionEvent], cut_index: int) -> bool
                 if call_id:
                     pending_calls.add(call_id)
         elif ev.type == EventType.TOOL_RESULT:
-            call_id = ev.payload.get("call_id")
+            message = ev.payload.get("message")
+            if isinstance(message, dict):
+                # Admission-shaped result: the call id lives on the
+                # tool-role message.
+                call_id = message.get("toolCallId")
+            else:
+                # Legacy flat shape, kept readable for older logs.
+                call_id = ev.payload.get("call_id")
             if call_id:
                 pending_calls.discard(call_id)
 

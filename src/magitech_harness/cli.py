@@ -80,7 +80,7 @@ class ReplDispatcher:
                 if sess:
                     self.out(f"Session {sess.session_id}: {len(sess.events)} events")
                     for ev in sess.events:
-                        self.out(f"  [{ev.type.value}] {ev.payload}")
+                        self.out(f"  [{ev.type}] {ev.payload}")
                 else:
                     self.out(f"Session not found: {subarg}")
             else:
@@ -268,7 +268,7 @@ async def main_async(argv: list[str] | None = None) -> None:
             if sess:
                 print(f"Session '{sess.session_id}' ({len(sess.events)} events):")
                 for ev in sess.events:
-                    print(f"  [{ev.type.value}] {ev.payload}")
+                    print(f"  [{ev.type}] {ev.payload}")
             else:
                 print(f"Session not found: {args.session_id}")
         else:

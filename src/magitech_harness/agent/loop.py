@@ -4,6 +4,7 @@ Implements the Magitech Harness turn execution state machine.
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from collections.abc import AsyncIterator
@@ -13,10 +14,34 @@ from anima import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.types import UsageData
-from magitech_harness.session.events import EventType, ToolCallData
+from magitech_harness.session.events import (
+    EventType,
+    ToolCallData,
+    ToolResultData,
+)
 from magitech_harness.session.store import Session
 
 logger = logging.getLogger("harness.agent")
+
+
+def _tool_result_payload(tc: ToolCallData, result: ToolResultData) -> dict[str, Any]:
+    """Build the admission-shaped tool/result payload for one tool call.
+
+    The result is carried as a tool-role message — the shape the v4
+    admission check requires — instead of the legacy flat shape.
+    """
+    content = result.content
+    text = content if isinstance(content, str) else json.dumps(content, default=str)
+    return {
+        "message": {
+            "id": f"tool-result-{tc.call_id}",
+            "role": "tool",
+            "toolCallId": tc.call_id,
+            "source": {"kind": "tool", "callId": tc.call_id},
+            "content": [{"type": "text", "text": text}],
+            "isError": result.is_error,
+        }
+    }
 
 
 class AgentLoopService(Service):
@@ -147,14 +172,14 @@ class AgentLoopService(Service):
                         self.ctx.sessions.log_event(
                             session,
                             EventType.TOOL_RESULT,
-                            tool_result.model_dump(),
+                            _tool_result_payload(tc, tool_result),
                         )
 
                     # Step end after tool execution; loop continues to next step
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": True},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                 else:
@@ -162,7 +187,7 @@ class AgentLoopService(Service):
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": False},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                     break
@@ -305,7 +330,7 @@ class AgentLoopService(Service):
                         self.ctx.sessions.log_event(
                             session,
                             EventType.TOOL_RESULT,
-                            tool_result.model_dump(),
+                            _tool_result_payload(tc, tool_result),
                         )
 
                         yield {
@@ -319,14 +344,14 @@ class AgentLoopService(Service):
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": True},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                 else:
                     self.ctx.sessions.log_event(
                         session,
                         EventType.STEP_END,
-                        {"step_index": step_index, "owed_step": False},
+                        {"step_index": step_index},
                     )
                     self.ctx.emit("step/end", session, step_index)
                     break
