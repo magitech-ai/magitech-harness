@@ -102,8 +102,11 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
 
     # 7. Verify JSONL file persistence on disk: one v4 header line plus
     # one physical row per event.
-    assert session.storage_path.exists()
-    lines = session.storage_path.read_text(encoding="utf-8").strip().splitlines()
+    await ctx.sessions.flush()
+    location = ctx.sessions.location(session.session_id)
+    assert location is not None
+    assert location.exists()
+    lines = location.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 12
     header = json.loads(lines[0])
     assert header["type"] == "session"

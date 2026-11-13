@@ -76,7 +76,7 @@ class ReplDispatcher:
                 self.session = self.ctx.sessions.create()
                 self.out(f"Started new session: {self.session.session_id}")
             elif subcmd == "show":
-                sess = self.ctx.sessions.load(subarg) if subarg else self.session
+                sess = self.ctx.sessions.read(subarg) if subarg else self.session
                 if sess:
                     self.out(f"Session {sess.session_id}: {len(sess.events)} events")
                     for ev in sess.events:
@@ -257,14 +257,16 @@ async def main_async(argv: list[str] | None = None) -> None:
         session = ctx.sessions.create()
         print(f"\n🚀 Running prompt: '{args.prompt}'")
         res = await ctx.agent_loop.run_turn(session, args.prompt, model=args.model)
+        await ctx.sessions.flush()
         print(f"\n🤖 Assistant: {res}")
         print(f"📝 Session Events Recorded: {len(session.events)}")
-        if session.storage_path:
-            print(f"💾 Persisted to: {session.storage_path}")
+        location = ctx.sessions.location(session.session_id)
+        if location is not None:
+            print(f"💾 Persisted to: {location}")
 
     elif cmd == "session":
         if args.session_command == "show":
-            sess = ctx.sessions.load(args.session_id)
+            sess = ctx.sessions.read(args.session_id)
             if sess:
                 print(f"Session '{sess.session_id}' ({len(sess.events)} events):")
                 for ev in sess.events:
@@ -286,6 +288,7 @@ async def main_async(argv: list[str] | None = None) -> None:
     else:
         # Default or 'repl': run interactive REPL
         await run_repl(ctx, model=args.model)
+        await ctx.sessions.flush()
 
 
 def main() -> None:
