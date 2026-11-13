@@ -166,21 +166,29 @@ class AgentLoopService(Service):
 
     # -- request construction -------------------------------------------------
 
-    def _resolve_route(self, model: str | None) -> tuple[str, str]:
-        """Resolve the ``(provider, model)`` pair the dispatch will use.
+    def _resolve_route(self, model: str | None) -> tuple[str, str, str]:
+        """Resolve the ``(provider, model, dispatch_model)`` the dispatch uses.
 
-        The slug's provider wins when registered; otherwise the active
-        provider's registered name. The model is the slug's model part,
-        else the provider object's ``model`` attribute when it is a
-        non-empty string, else the provider registration name. Raises
-        ``NoProviderError`` when no provider resolves, before any header
-        is logged.
+        The slug's provider wins when registered, and the model is the
+        slug's remainder. When the slug's provider segment names no
+        registered provider, the WHOLE slug is the model the active
+        provider would have received, and the dispatch passes it
+        verbatim. With no slug model, the active provider's
+        ``default_model`` applies (a ``model`` attribute is accepted
+        where present); when no model can be determined, raises
+        ``NoProviderError`` — the registration name is never
+        substituted. ``dispatch_model`` is the original slug when one
+        was given, else ``provider/model`` for the resolved default.
         """
         provider_name, model_name = parse_model_slug(model or "")
         providers = self.ctx.llm.providers
         if provider_name and provider_name in providers:
             provider = providers[provider_name]
         else:
+            if provider_name:
+                # Unregistered vendor segment: the whole slug stays the
+                # model; only the provider falls back to the active one.
+                model_name = model or ""
             provider = self.ctx.llm.active_provider
             if provider is None:
                 raise NoProviderError(
@@ -192,11 +200,18 @@ class AgentLoopService(Service):
                 name for name, candidate in providers.items() if candidate is provider
             )
         if not model_name:
-            candidate = getattr(provider, "model", None)
-            model_name = (
-                candidate if isinstance(candidate, str) and candidate else provider_name
-            )
-        return provider_name, model_name
+            candidate = getattr(provider, "default_model", None)
+            if not isinstance(candidate, str) or not candidate:
+                candidate = getattr(provider, "model", None)
+            if not isinstance(candidate, str) or not candidate:
+                raise NoProviderError(
+                    "No model could be determined: specify one (for "
+                    "example 'provider/model') or register a provider "
+                    "with a default model."
+                )
+            model_name = candidate
+        dispatch_model = model if model else f"{provider_name}/{model_name}"
+        return provider_name, model_name, dispatch_model
 
     def _starts_series(
         self,
@@ -204,11 +219,16 @@ class AgentLoopService(Service):
         request_state: _RequestState,
         tools: list[dict[str, Any]],
     ) -> bool:
-        """Whether this attempt starts a new request series.
+        """Whether this attempt starts a new request series, for the
+        system projection input only.
 
-        The pre-step declaration is always ``False`` in this chunk (no
-        pre-step series signal exists); a surface change since the last
-        request or a changed tool list starts a series.
+        The combined fact: the pre-step declaration (always ``False``
+        in this chunk — no pre-step series signal exists), a surface
+        change since the last request, or a changed tool list. The
+        header decision does NOT use this boolean: ``_build_request``
+        recomputes its own narrower fact (declaration plus the
+        post-commit surface-generation diff, no tools term) after the
+        system commits land.
         """
         baseline = session.request_header()
         tools_changed = False
@@ -243,8 +263,16 @@ class AgentLoopService(Service):
         request_state: _RequestState,
     ) -> dict[str, Any]:
         """Log the resolved header/context/developer events for one step's
-        request; return the request dict the model call consumes."""
-        provider, model_name = self._resolve_route(model)
+        request; return the request dict the model call consumes.
+
+        ``starts_request_series`` is the pre-step declaration only
+        (always ``False`` in this chunk). The header's series fact is
+        recomputed here, after the system commits of this step have
+        landed: the declaration, or a surface-generation change since
+        the last request. The tools term feeds the system projection
+        input only and never reaches this decision.
+        """
+        provider, model_name, dispatch_model = self._resolve_route(model)
         header = canonical_header(
             {
                 "config": {"provider": provider, "model": model_name},
@@ -252,6 +280,13 @@ class AgentLoopService(Service):
             }
         )
         baseline = session.request_header()
+        # Read at header-decision time, after the system commits: a
+        # normalization replace in this step bumps the generation
+        # after the projection input was computed.
+        header_starts_series = (
+            starts_request_series
+            or request_state.surface_generation != session.surface_content_generation
+        )
         header_seq: int | None = None
         if not request_state.header_logged:
             reason = "initial" if baseline is None else "resume"
@@ -259,7 +294,7 @@ class AgentLoopService(Service):
                 "header": header,
                 "reason": reason,
             }
-            if starts_request_series:
+            if header_starts_series:
                 payload["startsSeries"] = True
             event = self.ctx.sessions.log_event(
                 session, EventType.REQUEST_HEADER, payload
@@ -268,13 +303,13 @@ class AgentLoopService(Service):
             request_state.header_logged = True
         elif baseline is None or not header_equals(baseline, header):
             payload = {"header": header, "reason": "change"}
-            if starts_request_series:
+            if header_starts_series:
                 payload["startsSeries"] = True
             event = self.ctx.sessions.log_event(
                 session, EventType.REQUEST_HEADER, payload
             )
             header_seq = event.seq
-        elif starts_request_series:
+        elif header_starts_series:
             event = self.ctx.sessions.log_event(
                 session,
                 EventType.REQUEST_HEADER,
@@ -343,6 +378,7 @@ class AgentLoopService(Service):
             )
         request: dict[str, Any] = {
             **header["config"],
+            "dispatch_model": dispatch_model,
             "messages": session.derive_messages(),
             "tool_history": session.tool_history(),
         }
@@ -398,10 +434,15 @@ class AgentLoopService(Service):
             else ""
         )
         tool_schemas = self.ctx.tools.get_schemas() if self.ctx.has("tools") else []
-        starts_series = self._starts_series(session, request_state, tool_schemas)
+        # Combined fact for the system projection input only: the
+        # header decision recomputes its own narrower fact inside
+        # _build_request, after these commits land.
+        projection_starts_series = self._starts_series(
+            session, request_state, tool_schemas
+        )
         projection = SystemPromptProjection(lambda: self._system_nodes(session))
         for commit in projection.project(
-            system_prompt, in_history=False, starts_series=starts_series
+            system_prompt, in_history=False, starts_series=projection_starts_series
         ):
             self.ctx.sessions.log_event(
                 session,
@@ -425,7 +466,10 @@ class AgentLoopService(Service):
             step=step,
             tools=tool_schemas,
             model=model,
-            starts_request_series=starts_series,
+            # No pre-step series signal exists in this chunk: the
+            # declaration is always False. _build_request recomputes
+            # the header's series fact from the post-commit surface.
+            starts_request_series=False,
             request_state=request_state,
         )
 
@@ -558,7 +602,7 @@ class AgentLoopService(Service):
                     response = await self.ctx.llm.call(
                         messages=request["messages"],
                         tools=request.get("tools"),
-                        model=f"{request['provider']}/{request['model']}",
+                        model=request["dispatch_model"],
                     )
                     if response.finish_reason == "max_tokens":
                         max_tokens_hit = True
@@ -714,7 +758,7 @@ class AgentLoopService(Service):
                         async for chunk in self.ctx.llm.stream(
                             messages=request["messages"],
                             tools=request.get("tools"),
-                            model=f"{request['provider']}/{request['model']}",
+                            model=request["dispatch_model"],
                             signal=signal,
                             session_id=session.session_id,
                         ):

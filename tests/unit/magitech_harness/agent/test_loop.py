@@ -19,7 +19,7 @@ async def test_agent_loop_single_step_no_tools() -> None:
     ctx.use(AgentLoopService)
     await ctx.flush()
 
-    mock_llm = MockLLMProvider()
+    mock_llm = MockLLMProvider(default_model="mock-model")
     ctx.llm.register_provider("mock", mock_llm)
     mock_llm.queue_response(text="Direct answer")
 
@@ -52,13 +52,15 @@ async def test_agent_loop_single_step_no_tools() -> None:
     assert user["content"] == [{"type": "text", "text": "Hello agent"}]
     assert user["source"] == {"kind": "user"}
     header = by_type[EventType.REQUEST_HEADER].payload
+    # The header carries the provider's declared default, not the
+    # registration name: the default is deliberately distinct here.
     assert header == {
-        "header": {"config": {"provider": "mock", "model": "mock"}},
+        "header": {"config": {"provider": "mock", "model": "mock-model"}},
         "reason": "initial",
     }
     assert by_type[EventType.REQUEST_CONTEXT].payload == {
         "provider": "mock",
-        "model": "mock",
+        "model": "mock-model",
     }
     assistant = by_type[EventType.ASSISTANT_MESSAGE].payload
     assert assistant["turn"] == 1 and assistant["step"] == 1
@@ -69,7 +71,7 @@ async def test_agent_loop_single_step_no_tools() -> None:
     assert assistant["message"]["source"] == {
         "kind": "model",
         "provider": "mock",
-        "model": "mock",
+        "model": "mock-model",
     }
     # Non-streaming settlement: exactly one chunk record, no usage field
     # when the adapter reported no accounting.
@@ -88,9 +90,10 @@ async def test_agent_loop_single_step_no_tools() -> None:
         "reason": {"kind": "completed"},
     }
     # The model call receives the derived history (block-structured) and
-    # no separate system prompt; the resolved model slug is dispatched.
+    # no separate system prompt; the resolved default is dispatched as
+    # a provider/model slug.
     assert mock_llm.call_history[0]["system_prompt"] is None
-    assert mock_llm.call_history[0]["kwargs"]["model"] == "mock/mock"
+    assert mock_llm.call_history[0]["kwargs"]["model"] == "mock/mock-model"
     # At request time the derived history holds only the user message: the
     # empty system node projects to nothing and the assistant reply is
     # not yet logged.
@@ -414,6 +417,49 @@ async def test_agent_loop_signal_active_during_tool_execution() -> None:
 # ---------------------------------------------------------------------------
 
 
+class _RecordingProvider:
+    """Provider recording the dispatched model; declares a default_model
+    (or a legacy ``model`` attribute) and no other model source."""
+
+    def __init__(
+        self,
+        default_model: str | None = None,
+        *,
+        model: str | None = None,
+    ) -> None:
+        if default_model is not None:
+            self.default_model = default_model
+        if model is not None:
+            self.model = model
+        self.seen_models: list = []
+
+    async def generate(self, messages, tools=None, system_prompt=None, **kwargs):  # type: ignore[no-untyped-def]
+        self.seen_models.append(kwargs.get("model"))
+        return ModelResponse(
+            text="ok",
+            tool_calls=[],
+            finish_reason="stop",
+            usage=UsageData(),
+        )
+
+    async def stream(  # type: ignore[no-untyped-def]
+        self,
+        messages,
+        tools=None,
+        system_prompt=None,
+        model=None,
+        signal=None,
+        **kwargs,
+    ):
+        self.seen_models.append(model)
+        yield ModelChunk(
+            text="ok",
+            tool_calls=[],
+            finish_reason="stop",
+            usage=UsageData(),
+        )
+
+
 class _FailingStreamProvider:
     """Provider whose stream yields chunks then raises."""
 
@@ -469,6 +515,9 @@ async def _ctx_with_mock() -> tuple[Context, MockLLMProvider]:
 async def test_agent_loop_second_turn_resume_header() -> None:
     """Verifies the second turn numbers from the log and resumes its header."""
     ctx, mock_llm = await _ctx_with_mock()
+    # Distinct from the registration name, so the route below proves
+    # the header carries the provider default.
+    mock_llm.default_model = "mock-model"
     mock_llm.queue_response(text="one")
     mock_llm.queue_response(text="two")
     session = ctx.sessions.create("sess_resume")
@@ -484,7 +533,7 @@ async def test_agent_loop_second_turn_resume_header() -> None:
     # The route never changed, so exactly one context event exists.
     contexts = [e for e in session.events if e.type == EventType.REQUEST_CONTEXT]
     assert len(contexts) == 1
-    assert contexts[0].payload == {"provider": "mock", "model": "mock"}
+    assert contexts[0].payload == {"provider": "mock", "model": "mock-model"}
     derived = session.derive_messages()
     assert [message["role"] for message in derived] == [
         "user",
@@ -582,7 +631,10 @@ async def test_agent_loop_stream_failed_attempt_preserved() -> None:
     session = ctx.sessions.create("sess_attempt")
 
     with pytest.raises(RuntimeError, match="boom"):
-        async for _ in ctx.agent_loop.stream_turn(session, "Prompt"):
+        # Explicit route: the failing provider declares no default.
+        async for _ in ctx.agent_loop.stream_turn(
+            session, "Prompt", model="mock/failing"
+        ):
             pass
 
     attempt = next(e for e in session.events if e.type == EventType.ASSISTANT_ATTEMPT)
@@ -613,7 +665,10 @@ async def test_agent_loop_stream_cancelled_prefix_finalized() -> None:
     session = ctx.sessions.create("sess_cancel_prefix")
 
     with pytest.raises(AbortError, match="cancelled by test"):
-        async for _ in ctx.agent_loop.stream_turn(session, "Prompt"):
+        # Explicit route: the failing provider declares no default.
+        async for _ in ctx.agent_loop.stream_turn(
+            session, "Prompt", model="mock/failing"
+        ):
             pass
 
     assistant = next(e for e in session.events if e.type == EventType.ASSISTANT_MESSAGE)
@@ -648,7 +703,10 @@ async def test_agent_loop_stream_cancelled_empty_prefix_logs_attempt() -> None:
     session = ctx.sessions.create("sess_cancel_empty")
 
     with pytest.raises(AbortError, match="cancelled by test"):
-        async for _ in ctx.agent_loop.stream_turn(session, "Prompt"):
+        # Explicit route: the failing provider declares no default.
+        async for _ in ctx.agent_loop.stream_turn(
+            session, "Prompt", model="mock/failing"
+        ):
             pass
 
     assert any(e.type == EventType.ASSISTANT_ATTEMPT for e in session.events)
@@ -665,7 +723,10 @@ async def test_agent_loop_stream_empty_failure_logs_nothing() -> None:
     session = ctx.sessions.create("sess_empty_fail")
 
     with pytest.raises(RuntimeError, match="no chunks"):
-        async for _ in ctx.agent_loop.stream_turn(session, "Prompt"):
+        # Explicit route: the failing provider declares no default.
+        async for _ in ctx.agent_loop.stream_turn(
+            session, "Prompt", model="mock/failing"
+        ):
             pass
 
     assert not any(
@@ -757,7 +818,9 @@ async def test_agent_loop_developer_tool_addition_and_removal() -> None:
     header = session.events[header_seq]
     assert header.type == EventType.REQUEST_HEADER
     assert header.payload["reason"] == "resume"
-    assert header.payload["startsSeries"] is True
+    # A tools-only change does not start a series for the header: the
+    # tools term feeds the system projection input only.
+    assert "startsSeries" not in header.payload
 
     dispose_ping()
     await ctx.agent_loop.run_turn(session, "third")
@@ -770,7 +833,57 @@ async def test_agent_loop_developer_tool_addition_and_removal() -> None:
     # Removals only: headerSeq is absent.
     assert "headerSeq" not in removal.payload
     history = session.tool_history()
-    assert [tool["function"]["name"] for tool in history["tools"]] == ["greet"]
+    # No re-baseline: the removal leaves the baseline series intact and
+    # is carried as an empty-additions update.
+    assert [tool["function"]["name"] for tool in history["tools"]] == ["ping"]
+    assert [
+        [tool["function"]["name"] for tool in update["additions"]]
+        for update in history["updates"]
+    ] == [["greet"], []]
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_tools_only_change_keeps_tool_baseline() -> None:
+    """Verifies a tools-only change marks no header series and keeps the baseline."""
+    from magitech_harness.tools.definition import define_tool
+    from magitech_harness.tools.service import ToolService
+
+    ctx = Context()
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(ToolService)
+    ctx.use(AgentLoopService)
+    await ctx.flush()
+
+    ctx.tools.register(
+        define_tool(name="a_tool", description="a", execute=lambda args: "a")
+    )
+    mock_llm = MockLLMProvider()
+    ctx.llm.register_provider("mock", mock_llm)
+    mock_llm.queue_response(text="one")
+    mock_llm.queue_response(text="two")
+
+    session = ctx.sessions.create("sess_tools_series")
+    await ctx.agent_loop.run_turn(session, "first")
+    baseline_schemas = ctx.tools.get_schemas()
+    ctx.tools.register(
+        define_tool(name="b_tool", description="b", execute=lambda args: "b")
+    )
+    added_schemas = ctx.tools.get_schemas()
+    await ctx.agent_loop.run_turn(session, "second")
+
+    headers = [e for e in session.events if e.type == EventType.REQUEST_HEADER]
+    assert [h.payload["reason"] for h in headers] == ["initial", "resume"]
+    # Tools alone do not start a header series: the tools term feeds
+    # the system projection input only.
+    assert "startsSeries" not in headers[1].payload
+    # The baseline is not re-based: the addition is recorded as an
+    # update against the original baseline.
+    history = session.tool_history()
+    assert history["tools"] == baseline_schemas
+    assert len(history["updates"]) == 1
+    assert history["updates"][0]["additions"] == [added_schemas[1]]
+    assert "messageId" in history["updates"][0]
 
 
 @pytest.mark.asyncio
@@ -818,6 +931,43 @@ async def test_agent_loop_system_prompt_normalization_across_turns() -> None:
     assert derived[0]["role"] == "system"
     assert derived[0]["content"] == [{"type": "text", "text": "Prompt B"}]
     assert sum(1 for m in derived if m["role"] == "system") == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_loop_resumed_turn_system_change_marks_series() -> None:
+    """Verifies a resumed turn whose system prompt changed marks a series."""
+    from magitech_harness.system_prompt.service import SystemPromptService
+
+    ctx = Context()
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(SystemPromptService)
+    ctx.use(AgentLoopService)
+    await ctx.flush()
+
+    ctx.system_prompt.register_section("main", "Prompt A.")
+    mock_llm = MockLLMProvider()
+    ctx.llm.register_provider("mock", mock_llm)
+    mock_llm.queue_response(text="one")
+    mock_llm.queue_response(text="two")
+
+    session = ctx.sessions.create("sess_series_system")
+    await ctx.agent_loop.run_turn(session, "first")
+    ctx.system_prompt.register_section("main", "Prompt B.")
+    await ctx.agent_loop.run_turn(session, "second")
+
+    headers = [e for e in session.events if e.type == EventType.REQUEST_HEADER]
+    assert [h.payload["reason"] for h in headers] == ["initial", "resume"]
+    # The second turn's first header carries startsSeries: the system
+    # normalization replace in that step bumped the surface generation
+    # after the projection input was computed, and the header decision
+    # re-reads it.
+    assert headers[1].payload["startsSeries"] is True
+    system_nodes = [e for e in session.events if e.type == EventType.SYSTEM_MESSAGE]
+    assert len(system_nodes) == 2
+    assert system_nodes[1].payload["message"]["content"] == [
+        {"type": "text", "text": "Prompt B."}
+    ]
 
 
 @pytest.mark.asyncio
@@ -943,7 +1093,10 @@ async def test_loop_next_turn_reads_max_from_log() -> None:
 @pytest.mark.asyncio
 async def test_build_request_change_and_series_reasons() -> None:
     """Verifies _build_request reason taxonomy across successive requests."""
-    ctx, _ = await _ctx_with_mock()
+    ctx, mock_llm = await _ctx_with_mock()
+    # Distinct from the registration name, so the route below proves
+    # the header carries the provider default.
+    mock_llm.default_model = "mock-model"
     session = ctx.sessions.create("sess_build_request")
     loop = ctx.agent_loop
     state = _RequestState(surface_generation=session.surface_content_generation)
@@ -959,7 +1112,7 @@ async def test_build_request_change_and_series_reasons() -> None:
     request = loop._build_request(
         session, turn=1, step=1, tools=[], model=None, request_state=state
     )
-    assert request["provider"] == "mock" and request["model"] == "mock"
+    assert request["provider"] == "mock" and request["model"] == "mock-model"
     assert "tools" not in request
     headers = [e for e in session.events if e.type == EventType.REQUEST_HEADER]
     assert len(headers) == 1
@@ -1027,6 +1180,92 @@ async def test_build_request_change_and_series_reasons() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_loop_model_resolution() -> None:
+    """Verifies model resolution: provider default, verbatim slugs, legacy model, fail-loud."""
+    # No slug: the header and the dispatch use the provider's declared
+    # default, never the registration name.
+    ctx = Context()
+    ctx.use(SessionService)
+    ctx.use(LLMService)
+    ctx.use(AgentLoopService)
+    await ctx.flush()
+    recording = _RecordingProvider("real-model-x")
+    ctx.llm.register_provider("prov", recording)
+    session = ctx.sessions.create("sess_default_model")
+    await ctx.agent_loop.run_turn(session, "hi")
+    header = next(e for e in session.events if e.type == EventType.REQUEST_HEADER)
+    assert header.payload["header"]["config"] == {
+        "provider": "prov",
+        "model": "real-model-x",
+    }
+    assert recording.seen_models == ["prov/real-model-x"]
+
+    # Explicit slug for a registered provider resolves exactly.
+    ctx2 = Context()
+    ctx2.use(SessionService)
+    ctx2.use(LLMService)
+    ctx2.use(AgentLoopService)
+    await ctx2.flush()
+    recording2 = _RecordingProvider("other-default")
+    ctx2.llm.register_provider("prov2", recording2)
+    session2 = ctx2.sessions.create("sess_explicit_slug")
+    await ctx2.agent_loop.run_turn(session2, "hi", model="prov2/explicit-model")
+    header2 = next(e for e in session2.events if e.type == EventType.REQUEST_HEADER)
+    assert header2.payload["header"]["config"] == {
+        "provider": "prov2",
+        "model": "explicit-model",
+    }
+    assert recording2.seen_models == ["prov2/explicit-model"]
+
+    # Unregistered vendor segment: the whole slug is the model, and the
+    # dispatch passes it verbatim to the active provider.
+    ctx3 = Context()
+    ctx3.use(SessionService)
+    ctx3.use(LLMService)
+    ctx3.use(AgentLoopService)
+    await ctx3.flush()
+    recording3 = _RecordingProvider("real-model-x")
+    ctx3.llm.register_provider("prov", recording3)
+    session3 = ctx3.sessions.create("sess_unregistered_vendor")
+    await ctx3.agent_loop.run_turn(session3, "hi", model="openrouter/gpt-4o-mini")
+    header3 = next(e for e in session3.events if e.type == EventType.REQUEST_HEADER)
+    assert header3.payload["header"]["config"] == {
+        "provider": "prov",
+        "model": "openrouter/gpt-4o-mini",
+    }
+    assert recording3.seen_models == ["openrouter/gpt-4o-mini"]
+
+    # A legacy ``model`` attribute is accepted where no default exists.
+    ctx4 = Context()
+    ctx4.use(SessionService)
+    ctx4.use(LLMService)
+    ctx4.use(AgentLoopService)
+    await ctx4.flush()
+    legacy = _RecordingProvider(model="legacy-model")
+    ctx4.llm.register_provider("prov", legacy)
+    session4 = ctx4.sessions.create("sess_legacy_model")
+    await ctx4.agent_loop.run_turn(session4, "hi")
+    header4 = next(e for e in session4.events if e.type == EventType.REQUEST_HEADER)
+    assert header4.payload["header"]["config"] == {
+        "provider": "prov",
+        "model": "legacy-model",
+    }
+    assert legacy.seen_models == ["prov/legacy-model"]
+
+    # No slug and no determinable model: fail loud before any header.
+    ctx5 = Context()
+    ctx5.use(SessionService)
+    ctx5.use(LLMService)
+    ctx5.use(AgentLoopService)
+    await ctx5.flush()
+    ctx5.llm.register_provider("prov", _RecordingProvider())
+    session5 = ctx5.sessions.create("sess_no_model")
+    with pytest.raises(NoProviderError):
+        await ctx5.agent_loop.run_turn(session5, "hi")
+    assert not any(e.type == EventType.REQUEST_HEADER for e in session5.events)
+
+
+@pytest.mark.asyncio
 async def test_agent_loop_no_provider_logs_no_header() -> None:
     """Verifies a turn with no provider fails before any request exists."""
     ctx = Context()
@@ -1075,7 +1314,8 @@ async def test_agent_loop_abort_during_call_ends_aborted() -> None:
 
     session = ctx.sessions.create("sess_abort_call")
     with pytest.raises(AbortError, match="aborted in generate"):
-        await ctx.agent_loop.run_turn(session, "hi")
+        # Explicit route: the aborting provider declares no default.
+        await ctx.agent_loop.run_turn(session, "hi", model="mock/aborting")
 
     # The request was built before dispatch, so its header stands.
     assert any(e.type == EventType.REQUEST_HEADER for e in session.events)

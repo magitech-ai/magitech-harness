@@ -107,10 +107,10 @@ def validate_session_event_data(
 
     ``strict`` gates the checks that only a fresh write must satisfy:
     an assistant message's model-source attribution (kind, provider,
-    model). Restored logs predate that attribution on assistant
-    sources, so the seed/restore path leaves it unenforced; the load
-    layer enforces it for file rows, and :meth:`Session.append`
-    always validates strictly.
+    model), and the refusal of a legacy husk header. Restored logs
+    predate that attribution on assistant sources, so the seed/restore
+    path leaves it unenforced; the load layer enforces it for file
+    rows, and :meth:`Session.append` always validates strictly.
     """
     data = event.payload
     if event.type in SURFACE_EVENT_TYPES and _is_record(data):
@@ -192,8 +192,9 @@ def validate_session_event_data(
             raise SurfaceError(f"{subject} must omit empty adapterDefaults")
         # The migration's own husk header (empty header, legacy start
         # reason) carries no config to validate; it is grandfathered
-        # here exactly as in the load layer.
-        if header == {} and data.get("reason") == {"kind": "start"}:
+        # here exactly as in the load layer — but only on the
+        # restore/seed path. A fresh append (strict) must not write one.
+        if not strict and header == {} and data.get("reason") == {"kind": "start"}:
             return
         config = header.get("config")
         if (

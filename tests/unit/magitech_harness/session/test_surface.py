@@ -529,6 +529,12 @@ def test_validate_session_event_data_rules() -> None:
     )
     with pytest.raises(SurfaceError, match="must omit empty adapterDefaults"):
         validate_session_event_data(empty_defaults, "test")
+    # A husk header is grandfathered on the restore/seed path only: a
+    # fresh (strict) write refuses it for want of a config.
+    husk = _event(0, "request/header", {"header": {}, "reason": {"kind": "start"}})
+    validate_session_event_data(husk, "test")
+    with pytest.raises(SurfaceError, match="requires a nonempty provider and model"):
+        validate_session_event_data(husk, "test", strict=True)
     # tool/result error without message.isError.
     bad_result = _event(
         0,
