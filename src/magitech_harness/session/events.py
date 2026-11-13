@@ -210,6 +210,7 @@ class ToolResultData(BaseModel):
     name: str
     content: Any
     is_error: bool = False
+    error: dict[str, Any] | None = None
 
 
 class SessionEvent(BaseModel):
