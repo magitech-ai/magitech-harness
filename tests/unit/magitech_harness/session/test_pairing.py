@@ -131,3 +131,90 @@ def test_pairing_edge_cases_empty_call_id_and_untracked_result() -> None:
     ]
     # Should evaluate cleanly as balanced
     assert is_tool_pairing_balanced(events, 4) is True
+
+
+def test_pairing_canonical_message_shape() -> None:
+    """Verifies pairing reads tool-call blocks from canonical messages."""
+    events = [
+        _event(
+            EventType.ASSISTANT_MESSAGE,
+            {
+                "turn": 1,
+                "step": 1,
+                "message": {
+                    "id": "m1",
+                    "role": "assistant",
+                    "content": [
+                        "not-a-block",
+                        {"type": "text", "text": "working"},
+                        {"type": "tool-call", "name": "nameless"},
+                        {"type": "tool-call", "id": "", "name": "empty"},
+                        {
+                            "type": "tool-call",
+                            "id": "c9",
+                            "name": "search",
+                            "arguments": "{}",
+                        },
+                    ],
+                    "source": {"kind": "model", "provider": "p", "model": "m"},
+                },
+                "stream": [],
+            },
+        ),
+        _event(
+            EventType.TOOL_RESULT,
+            {
+                "message": {
+                    "toolCallId": "c9",
+                    "content": [{"type": "text", "text": "hit"}],
+                }
+            },
+        ),
+        _event(
+            EventType.ASSISTANT_MESSAGE,
+            {"message": {"content": "not-a-list"}},
+        ),
+    ]
+    # At index 0 the canonical call c9 is unresolved: unbalanced.
+    assert is_tool_pairing_balanced(events, 0) is False
+    # At index 1 the message-shaped result resolves c9: balanced.
+    assert is_tool_pairing_balanced(events, 1) is True
+    # At index 2 the malformed message shape adds no calls: balanced.
+    assert is_tool_pairing_balanced(events, 2) is True
+
+
+def test_pairing_mixed_flat_and_canonical_calls() -> None:
+    """Verifies flat and canonical calls pair in one log."""
+    events = [
+        _event(
+            EventType.ASSISTANT_MESSAGE,
+            {"tool_calls": [{"call_id": "c_flat", "name": "bash", "arguments": {}}]},
+        ),
+        _event(
+            EventType.ASSISTANT_MESSAGE,
+            {
+                "message": {
+                    "id": "m2",
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool-call",
+                            "id": "c_canon",
+                            "name": "search",
+                            "arguments": "{}",
+                        }
+                    ],
+                    "source": {"kind": "model", "provider": "p", "model": "m"},
+                },
+            },
+        ),
+        _event(EventType.TOOL_RESULT, {"call_id": "c_flat", "content": "ok"}),
+        _event(
+            EventType.TOOL_RESULT,
+            {"message": {"toolCallId": "c_canon", "content": []}},
+        ),
+    ]
+    assert is_tool_pairing_balanced(events, 0) is False
+    assert is_tool_pairing_balanced(events, 1) is False
+    assert is_tool_pairing_balanced(events, 2) is False
+    assert is_tool_pairing_balanced(events, 3) is True

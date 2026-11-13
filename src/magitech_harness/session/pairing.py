@@ -4,7 +4,34 @@ Tool pairing boundary verification for safe compaction cuts.
 
 from __future__ import annotations
 
+from typing import Any
+
 from magitech_harness.session.events import EventType, SessionEvent
+
+
+def _assistant_tool_call_ids(payload: dict[str, Any]) -> list[str]:
+    """Call ids on one assistant event, flat or canonical message shape."""
+    ids: list[str] = []
+    for tc in payload.get("tool_calls") or []:
+        call_id = (
+            tc.get("call_id") or tc.get("id")
+            if isinstance(tc, dict)
+            else getattr(tc, "call_id", None)
+        )
+        if call_id:
+            ids.append(call_id)
+    message = payload.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if isinstance(content, list):
+        for block in content:
+            if (
+                isinstance(block, dict)
+                and block.get("type") == "tool-call"
+                and isinstance(block.get("id"), str)
+                and block["id"]
+            ):
+                ids.append(block["id"])
+    return ids
 
 
 def is_tool_pairing_balanced(events: list[SessionEvent], cut_index: int) -> bool:
@@ -23,15 +50,7 @@ def is_tool_pairing_balanced(events: list[SessionEvent], cut_index: int) -> bool
 
     for ev in slice_events:
         if ev.type == EventType.ASSISTANT_MESSAGE:
-            tool_calls = ev.payload.get("tool_calls", [])
-            for tc in tool_calls:
-                call_id = (
-                    tc.get("call_id") or tc.get("id")
-                    if isinstance(tc, dict)
-                    else getattr(tc, "call_id", None)
-                )
-                if call_id:
-                    pending_calls.add(call_id)
+            pending_calls.update(_assistant_tool_call_ids(ev.payload))
         elif ev.type == EventType.TOOL_RESULT:
             message = ev.payload.get("message")
             if isinstance(message, dict):
