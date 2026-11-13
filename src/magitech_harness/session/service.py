@@ -61,6 +61,7 @@ from magitech_harness.session.projections import (
     WORKING_DIRECTORY_PROJECTION,
 )
 from magitech_harness.session.store import Session, SessionStore
+from magitech_harness.session.title import SessionTitleService
 
 logger = logging.getLogger("harness.session")
 
@@ -74,6 +75,10 @@ class SessionService(Service):
     backend root comes from the ``base_storage_dir`` config value; with
     no root configured the service runs in memory only — sessions work
     exactly the same, nothing is persisted, and no tracker is installed.
+
+    Title config keys (all optional here; the title service itself
+    requires them): ``title_fallback_max_words`` (5),
+    ``title_fallback_max_bytes`` (40), ``title_max_title_bytes`` (80).
     """
 
     def __init__(self, ctx: Context, config: dict | None = None) -> None:
@@ -98,6 +103,21 @@ class SessionService(Service):
         )
         self._working_directory_handle: ProjectionHandle[str | None] = (
             self._projections.register(WORKING_DIRECTORY_PROJECTION)
+        )
+        # The title service takes the title and titleInput handles from
+        # here; it never registers those units itself. Title limits are
+        # required config with no library defaults: the service supplies
+        # the shipped 5/40/80 when its config omits them.
+        self._title_service = SessionTitleService(
+            ctx,
+            self._store,
+            self._title_handle,
+            self._title_input_handle,
+            {
+                "fallback_max_words": cfg.get("title_fallback_max_words", 5),
+                "fallback_max_bytes": cfg.get("title_fallback_max_bytes", 40),
+                "max_title_bytes": cfg.get("title_max_title_bytes", 80),
+            },
         )
         self._active_sessions: dict[str, Session] = {}
         self._handles: dict[str, JsonlSessionHandle] = {}
@@ -141,6 +161,11 @@ class SessionService(Service):
     def projections(self) -> SessionProjectionRegistry:
         """The registry driving the five units over committed events."""
         return self._projections
+
+    @property
+    def title_service(self) -> SessionTitleService:
+        """The log-backed title service for sessions this service owns."""
+        return self._title_service
 
     @property
     def projection_cache(self) -> SessionProjectionCache | None:

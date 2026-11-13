@@ -31,31 +31,16 @@ from magitech_harness.session.projection_registry import (
     ProjectionDefinition,
     WireView,
 )
+from magitech_harness.session.title import eligible_title_message
 
 # ---------------------------------------------------------------------------
 # Title-text cleaning (escape sequences, controls, whitespace collapse).
+#
+# The cleaner lives in the title module; the eligibility helper below is
+# the same function the title service uses, so the two never drift apart.
 # ---------------------------------------------------------------------------
 
-_OSC_SEQUENCE = re.compile(
-    r"(?:\x1b\]|\x9d)(?:(?!\x07|\x1b\\)[\s\S])*(?:\x07|\x1b\\|\Z)"
-)
-_CSI_SEQUENCE = re.compile(r"(?:\x1b\[|\x9b)[0-?]*[ -/]*[@-~]")
-_ESC_SEQUENCE = re.compile(r"\x1b[@-_]")
-_CONTROL_CHARACTER = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
-_DIRECTIONAL_CONTROL = re.compile(
-    r"[\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]"
-)
 _WHITESPACE_RUN = re.compile(r"\s+")
-
-
-def _clean_title_text(text: str) -> str:
-    """Strip escapes and controls; collapse whitespace runs; trim."""
-    cleaned = _OSC_SEQUENCE.sub("", text)
-    cleaned = _CSI_SEQUENCE.sub("", cleaned)
-    cleaned = _ESC_SEQUENCE.sub("", cleaned)
-    cleaned = _CONTROL_CHARACTER.sub("", cleaned)
-    cleaned = _DIRECTIONAL_CONTROL.sub("", cleaned)
-    return _WHITESPACE_RUN.sub(" ", cleaned).strip()
 
 
 def _eligible_title_message(event: SessionEvent) -> dict[str, Any] | None:
@@ -66,24 +51,7 @@ def _eligible_title_message(event: SessionEvent) -> dict[str, Any] | None:
     value carries the raw joined block text; cleaning is only the
     emptiness test.
     """
-    if event.type != "user/message":
-        return None
-    source = event.payload.get("source")
-    if not isinstance(source, dict) or source.get("kind") != "user":
-        return None
-    content = event.payload.get("content")
-    if not isinstance(content, list):
-        return None
-    text = "\n".join(
-        block["text"]
-        for block in content
-        if isinstance(block, dict)
-        and block.get("type") == "text"
-        and isinstance(block.get("text"), str)
-    )
-    if _clean_title_text(text) == "":
-        return None
-    return {"seq": event.seq, "text": text}
+    return eligible_title_message(event)
 
 
 # ---------------------------------------------------------------------------
