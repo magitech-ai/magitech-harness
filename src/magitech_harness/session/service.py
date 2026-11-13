@@ -43,6 +43,17 @@ from magitech_harness.session.persistence_jsonl import (
     resolve_current_generation,
     session_dir,
 )
+from magitech_harness.session.projection_registry import (
+    ProjectionHandle,
+    SessionProjectionRegistry,
+)
+from magitech_harness.session.projections import (
+    SESSION_STATS_PROJECTION,
+    TITLE_INPUT_PROJECTION,
+    TITLE_PROJECTION,
+    TURN_OUTLINE_PROJECTION,
+    WORKING_DIRECTORY_PROJECTION,
+)
 from magitech_harness.session.store import Session, SessionStore
 
 logger = logging.getLogger("harness.session")
@@ -65,6 +76,22 @@ class SessionService(Service):
         root = cfg.get("base_storage_dir")
         self.base_storage_dir = Path(root) if root is not None else None
         self._store = SessionStore(ctx)
+        self._projections = SessionProjectionRegistry(ctx)
+        self._title_handle: ProjectionHandle[str | None] = self._projections.register(
+            TITLE_PROJECTION
+        )
+        self._title_input_handle: ProjectionHandle[dict[str, Any]] = (
+            self._projections.register(TITLE_INPUT_PROJECTION)
+        )
+        self._session_stats_handle: ProjectionHandle[dict[str, Any]] = (
+            self._projections.register(SESSION_STATS_PROJECTION)
+        )
+        self._turn_outline_handle: ProjectionHandle[dict[str, Any]] = (
+            self._projections.register(TURN_OUTLINE_PROJECTION)
+        )
+        self._working_directory_handle: ProjectionHandle[str | None] = (
+            self._projections.register(WORKING_DIRECTORY_PROJECTION)
+        )
         self._active_sessions: dict[str, Session] = {}
         self._handles: dict[str, JsonlSessionHandle] = {}
         self._persistence: JsonlSessionPersistence | None = None
@@ -82,6 +109,11 @@ class SessionService(Service):
     def store(self) -> SessionStore:
         """The live-session store this service shells over."""
         return self._store
+
+    @property
+    def projections(self) -> SessionProjectionRegistry:
+        """The registry driving the five units over committed events."""
+        return self._projections
 
     def _new_header(self, session_id: str) -> dict[str, Any]:
         """The fresh unseeded header for one new session."""
