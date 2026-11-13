@@ -270,9 +270,17 @@ class LLMService(Service):
         system_prompt: str | None = None,
         model: str | None = None,
         signal: AbortSignal | None = None,
+        session_id: str | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ModelChunk]:
-        """Streams model output chunks from the resolved provider."""
+        """Streams model output chunks from the resolved provider.
+
+        The provider stream runs through the ``llm/stream`` waterfall
+        with one options dict carrying the request and ``session_id``;
+        a listener may checkpoint the named session before the provider
+        stream is produced. With no session id the stream passes through
+        uncheckpointed.
+        """
         provider_name, _ = parse_model_slug(model or "")
         target_provider: LLMProvider | None = None
 
@@ -291,19 +299,48 @@ class LLMService(Service):
         if signal:
             signal.throw_if_aborted()
 
-        self.ctx.emit("llm/stream-start", {"messages": messages, "model": model})
+        # Narrowed once here: the nested generator below cannot narrow a
+        # captured optional on its own.
+        provider = target_provider
 
-        async for chunk in target_provider.stream(
-            messages=messages,
-            tools=tools,
-            system_prompt=system_prompt,
-            model=model,
-            signal=signal,
-            **kwargs,
-        ):
-            if signal:
-                signal.throw_if_aborted()
-            self.ctx.emit("llm/chunk", chunk)
+        options: dict[str, Any] = {
+            "messages": messages,
+            "tools": tools,
+            "system_prompt": system_prompt,
+            "model": model,
+            "signal": signal,
+            "session_id": session_id,
+        }
+
+        async def _stream_provider(
+            stream_options: dict[str, Any],
+        ) -> AsyncIterator[ModelChunk]:
+            request_signal = stream_options["signal"]
+            self.ctx.emit(
+                "llm/stream-start",
+                {
+                    "messages": stream_options["messages"],
+                    "model": stream_options["model"],
+                },
+            )
+
+            async for chunk in provider.stream(
+                messages=stream_options["messages"],
+                tools=stream_options["tools"],
+                system_prompt=stream_options["system_prompt"],
+                model=stream_options["model"],
+                signal=request_signal,
+                **kwargs,
+            ):
+                if request_signal:
+                    request_signal.throw_if_aborted()
+                self.ctx.emit("llm/chunk", chunk)
+                yield chunk
+
+            self.ctx.emit("llm/stream-end", {"model": stream_options["model"]})
+
+        stream = await self.ctx.waterfall(
+            "llm/stream", options, default_handler=_stream_provider
+        )
+        async for chunk in stream:
             yield chunk
-
-        self.ctx.emit("llm/stream-end", {"model": model})

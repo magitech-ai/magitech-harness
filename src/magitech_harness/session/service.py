@@ -21,6 +21,7 @@ from typing import Any
 
 from anima import Context, Service
 
+from magitech_harness.session.checkpoint_policy import SessionCheckpointPolicy
 from magitech_harness.session.events import (
     SURFACE_EVENT_TYPES,
     EventType,
@@ -81,6 +82,7 @@ class SessionService(Service):
         root = cfg.get("base_storage_dir")
         self.base_storage_dir = Path(root) if root is not None else None
         self._store = SessionStore(ctx)
+        self._checkpoint_policy = SessionCheckpointPolicy(ctx, self._store)
         self._projections = SessionProjectionRegistry(ctx)
         self._title_handle: ProjectionHandle[str | None] = self._projections.register(
             TITLE_PROJECTION
@@ -129,6 +131,11 @@ class SessionService(Service):
     def store(self) -> SessionStore:
         """The live-session store this service shells over."""
         return self._store
+
+    @property
+    def checkpoint_policy(self) -> SessionCheckpointPolicy:
+        """The durability checkpoint policy installed on this context."""
+        return self._checkpoint_policy
 
     @property
     def projections(self) -> SessionProjectionRegistry:

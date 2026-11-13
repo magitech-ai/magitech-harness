@@ -166,7 +166,9 @@ class AgentLoopService(Service):
                         )
 
                         # Execute via tool pipeline
-                        tool_result = await self.ctx.tools.execute(tc)
+                        tool_result = await self.ctx.tools.execute(
+                            tc, session=session, signal=signal
+                        )
 
                         # Log tool result event
                         self.ctx.sessions.log_event(
@@ -285,6 +287,7 @@ class AgentLoopService(Service):
                     system_prompt=system_prompt if system_prompt else None,
                     model=model,
                     signal=signal,
+                    session_id=session.session_id,
                 ):
                     if chunk.text:
                         accumulated_text += chunk.text
@@ -325,7 +328,9 @@ class AgentLoopService(Service):
                             tc.model_dump(),
                         )
 
-                        tool_result = await self.ctx.tools.execute(tc)
+                        tool_result = await self.ctx.tools.execute(
+                            tc, session=session, signal=signal
+                        )
 
                         self.ctx.sessions.log_event(
                             session,
