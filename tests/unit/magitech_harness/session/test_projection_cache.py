@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import stat
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -684,9 +685,13 @@ def test_missing_record_key_is_schema_invalid(tmp_path: Path) -> None:
         lambda record: record["identity"].update(created_at=True),
         lambda record: record["identity"].update(created_at="1700000000000"),
         lambda record: record["identity"].update(format_version=-1),
+        lambda record: record["identity"].update(format_version=None),
         lambda record: record["identity"].update(cwd=12),
+        lambda record: record["identity"].update(cwd=None),
         lambda record: record["identity"].update(is_seeded="yes"),
+        lambda record: record["identity"].update(is_seeded=None),
         lambda record: record["identity"].update(inherited_event_count=-1),
+        lambda record: record["identity"].update(inherited_event_count=None),
         lambda record: record.pop("identity"),
         lambda record: record.update(rows=[]),
         lambda record: record["rows"].update(title={"ver": -1, "seq": 9, "val": "x"}),
@@ -867,9 +872,11 @@ def test_put_sets_file_and_directory_modes(tmp_path: Path) -> None:
     cache = _cache(tmp_path, registry)
     cache.put("s1", identity_of(dict(HEADER), 0), registry.checkpoint(session))
     path = _record_path(tmp_path)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
-    assert stat.S_IMODE(path.parent.parent.stat().st_mode) == 0o700
+    if sys.platform != "win32":
+        # Windows ignores permission bits on creation.
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(path.parent.parent.stat().st_mode) == 0o700
 
 
 def test_put_replaces_the_whole_record(tmp_path: Path) -> None:

@@ -20,6 +20,19 @@ from anima import Context
 from magitech_harness.session.service import SessionService
 
 
+def _kill_self() -> None:
+    """Terminate this process immediately with SIGKILL.
+
+    The crash modes only run where SIGKILL exists; on platforms without it
+    (Windows) the caller tests are skipped, so reaching this is a loud
+    error rather than a silent no-op.
+    """
+    sigkill = getattr(signal, "SIGKILL", None)
+    if sigkill is None:
+        raise RuntimeError("SIGKILL is unavailable on this platform")
+    os.kill(os.getpid(), sigkill)
+
+
 def _append_golden_live(service: SessionService, session) -> None:
     """Drive Scenario A through the live append path (v4 first-class shapes)."""
     service.log_event(session, "turn/start", {"turn": 1})
@@ -94,7 +107,7 @@ def _kill_at_put(service: SessionService) -> None:
     def counting_put(session_id: str, identity, rows) -> None:
         calls["n"] += 1
         if calls["n"] == 2:
-            os.kill(os.getpid(), signal.SIGKILL)
+            _kill_self()
         real_put(session_id, identity, rows)
 
     cache.put = counting_put  # type: ignore[method-assign]
@@ -109,7 +122,7 @@ def _kill_mid_put() -> None:
         if str(src).endswith(".tmp") and "session_projcache" in str(src):
             calls["n"] += 1
             if calls["n"] == 2:
-                os.kill(os.getpid(), signal.SIGKILL)
+                _kill_self()
         real_replace(src, dst)
 
     os.replace = counting_replace  # type: ignore[method-assign]

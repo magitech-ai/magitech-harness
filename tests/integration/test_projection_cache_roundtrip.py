@@ -12,6 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from anima import Context
 
 from magitech_harness.session.service import SessionService
@@ -97,6 +98,7 @@ def test_child_roundtrip_cold_read(tmp_path: Path) -> None:
     service.projection_cache.dispose()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL does not exist on Windows")
 def test_kill_at_put_cache_never_ahead_of_log(tmp_path: Path) -> None:
     """A SIGKILL at the cache write leaves the cache behind the log."""
     result = _run_child(tmp_path, "kill-at-put")
@@ -118,6 +120,7 @@ def test_kill_at_put_cache_never_ahead_of_log(tmp_path: Path) -> None:
     service.projection_cache.dispose()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="SIGKILL does not exist on Windows")
 def test_kill_mid_put_record_intact_and_tmp_ignored(tmp_path: Path) -> None:
     """A SIGKILL mid-rename leaves the old record intact and a stray temp."""
     result = _run_child(tmp_path, "kill-mid-put")

@@ -190,18 +190,20 @@ def _identity_error(identity: Any) -> str | None:
     if not _is_int(created_at) or created_at < 0:
         return "identity.created_at must be an integer >= 0"
     format_version = identity.get("format_version")
-    if format_version is not None and (
+    if "format_version" in identity and (
         not _is_int(format_version) or format_version < 0
     ):
         return "identity.format_version must be an integer >= 0 when present"
     cwd = identity.get("cwd")
-    if cwd is not None and not isinstance(cwd, str):
+    if "cwd" in identity and not isinstance(cwd, str):
         return "identity.cwd must be a string when present"
     is_seeded = identity.get("is_seeded")
-    if is_seeded is not None and not isinstance(is_seeded, bool):
+    if "is_seeded" in identity and not isinstance(is_seeded, bool):
         return "identity.is_seeded must be a boolean when present"
     inherited = identity.get("inherited_event_count")
-    if inherited is not None and (not _is_int(inherited) or inherited < 0):
+    if "inherited_event_count" in identity and (
+        not _is_int(inherited) or inherited < 0
+    ):
         return "identity.inherited_event_count must be an integer >= 0 when present"
     return None
 
