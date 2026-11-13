@@ -8,6 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from magitech_harness.session.events import EventType, SessionEvent
+from magitech_harness.session.format import (
+    SessionFormatError,
+    SessionFormatUnsupportedError,
+    SessionPersistenceCorruptionError,
+)
 from magitech_harness.session.store import (
     Session,
     _lock_exclusive,
@@ -77,8 +82,17 @@ def test_session_append_and_load(tmp_path: Path) -> None:
     session.append(event2)
     assert event1.seq == 1
     assert event2.seq == 10
-    assert event1.schema_version == 1
     assert file_path.exists()
+
+    # The first line is the v4 physical header, not an event row.
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    header = json.loads(lines[0])
+    assert header["type"] == "session"
+    assert header["version"] == 4
+    assert header["id"] == "sess_custom"
+    assert header["isSeeded"] is False
+    assert header["delegationDepth"] == 0
+    assert isinstance(header["createdAt"], int)
 
     # Append blank line to verify line.strip() branch
     with open(file_path, "a", encoding="utf-8") as f:
@@ -88,32 +102,329 @@ def test_session_append_and_load(tmp_path: Path) -> None:
     loaded_session = Session.load(file_path)
     assert loaded_session.session_id == "sess_custom"
     assert len(loaded_session.events) == 2
+    # Rows carry no event id; the id is synthesized from session and seq.
+    assert loaded_session.events[0].id == "sess_custom:1"
+    assert loaded_session.events[1].id == "sess_custom:10"
     assert loaded_session.events[0].payload == {"text": "persisted text 1"}
     assert loaded_session.events[0].seq == 1
     assert loaded_session.events[1].seq == 10
 
 
-def test_session_load_repair_on_open(tmp_path: Path) -> None:
-    """Verifies Session.load skips corrupt/torn lines when repair_on_open=True."""
-    file_path = tmp_path / "sess_torn.jsonl"
-    valid_ev = SessionEvent(
-        id="1",
-        session_id="torn_sess",
-        type=EventType.USER_MESSAGE,
-        payload={"text": "ok"},
+def _v4_header_line(session_id: str, **extra: object) -> str:
+    header: dict = {
+        "type": "session",
+        "version": 4,
+        "id": session_id,
+        "createdAt": 1000,
+        "isSeeded": False,
+        "delegationDepth": 0,
+    }
+    header.update(extra)
+    return json.dumps(header)
+
+
+def test_session_load_refuses_bad_envelope_row(tmp_path: Path) -> None:
+    """Verifies a v4 row that fails envelope checks is corruption, not a skip."""
+    file_path = tmp_path / "sess_bad_row.jsonl"
+    file_path.write_text(
+        _v4_header_line("bad_row_sess")
+        + "\n"
+        + json.dumps({"type": "user/message", "seq": 1, "data": {"text": "no time"}})
+        + "\n",
+        encoding="utf-8",
     )
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(valid_ev.model_dump_json() + "\n")
-        f.write('{"id": "2", "session_id": "torn_sess", "incomp\n')  # Torn write
+    with pytest.raises(SessionPersistenceCorruptionError):
+        Session.load(file_path)
 
-    # Default repair_on_open=True should load valid line and ignore corrupt line
-    sess = Session.load(file_path, repair_on_open=True)
-    assert len(sess.events) == 1
-    assert sess.events[0].id == "1"
 
-    # repair_on_open=False should raise JSONDecodeError
-    with pytest.raises(json.JSONDecodeError):
-        Session.load(file_path, repair_on_open=False)
+def test_session_load_migrated_unsupported_is_unsupported(tmp_path: Path) -> None:
+    """Verifies a historical file that cannot migrate is unsupported, not corrupt."""
+    file_path = tmp_path / "sess_unmig.jsonl"
+    file_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 0,
+                        "id": "unmig",
+                        "createdAt": 1000,
+                        "delegationDepth": 0,
+                    }
+                ),
+                json.dumps(
+                    {"type": "mode/set", "seq": 0, "time": 1000, "data": {"mode": "x"}}
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionFormatUnsupportedError, match="raw log"):
+        Session.load(file_path)
+
+
+def test_session_load_migrated_malformed_is_corruption(tmp_path: Path) -> None:
+    """Verifies a historical file with a seq gap is corruption, not unsupported."""
+    file_path = tmp_path / "sess_gap.jsonl"
+    file_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 3,
+                        "id": "gap",
+                        "createdAt": 1000,
+                        "isSeeded": False,
+                        "delegationDepth": 0,
+                    }
+                ),
+                json.dumps(
+                    {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+                ),
+                json.dumps(
+                    {
+                        "type": "turn/end",
+                        "seq": 2,
+                        "time": 1001,
+                        "data": {"turn": 1, "reason": {"kind": "done"}},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionPersistenceCorruptionError):
+        Session.load(file_path)
+
+
+def test_session_load_migrates_ignorable_unknown_as_skip(tmp_path: Path) -> None:
+    """Verifies a migrated ignorable unknown row is skipped, not refused."""
+    file_path = tmp_path / "mig_skip.jsonl"
+    file_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 3,
+                        "id": "mig_skip",
+                        "createdAt": 1000,
+                        "isSeeded": False,
+                        "delegationDepth": 0,
+                    }
+                ),
+                json.dumps(
+                    {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+                ),
+                json.dumps(
+                    {
+                        "type": "vendor/widget",
+                        "seq": 1,
+                        "time": 1001,
+                        "data": {"x": 1},
+                        "ignorable": True,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "turn/end",
+                        "seq": 2,
+                        "time": 1002,
+                        "data": {"turn": 1, "reason": {"kind": "done"}},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = Session.load(file_path)
+    assert [event.type for event in loaded.events] == [
+        EventType.TURN_START,
+        EventType.TURN_END,
+    ]
+
+
+def test_session_load_refuses_torn_row(tmp_path: Path) -> None:
+    """Verifies Session.load refuses a torn row instead of silently truncating it."""
+    file_path = tmp_path / "sess_torn.jsonl"
+    file_path.write_text(
+        _v4_header_line("torn_sess")
+        + "\n"
+        + json.dumps(
+            {
+                "type": "user/message",
+                "seq": 1,
+                "time": 100000,
+                "data": {"text": "ok"},
+            }
+        )
+        + "\n"
+        + '{"type": "user/message", "seq": 2, "time": 100001, "data": {"text": "torn\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionPersistenceCorruptionError, match="corrupt session row"):
+        Session.load(file_path)
+
+
+def test_session_load_refuses_non_object_row(tmp_path: Path) -> None:
+    """Verifies Session.load refuses a JSON row that is not an object."""
+    file_path = tmp_path / "sess_array_row.jsonl"
+    file_path.write_text(
+        _v4_header_line("array_sess") + "\n" + "[]\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        SessionPersistenceCorruptionError, match="row must be a JSON object"
+    ):
+        Session.load(file_path)
+
+
+def test_session_load_refuses_corrupt_header(tmp_path: Path) -> None:
+    """Verifies Session.load refuses a header line that is not JSON."""
+    file_path = tmp_path / "sess_bad_header.jsonl"
+    file_path.write_text(
+        '{"type": "session", "version": 4, "id": "bad\n', encoding="utf-8"
+    )
+    with pytest.raises(
+        SessionPersistenceCorruptionError, match="corrupt session header"
+    ):
+        Session.load(file_path)
+
+
+def test_session_load_refuses_newer_version_without_decoding_rows(
+    tmp_path: Path,
+) -> None:
+    """Verifies a newer-version log is refused with the upgrade text, rows unread."""
+    file_path = tmp_path / "sess_future.jsonl"
+    file_path.write_text(
+        _v4_header_line("future_sess", version=9)
+        + "\n"
+        + "this is not json at all\n"
+        + '{"type": "user/message", "seq": 1}\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionFormatUnsupportedError, match="upgrade the harness"):
+        Session.load(file_path)
+
+
+def test_session_load_refuses_bare_old_format_file(tmp_path: Path) -> None:
+    """Verifies a headerless log (event row first) is malformed, not loadable."""
+    file_path = tmp_path / "sess_bare.jsonl"
+    file_path.write_text(
+        json.dumps(
+            {
+                "type": "user/message",
+                "seq": 1,
+                "time": 100000,
+                "data": {"text": "cold"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionFormatError, match="must be a non-negative safe integer"):
+        Session.load(file_path)
+
+
+def test_session_load_refuses_malformed_header(tmp_path: Path) -> None:
+    """Verifies a header object without a version is malformed, not unsupported."""
+    file_path = tmp_path / "sess_no_version.jsonl"
+    file_path.write_text(
+        json.dumps({"type": "session", "id": "no_version"}) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(SessionFormatError, match="must be a non-negative safe integer"):
+        Session.load(file_path)
+
+
+def test_session_load_migrates_v0_file(tmp_path: Path) -> None:
+    """Verifies a v0 log loads through the migration chain as v4 events."""
+    file_path = tmp_path / "mig_v0.jsonl"
+    file_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 0,
+                        "id": "mig_v0",
+                        "createdAt": 1000,
+                        "delegationDepth": 0,
+                    }
+                ),
+                json.dumps(
+                    {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+                ),
+                json.dumps(
+                    {
+                        "type": "turn/end",
+                        "seq": 1,
+                        "time": 1001,
+                        "data": {"turn": 1, "reason": {"kind": "completed"}},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = Session.load(file_path)
+    assert loaded.session_id == "mig_v0"
+    assert [event.type for event in loaded.events] == [
+        EventType.TURN_START,
+        EventType.TURN_END,
+    ]
+    assert loaded.events[0].payload == {"turn": 1}
+    assert loaded.events[1].payload == {"turn": 1, "reason": {"kind": "completed"}}
+
+
+def test_session_load_skips_ignorable_unknown_and_refuses_known_unknown(
+    tmp_path: Path,
+) -> None:
+    """Verifies unknown ignorable rows are skipped while unknown rows are refused."""
+    file_path = tmp_path / "sess_unknown.jsonl"
+    file_path.write_text(
+        _v4_header_line("unknown_sess")
+        + "\n"
+        + json.dumps(
+            {
+                "type": "vendor/widget",
+                "seq": 1,
+                "time": 100000,
+                "data": {"x": 1},
+                "ignorable": True,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "user/message",
+                "seq": 2,
+                "time": 100001,
+                "data": {"text": "kept"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 1
+    assert loaded.events[0].payload == {"text": "kept"}
+
+    file_path.write_text(
+        _v4_header_line("unknown_sess")
+        + "\n"
+        + json.dumps(
+            {"type": "vendor/widget", "seq": 1, "time": 100000, "data": {"x": 1}}
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(SessionFormatUnsupportedError, match="unknown event type"):
+        Session.load(file_path)
 
 
 def test_session_append_fcntl_fallback(tmp_path: Path) -> None:
@@ -375,3 +686,669 @@ def test_session_derive_messages_method() -> None:
     msgs = session.derive_messages()
     assert len(msgs) == 1
     assert msgs[0]["content"] == "hello"
+
+
+def _write_history_file(
+    file_path: Path, version: int, session_id: str, rows: list[dict]
+) -> None:
+    """Write one historical log (physical header + source rows) as JSONL."""
+    header: dict = {
+        "type": "session",
+        "version": version,
+        "id": session_id,
+        "createdAt": 1000,
+        "delegationDepth": 0,
+    }
+    if version >= 2:
+        header["isSeeded"] = False
+    file_path.write_text(
+        "\n".join([json.dumps(header)] + [json.dumps(row) for row in rows]) + "\n",
+        encoding="utf-8",
+    )
+
+
+#: Source rows of the end-to-end fixtures in test_format.py
+#: (test_e2e_v*_to_v4), paired with the migrated event types Session.load
+#: must produce for each.
+_E2E_HISTORY_CASES: list[tuple[int, str, list[dict], list[EventType]]] = [
+    (
+        0,
+        "e2e-v0",
+        [
+            {
+                "type": "turn/start",
+                "seq": 0,
+                "time": 1000,
+                "data": {"turn": 1, "trigger": {"kind": "user"}},
+            },
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "steering/message",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "turn": 1,
+                    "content": [{"type": "text", "text": "steer"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "compact/start",
+                "seq": 3,
+                "time": 1003,
+                "data": {"compactionId": "c1", "turn": 1},
+            },
+            {
+                "type": "step/end",
+                "seq": 4,
+                "time": 1004,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 5,
+                "time": 1005,
+                "data": {"turn": 1, "reason": {"kind": "aborted"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.SYSTEM_MESSAGE,
+            EventType.USER_MESSAGE,
+            EventType.COMPACTION_START,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+    (
+        1,
+        "e2e-v1",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "user/message",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "role": "user",
+                    "id": "m1",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "assistant/chunk",
+                "seq": 3,
+                "time": 1003,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "chunk": {"type": "text-delta", "index": 0, "text": "Hello"},
+                },
+            },
+            {
+                "type": "assistant/chunk",
+                "seq": 4,
+                "time": 1004,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "chunk": {"type": "text-delta", "index": 0, "text": " world"},
+                },
+            },
+            {
+                "type": "assistant/message",
+                "seq": 5,
+                "time": 1005,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "m2",
+                        "role": "assistant",
+                        "source": {"kind": "model"},
+                        "content": [{"type": "text", "text": "Hello world"}],
+                    },
+                },
+                "sourceEventSeqs": [3, 4],
+                "surfaceOp": "append",
+            },
+            {
+                "type": "step/end",
+                "seq": 6,
+                "time": 1006,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 7,
+                "time": 1007,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.SYSTEM_MESSAGE,
+            EventType.USER_MESSAGE,
+            EventType.ASSISTANT_MESSAGE,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+    (
+        2,
+        "e2e-v2",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "request/header",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "header": {"system": "Be helpful."},
+                    "reason": {"kind": "start"},
+                },
+            },
+            {
+                "type": "user/message",
+                "seq": 3,
+                "time": 1003,
+                "data": {
+                    "role": "user",
+                    "id": "m1",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "step/end",
+                "seq": 4,
+                "time": 1004,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 5,
+                "time": 1005,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.SYSTEM_MESSAGE,
+            EventType.SYSTEM_MESSAGE,
+            EventType.REQUEST_HEADER,
+            EventType.USER_MESSAGE,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+    (
+        3,
+        "e2e-v3",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "user/message",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "role": "user",
+                    "id": "m-user-1",
+                    "content": [{"type": "text", "text": "hello"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "assistant/message",
+                "seq": 3,
+                "time": 1003,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "m-asst-1",
+                        "role": "assistant",
+                        "source": {"kind": "model"},
+                        "content": [{"type": "text", "text": "hi there"}],
+                    },
+                    "stream": [],
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "tool/call",
+                "seq": 4,
+                "time": 1004,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "callId": "c1",
+                    "name": "add",
+                    "arguments": {"a": 1},
+                },
+            },
+            {
+                "type": "tool/result",
+                "seq": 5,
+                "time": 1005,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "m-tool-1",
+                        "role": "user",
+                        "source": {"kind": "tool", "callId": "c1"},
+                        "content": [
+                            {
+                                "type": "tool-result",
+                                "toolCallId": "c1",
+                                "content": [{"type": "text", "text": "3"}],
+                            }
+                        ],
+                    },
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "step/end",
+                "seq": 6,
+                "time": 1006,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 7,
+                "time": 1007,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.USER_MESSAGE,
+            EventType.ASSISTANT_MESSAGE,
+            EventType.TOOL_CALL,
+            EventType.TOOL_RESULT,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("version", "session_id", "rows", "expected_types"),
+    _E2E_HISTORY_CASES,
+    ids=["e2e-v0", "e2e-v1", "e2e-v2", "e2e-v3"],
+)
+def test_session_load_e2e_history_fixtures(
+    tmp_path: Path,
+    version: int,
+    session_id: str,
+    rows: list[dict],
+    expected_types: list[EventType],
+) -> None:
+    """Verifies each end-to-end history fixture loads through Session.load.
+
+    The inputs mirror test_e2e_v*_to_v4 in test_format.py; this pins the
+    store mapping against the migration's own validated output instead of
+    only the format-level byte encoding.
+    """
+    file_path = tmp_path / f"{session_id}.jsonl"
+    _write_history_file(file_path, version, session_id, rows)
+    loaded = Session.load(file_path)
+    assert loaded.session_id == session_id
+    assert [event.type for event in loaded.events] == expected_types
+
+
+def test_session_append_to_migrated_session_is_refused(tmp_path: Path) -> None:
+    """Verifies append fails closed on a migrated log instead of bricking it.
+
+    Appending a current-version row to a historical log corrupts the next
+    load (missing surfaceOp marker, seq drift from promoted events), so
+    append refuses until the session is republished as current-version v4.
+    """
+    file_path = tmp_path / "mig_append.jsonl"
+    _write_history_file(
+        file_path,
+        3,
+        "mig_append",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "turn/end",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+    )
+    before = file_path.read_bytes()
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        loaded.append(
+            SessionEvent(
+                id="ev_after",
+                session_id="mig_append",
+                type=EventType.USER_MESSAGE,
+                payload={"text": "after"},
+            )
+        )
+    assert len(loaded.events) == 2
+    assert file_path.read_bytes() == before
+
+
+def test_session_append_to_current_v4_session_loads_back(tmp_path: Path) -> None:
+    """Verifies append still works on a current-version log (load, append, reload)."""
+    file_path = tmp_path / "current_append.jsonl"
+    file_path.write_text(
+        _v4_header_line("current_append")
+        + "\n"
+        + json.dumps(
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "turn/end",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = Session.load(file_path)
+    loaded.append(
+        SessionEvent(
+            id="ev_after",
+            session_id="current_append",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "after"},
+        )
+    )
+    reloaded = Session.load(file_path)
+    assert [event.type for event in reloaded.events] == [
+        EventType.TURN_START,
+        EventType.TURN_END,
+        EventType.USER_MESSAGE,
+    ]
+    assert reloaded.events[2].payload == {"text": "after"}
+
+
+def _v4_file_with_two_events(file_path: Path, session_id: str) -> None:
+    """Write a current-version v4 log with two events (load, append, reload)."""
+    file_path.write_text(
+        _v4_header_line(session_id)
+        + "\n"
+        + json.dumps(
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "turn/end",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _v3_two_event_rows() -> list[dict]:
+    """Two valid historical v3 rows (turn/start, turn/end)."""
+    return [
+        {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+        {
+            "type": "turn/end",
+            "seq": 1,
+            "time": 1001,
+            "data": {"turn": 1, "reason": {"kind": "done"}},
+        },
+    ]
+
+
+def test_session_constructed_over_historical_file_refuses_append(
+    tmp_path: Path,
+) -> None:
+    """Verifies constructing a Session over a historical log refuses append.
+
+    The load-path guard alone is not enough: a Session built directly over
+    an existing v3 log used to append a current-version row to it, bricking
+    the next load with a seq gap. Construction classifies the on-disk
+    header, so append refuses and the file stays byte-identical.
+    """
+    file_path = tmp_path / "probe-bypass2.jsonl"
+    _write_history_file(file_path, 3, "probe-bypass2", _v3_two_event_rows())
+    before = file_path.read_bytes()
+    session = Session(session_id="probe-bypass2", storage_path=file_path)
+    event = SessionEvent(
+        id="ev_after",
+        session_id="probe-bypass2",
+        type=EventType.USER_MESSAGE,
+        payload={"text": "after"},
+    )
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        session.append(event)
+    assert event.seq == 0
+    assert session.events == []
+    assert file_path.read_bytes() == before
+    assert len(Session.load(file_path).events) == 2
+
+
+def test_session_constructed_over_header_only_v4_file_appends(
+    tmp_path: Path,
+) -> None:
+    """Verifies constructing a Session over a header-only v4 log appends.
+
+    Positive control for the construction-time classification: a current
+    v4 header classifies as current, so append writes the first event row
+    under the existing header and the log reloads with one event.
+    """
+    file_path = tmp_path / "header_only.jsonl"
+    file_path.write_text(_v4_header_line("header_only") + "\n", encoding="utf-8")
+    session = Session(session_id="header_only", storage_path=file_path)
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="header_only",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    reloaded = Session.load(file_path)
+    assert len(reloaded.events) == 1
+    assert reloaded.events[0].payload == {"text": "first"}
+
+
+def test_session_constructed_over_empty_file_writes_header(tmp_path: Path) -> None:
+    """Verifies constructing a Session over an empty file still writes a header."""
+    file_path = tmp_path / "empty.jsonl"
+    file_path.write_text("", encoding="utf-8")
+    session = Session(session_id="empty", storage_path=file_path)
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="empty",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0])["version"] == 4
+    assert len(Session.load(file_path).events) == 1
+
+
+def test_session_constructed_over_newer_version_file_raises(tmp_path: Path) -> None:
+    """Verifies constructing a Session over a newer-version log fails loud."""
+    file_path = tmp_path / "newer.jsonl"
+    file_path.write_text(_v4_header_line("newer", version=5) + "\n", encoding="utf-8")
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="uses log format v5",
+    ):
+        Session(session_id="newer", storage_path=file_path)
+
+
+def test_session_constructed_over_malformed_header_raises(tmp_path: Path) -> None:
+    """Verifies constructing a Session over a corrupt header fails loud."""
+    file_path = tmp_path / "bad_header.jsonl"
+    file_path.write_text('{"bad json\n', encoding="utf-8")
+    with pytest.raises(
+        SessionPersistenceCorruptionError,
+        match="corrupt session header",
+    ):
+        Session(session_id="bad_header", storage_path=file_path)
+
+
+def test_session_append_to_blank_only_file_writes_header(tmp_path: Path) -> None:
+    """Verifies append to a blank-lines-only file writes a header first."""
+    file_path = tmp_path / "blank.jsonl"
+    file_path.write_text("\n\n", encoding="utf-8")
+    session = Session(session_id="blank", storage_path=file_path)
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="blank",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    lines = [
+        line
+        for line in file_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert json.loads(lines[0])["version"] == 4
+    assert len(Session.load(file_path).events) == 1
+
+
+def test_session_append_refuses_when_log_replaced_after_load(tmp_path: Path) -> None:
+    """Verifies append refuses when the on-disk log is replaced after load.
+
+    A session loaded from a current v4 log must not silently append to a
+    historical log swapped in underneath it: append re-classifies the
+    on-disk header before mutating, so the replacement stays untouched
+    and the in-memory log is unchanged.
+    """
+    file_path = tmp_path / "stale.jsonl"
+    _v4_file_with_two_events(file_path, "stale")
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
+    _write_history_file(file_path, 3, "stale", _v3_two_event_rows())
+    replacement = file_path.read_bytes()
+    event = SessionEvent(
+        id="ev_after",
+        session_id="stale",
+        type=EventType.USER_MESSAGE,
+        payload={"text": "after"},
+    )
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        loaded.append(event)
+    assert event.seq == 0
+    assert len(loaded.events) == 2
+    assert file_path.read_bytes() == replacement
+
+
+def test_session_append_refuses_when_log_replaced_with_newer_version(
+    tmp_path: Path,
+) -> None:
+    """Verifies append refuses when the log is replaced by a newer version."""
+    file_path = tmp_path / "stale_newer.jsonl"
+    _v4_file_with_two_events(file_path, "stale_newer")
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
+    file_path.write_text(
+        _v4_header_line("stale_newer", version=5) + "\n", encoding="utf-8"
+    )
+    replacement = file_path.read_bytes()
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="uses log format v5",
+    ):
+        loaded.append(
+            SessionEvent(
+                id="ev_after",
+                session_id="stale_newer",
+                type=EventType.USER_MESSAGE,
+                payload={"text": "after"},
+            )
+        )
+    assert len(loaded.events) == 2
+    assert file_path.read_bytes() == replacement
+
+
+def test_session_append_uses_header_of_file_created_after_construction(
+    tmp_path: Path,
+) -> None:
+    """Verifies append adopts a v4 header written after construction.
+
+    A session built while no log exists must not write a second header
+    when a current-version log appears at its path before the first
+    append: append re-classifies the on-disk header and writes only the
+    event row under it.
+    """
+    file_path = tmp_path / "appears_late.jsonl"
+    session = Session(session_id="appears_late", storage_path=file_path)
+    file_path.write_text(_v4_header_line("appears_late") + "\n", encoding="utf-8")
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="appears_late",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    lines = [
+        line
+        for line in file_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["version"] == 4
+    assert len(Session.load(file_path).events) == 1

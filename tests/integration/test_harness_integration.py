@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -99,10 +100,15 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
     assert projected[3]["role"] == "assistant"
     assert projected[3]["content"] == "The answer is 42."
 
-    # 7. Verify JSONL file persistence on disk
+    # 7. Verify JSONL file persistence on disk: one v4 header line plus
+    # one physical row per event.
     assert session.storage_path.exists()
     lines = session.storage_path.read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 11
+    assert len(lines) == 12
+    header = json.loads(lines[0])
+    assert header["type"] == "session"
+    assert header["version"] == 4
+    assert header["id"] == session.session_id
 
 
 @pytest.mark.asyncio

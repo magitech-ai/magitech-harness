@@ -8,6 +8,17 @@ from magitech_harness.session.events import (
     ToolCallData,
     ToolResultData,
 )
+from magitech_harness.session.format import KNOWN_SESSION_EVENT_TYPES
+
+
+def test_event_type_covers_known_session_event_types() -> None:
+    """Verifies EventType covers every format-admitted v4 event type.
+
+    Session.load must not refuse the format layer's own validated output,
+    so the vocabulary lives here; per-type payload and lifecycle validation
+    belongs to the event-vocabulary work, not to this mapping.
+    """
+    assert KNOWN_SESSION_EVENT_TYPES <= {member.value for member in EventType}
 
 
 def test_tool_call_data_serialization() -> None:
