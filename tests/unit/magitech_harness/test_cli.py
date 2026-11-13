@@ -320,6 +320,7 @@ async def test_main_async_session_commands(tmp_path: Path, capsys) -> None:
     await ctx.flush()
     s = ctx.sessions.create("persisted_123")
     ctx.sessions.log_event(s, EventType.USER_MESSAGE, {"text": "hello persisted"})
+    await ctx.sessions.flush()
 
     # Test session list
     await main_async(["--storage", str(tmp_path), "session", "list"])

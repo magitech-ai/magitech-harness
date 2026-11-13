@@ -1,4 +1,16 @@
-"""Session storage and deterministic model history projection (derive_messages)."""
+"""Session storage and deterministic model history projection (derive_messages).
+
+Ownership split: a Session is purely in-memory and never touches the
+filesystem. Durable writes flow from Session.append through
+``session/event`` publication to the live tracker, which batches them
+onto the write handle the service opened for that session. The service
+layer owns the persistence backend and the write handles; the store
+owns live-session membership (prepare / enter / announce).
+``Session.load`` is a strict file-level restore of one stored log: the
+stored header is authoritative for the session id, a missing or empty
+file is not found, and a migrated log refuses append until it is
+republished through the backend.
+"""
 
 from __future__ import annotations
 
@@ -7,11 +19,10 @@ import inspect
 import json
 import logging
 import os
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Self, TextIO
+from typing import Any, Self
 
 from magitech_harness.session.events import (
     CORE_EVENT_TYPES,
@@ -35,13 +46,13 @@ from magitech_harness.session.format import (
     assert_v4_row_admission,
     create_session_format_catalog_with_children,
     decode_envelope_row,
-    encode_envelope_event,
     is_json_object,
     require_count,
     require_safe_integer,
     session_format_version_refusal,
     snapshot_header,
 )
+from magitech_harness.session.persistence import SessionPersistenceNotFoundError
 from magitech_harness.session.repair import (
     interrupted_turn_closers,
     open_turn_closers,
@@ -212,39 +223,6 @@ def derive_messages(events: list[SessionEvent]) -> list[dict[str, Any]]:
     return _normalize_adjacent_messages(messages)
 
 
-def _lock_exclusive(f: TextIO) -> None:
-    """Take an exclusive advisory lock on the open session file.
-
-    POSIX uses flock; Windows uses msvcrt byte-range locking on the first
-    byte (the single-byte scheme file-locking libraries use). Both are
-    blocking and exclusive, so concurrent appenders serialize. The lock
-    region is pinned to offset 0 because msvcrt locks from the current
-    file position, which moves after a write.
-    """
-    if sys.platform == "win32":
-        import msvcrt
-
-        f.seek(0)
-        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-
-
-def _unlock(f: TextIO) -> None:
-    """Release the advisory lock taken by _lock_exclusive."""
-    if sys.platform == "win32":
-        import msvcrt
-
-        f.seek(0)
-        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
-    else:
-        import fcntl
-
-        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-
 # ---------------------------------------------------------------------------
 # Plugin records
 # ---------------------------------------------------------------------------
@@ -343,7 +321,6 @@ class Session:
     def __init__(
         self,
         session_id: str,
-        storage_path: Path | None = None,
         *,
         seed: list[SessionEvent] | None = None,
         header: dict[str, Any] | None = None,
@@ -352,7 +329,6 @@ class Session:
         projections: list[MessageProjection] | None = None,
     ) -> None:
         self.session_id = session_id
-        self.storage_path = storage_path
         self.events: list[SessionEvent] = []
         self._surface_manager = SurfaceManager(self.events, projections)
         self._appending = False
@@ -361,27 +337,12 @@ class Session:
         self._publish_hook: Callable[[SessionEvent], None] | None = None
         # Retained v4 logical header (set on load, built on first append).
         self._header: dict[str, Any] | None = None
-        # Whether the on-disk log already carries a physical header line.
-        # The logical header is always present in memory; this flag is
-        # what decides whether the first append writes a header row.
-        self._header_written: bool = False
-        # True when the on-disk log (if any) is current-version v4. A
-        # session loaded from a migrated log refuses append until the log
-        # is republished as current-version v4.
+        # True when the log this session was restored from is already
+        # current-version v4. A session loaded from a migrated log
+        # refuses append until the log is republished as current-version
+        # v4 through the backend; fresh sessions are current by
+        # construction.
         self._on_disk_current: bool = True
-        if (
-            storage_path is not None
-            and storage_path.exists()
-            and storage_path.stat().st_size > 0
-        ):
-            # Classify the log this session would append to. A historical
-            # log refuses append from construction; an unsupported or
-            # malformed header fails loud here, as it does on load.
-            disk_header, self._on_disk_current = _on_disk_header(storage_path)
-            if disk_header is not None:
-                self._header_written = True
-            if header is None and disk_header is not None:
-                self._header = disk_header
         if header is not None:
             self._header = header
         if self._header is None:
@@ -526,12 +487,10 @@ class Session:
         header: dict[str, Any] | None = None,
         inherited_event_count: int | None = None,
         projections: list[MessageProjection] | None = None,
-        storage_path: Path | None = None,
     ) -> Session:
         """Create a detached session, snapshotting borrowed seed events."""
         return cls(
             session_id,
-            storage_path,
             seed=seed,
             header=header,
             inherited_event_count=inherited_event_count,
@@ -548,7 +507,6 @@ class Session:
         inherited_event_count: int,
         event_state: str,
         projections: list[MessageProjection] | None = None,
-        storage_path: Path | None = None,
     ) -> Session:
         """Restore a detached session, adopting independently owned events.
 
@@ -563,7 +521,6 @@ class Session:
             )
         return cls(
             session_id,
-            storage_path,
             seed=seed,
             header=header,
             inherited_event_count=inherited_event_count,
@@ -602,46 +559,18 @@ class Session:
             )
         return attachment
 
-    def _refresh_on_disk(self) -> None:
-        """Re-classify the on-disk log before any mutation.
+    def _require_appendable(self) -> None:
+        """Refuse appends to a session restored from a migrated log.
 
-        A historical or newer log refuses append instead of bricking it.
-        When the on-disk log is current-version v4 and longer than the
-        in-memory log, its events are adopted first, so the next seq is
-        derived from the log — not from ``len(self.events)`` alone.
+        A migrated log is republished as current-version v4 through the
+        backend before it accepts new events; appending in memory would
+        leave the restored session ahead of a log it can no longer
+        extend.
         """
-        if self.storage_path is None:
-            return
-        if not self.storage_path.exists() or self.storage_path.stat().st_size == 0:
-            return
-        on_disk_header, on_disk_current = _on_disk_header(self.storage_path)
-        self._on_disk_current = on_disk_current
-        if on_disk_header is not None:
-            self._header_written = True
-        if on_disk_header is not None and self._header is None:
-            # Defensive adoption; __init__ always sets _header, so this
-            # line can never run.
-            self._header = on_disk_header  # pragma: no cover
-        if not on_disk_current:
+        if not self._on_disk_current:
             raise SessionFormatUnsupportedError(
                 "cannot append to a migrated session until it is republished "
-                f"as current-version v4 (session {self.session_id!r}; "
-                f"raw log: {self.storage_path})"
-            )
-        disk_count = _on_disk_event_count(self.storage_path)
-        if disk_count > len(self.events):
-            lines = [
-                line.strip()
-                for line in self.storage_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            header, events, _, _ = _load_lines(lines, self.storage_path)
-            self._header = header
-            self._header_written = True
-            self.events.clear()
-            self.events.extend(events)
-            self._surface_manager = SurfaceManager(
-                self.events, self._surface_manager._projections
+                f"as current-version v4 (session {self.session_id!r})"
             )
 
     def append(
@@ -663,7 +592,7 @@ class Session:
         type_value = (
             event_type.value if isinstance(event_type, EventType) else str(event_type)
         )
-        self._refresh_on_disk()
+        self._require_appendable()
         entry = self._publication_entry()
         if type_value not in KNOWN_SESSION_EVENT_TYPES:
             raise ValueError(f'unknown session event type "{type_value}"')
@@ -749,7 +678,7 @@ class Session:
         Records are always ``ignorable: true`` and never members of the
         known event vocabulary; the owner validates the payload.
         """
-        self._refresh_on_disk()
+        self._require_appendable()
         entry = self._publication_entry()
         if not is_plugin_record_type(type):
             raise ValueError(f'plugin record type "{type}" is outside the grammar')
@@ -784,7 +713,6 @@ class Session:
         self._appending = True
         try:
             self.events.append(candidate)
-            self._persist_event(candidate)
             if self._publish_hook is not None:
                 self._publish_hook(candidate)
         finally:
@@ -793,55 +721,6 @@ class Session:
                 entry.appending = False
                 if entry.detach_requested and entry.status != "dispatching":
                     entry.detach()
-
-    def _persist_event(self, event: SessionEvent) -> None:
-        """Write one committed event to the JSONL log, if configured."""
-        if self.storage_path is None:
-            return
-        needs_header = not self._header_written
-        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.storage_path, "a", encoding="utf-8") as f:
-            try:
-                _lock_exclusive(f)
-            except (ImportError, OSError, AttributeError):
-                pass
-            try:
-                if needs_header:
-                    header: dict[str, Any] = {
-                        "version": CURRENT_FORMAT_VERSION,
-                        "id": self.session_id,
-                        "createdAt": int(time.time() * 1000),
-                        "isSeeded": False,
-                        "delegationDepth": 0,
-                    }
-                    physical = SESSION_FORMAT_CATALOG.encode_current_header(header, 0)
-                    f.write(json.dumps(physical) + "\n")
-                    self._header = header
-                    self._header_written = True
-                row: dict[str, Any] = {
-                    "type": event.type,
-                    "seq": event.seq,
-                    "time": int(event.timestamp * 1000),
-                    "data": event.payload,
-                    **({"ignorable": True} if event.ignorable else {}),
-                    **(
-                        {"surfaceOp": event.surface_op}
-                        if event.surface_op is not None
-                        else {}
-                    ),
-                    **(
-                        {"sourceEventSeqs": event.source_event_seqs}
-                        if event.source_event_seqs is not None
-                        else {}
-                    ),
-                }
-                f.write(json.dumps(encode_envelope_event(row)) + "\n")
-                f.flush()
-            finally:
-                try:
-                    _unlock(f)
-                except (ImportError, OSError, AttributeError):
-                    pass
 
     def derive_messages(self) -> list[dict[str, Any]]:
         """Project current model-visible messages from event log."""
@@ -857,41 +736,41 @@ class Session:
         storage_path: Path,
         projections: list[MessageProjection] | None = None,
     ) -> Session:
-        """Load session from a JSONL file.
+        """Load a session from one stored log file.
 
-        Refuses by default: a newer-version log, a malformed header, a
-        corrupt row, a gapped or duplicated seq, or an unknown
-        non-ignorable event raises instead of being silently truncated
-        or repaired. Missing or empty files still load as an empty
-        (phantom) session; that ownership belongs to the persistence
-        rewrite. Unknown ignorable events are carried opaquely. A log
-        holding ``image/offload`` needs its message projection supplied
-        here, or the fold refuses the event.
+        Strict file-level restore. Refuses by default: a newer-version
+        log, a malformed header, a corrupt row, a gapped or duplicated
+        seq, or an unknown non-ignorable event raises instead of being
+        silently truncated or repaired. A missing, empty, or blank-only
+        file raises not-found instead of synthesizing an empty session.
+        The stored header is authoritative for the session id. Unknown
+        ignorable events are carried opaquely. A log holding
+        ``image/offload`` needs its message projection supplied here, or
+        the fold refuses the event. The returned session is detached and
+        in-memory only: nothing written here reaches a durable log, and
+        a migrated log refuses append until it is republished through
+        the backend.
         """
-        session_id = storage_path.stem
-        if storage_path.exists() and storage_path.stat().st_size > 0:
-            lines = [
-                line.strip()
-                for line in storage_path.read_text(encoding="utf-8").splitlines()
-                if line.strip()
-            ]
-            if lines:
-                header, events, on_disk_current, inherited = _load_lines(
-                    lines, storage_path
-                )
-                session_id = header["id"]
-                sess = cls.from_restore(
-                    session_id,
-                    events,
-                    header,
-                    inherited,
-                    "shared-frozen",
-                    projections=projections,
-                    storage_path=storage_path,
-                )
-                sess._on_disk_current = on_disk_current
-                return sess
-        return cls.create(session_id, storage_path=storage_path)
+        if not storage_path.exists() or storage_path.stat().st_size == 0:
+            raise SessionPersistenceNotFoundError(str(storage_path))
+        lines = [
+            line.strip()
+            for line in storage_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if not lines:
+            raise SessionPersistenceNotFoundError(str(storage_path))
+        header, events, on_disk_current, inherited = _load_lines(lines, storage_path)
+        sess = cls.from_restore(
+            header["id"],
+            events,
+            header,
+            inherited,
+            "shared-frozen",
+            projections=projections,
+        )
+        sess._on_disk_current = on_disk_current
+        return sess
 
 
 def _parse_row(line: str, row_index: int, storage_path: Path) -> dict[str, Any]:
@@ -1087,33 +966,6 @@ def _classify_header_line(
     return header_value, read.header, read.status == "current"
 
 
-def _on_disk_header(storage_path: Path) -> tuple[dict[str, Any] | None, bool]:
-    """Classify the header line of an existing stored log, if it has one.
-
-    Returns the logical header and whether the log is current-version v4.
-    A file with no non-empty line has no header yet and reports
-    ``(None, True)``; it is treated as a fresh log. Unsupported and
-    malformed headers raise the same errors Session.load raises.
-    """
-    with open(storage_path, encoding="utf-8") as f:
-        for raw_line in f:
-            line = raw_line.strip()
-            if line:
-                _, header, is_current = _classify_header_line(line, storage_path)
-                return header, is_current
-    return None, True
-
-
-def _on_disk_event_count(storage_path: Path) -> int:
-    """Count event rows in an on-disk log (header line excluded)."""
-    count = 0
-    with open(storage_path, encoding="utf-8") as f:
-        for raw_line in f:
-            if raw_line.strip():
-                count += 1
-    return max(0, count - 1)
-
-
 def _load_lines(
     lines: list[str], storage_path: Path
 ) -> tuple[dict[str, Any], list[SessionEvent], bool, int]:
@@ -1197,9 +1049,11 @@ class SessionForkError(Exception):
 class SessionStore:
     """In-memory store of live sessions: prepare / enter / announce.
 
-    Persistence is intentionally not in the store: the agent lifecycle
-    attaches a session-log writer to each published session's write
-    handle; a session published outside that lifecycle persists nothing.
+    Persistence is intentionally not in the store: the service layer
+    owns the persistence backend and the write handles, and durable
+    writes reach a handle through ``session/event`` publication and the
+    live tracker the service installs. A session published outside
+    that lifecycle persists nothing.
     """
 
     def __init__(self, ctx: Any | None = None) -> None:
@@ -1306,7 +1160,6 @@ class SessionStore:
         event_state = opts.get("event_state")
         seed = opts.get("seed")
         inherited = opts.get("inherited_event_count")
-        storage_path = opts.get("storage_path")
         if event_state is not None:
             if event_state not in ("detached", "shared-frozen"):
                 raise ValueError(
@@ -1325,7 +1178,6 @@ class SessionStore:
                 inherited,
                 event_state,
                 projections=self._projections,
-                storage_path=storage_path,
             )
         else:
             session = Session.create(
@@ -1334,7 +1186,6 @@ class SessionStore:
                 header=header,
                 inherited_event_count=inherited,
                 projections=self._projections,
-                storage_path=storage_path,
             )
         attachment = _StoreAttachment(self, "prepared")
         attachment.session = session
@@ -1481,7 +1332,11 @@ class SessionStore:
 
         The single durability entry point: every listener settles
         (all-settled), then the first failure is thrown. Returns whether
-        at least one listener participated.
+        at least one listener participated. Durability itself is
+        performed by the service layer: the service installs the live
+        tracker as a ``session/flush`` listener, so dispatch drains the
+        session's buffered live events and flushes its write handle;
+        the service-wide barrier flushes every handle it owns.
         """
         self._live_entry(session)
         callbacks = self._listeners("session/flush")

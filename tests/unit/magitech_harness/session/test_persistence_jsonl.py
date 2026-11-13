@@ -1459,7 +1459,7 @@ def test_handle_flush_skips_dir_fsync_on_windows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Directory fsync is POSIX-only; a Windows flush still materializes."""
-    monkeypatch.setattr(sys, "platform", "win32")
+    _patch_windows(monkeypatch, _FakeMsvcrt())
     handle = _open_handle(tmp_path)
     handle.flush()
     path = tmp_path / "s-1" / "session.v4.jsonl"
@@ -1862,6 +1862,24 @@ def test_service_open_write_kernel_lease_contention_across_instances(
     assert reopened.access == "write"
     reopened.close()
     reader.close()
+
+
+def test_service_create_then_append_takes_lease_across_instances(
+    tmp_path: Path,
+) -> None:
+    """A created handle takes the kernel lease on its first materializing
+    write, so a second instance cannot write-open it until it closes."""
+    first_svc = _persistence(tmp_path)
+    second_svc = _persistence(tmp_path)
+    handle = first_svc.create(_v4_header("s-1"))
+    handle.append([_session_event("s-1", "turn/start", 0, {"turn": 1})])
+    with pytest.raises(SessionAlreadyOwnedError):
+        second_svc.open("s-1", "write")
+    handle.close()
+    reopened = second_svc.open("s-1", "write")
+    _, events = reopened.read()
+    assert len(events) == 1
+    reopened.close()
 
 
 def test_service_open_unknown_access_is_value_error(tmp_path: Path) -> None:

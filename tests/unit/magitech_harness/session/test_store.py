@@ -5,7 +5,6 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
 
 import pytest
 from anima import Context
@@ -21,15 +20,15 @@ from magitech_harness.session.format import (
     SessionFormatUnsupportedError,
     SessionPersistenceCorruptionError,
 )
+from magitech_harness.session.persistence import SessionPersistenceNotFoundError
+from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import (
     Session,
     SessionForkError,
     SessionPreparation,
     SessionStore,
-    _lock_exclusive,
     _normalize_adjacent_messages,
     _to_session_event,
-    _unlock,
     append_plugin_record,
     derive_messages,
     plugin_record_of,
@@ -75,10 +74,10 @@ def test_derive_messages_ignores_unknown_and_handles_roles() -> None:
     assert msgs[2]["content"] == "result_123"
 
 
-def test_session_append_and_load(tmp_path: Path) -> None:
-    """Verifies Session persistence, sequential numbering, and loading from JSONL file."""
-    file_path = tmp_path / "sess_save.jsonl"
-    session = Session(session_id="sess_custom", storage_path=file_path)
+def test_session_append_and_load() -> None:
+    """Verifies Session append numbering in memory; durability is the
+    service's job (see the service round-trip tests)."""
+    session = Session(session_id="sess_custom")
 
     event1 = session.append(
         EventType.USER_MESSAGE,
@@ -92,32 +91,11 @@ def test_session_append_and_load(tmp_path: Path) -> None:
     )
     assert event1.seq == 0
     assert event2.seq == 1
-    assert file_path.exists()
-
-    # The first line is the v4 physical header, not an event row.
-    lines = file_path.read_text(encoding="utf-8").splitlines()
-    header = json.loads(lines[0])
-    assert header["type"] == "session"
-    assert header["version"] == 4
-    assert header["id"] == "sess_custom"
-    assert header["isSeeded"] is False
-    assert header["delegationDepth"] == 0
-    assert isinstance(header["createdAt"], int)
-
-    # Append blank line to verify line.strip() branch
-    with open(file_path, "a", encoding="utf-8") as f:
-        f.write("\n\n")
-
-    # Load from disk
-    loaded_session = Session.load(file_path)
-    assert loaded_session.session_id == "sess_custom"
-    assert len(loaded_session.events) == 2
-    # Rows carry no event id; the id is synthesized from session and seq.
-    assert loaded_session.events[0].id == "sess_custom:0"
-    assert loaded_session.events[1].id == "sess_custom:1"
-    assert loaded_session.events[0].payload == {"text": "persisted text 1"}
-    assert loaded_session.events[0].seq == 0
-    assert loaded_session.events[1].seq == 1
+    assert session.events[0].id == "sess_custom:0"
+    assert session.events[1].id == "sess_custom:1"
+    assert session.events[0].payload == {"text": "persisted text 1"}
+    assert session.events[0].seq == 0
+    assert session.events[1].seq == 1
 
 
 def _v4_header_line(session_id: str, **extra: object) -> str:
@@ -445,113 +423,41 @@ def test_session_load_carries_ignorable_unknown_and_refuses_known_unknown(
         Session.load(file_path)
 
 
-def test_session_append_fcntl_fallback(tmp_path: Path) -> None:
-    """Verifies Session.append behaves gracefully when fcntl is unavailable or throws."""
-    file_path = tmp_path / "sess_nofcntl.jsonl"
-    session = Session(session_id="sess_nofcntl", storage_path=file_path)
+def test_session_load_header_is_authoritative_for_id(tmp_path: Path) -> None:
+    """Verifies a path load takes the session id from the stored header.
 
-    with patch.dict("sys.modules", {"fcntl": None}):
-        session.append(
-            EventType.USER_MESSAGE, {"text": "no fcntl"}, surface_op="append"
-        )
-        assert len(session.events) == 1
-
-
-def _fake_msvcrt() -> SimpleNamespace:
-    """A stub msvcrt recording locking calls (no Windows in the test env)."""
-    return SimpleNamespace(locking=MagicMock(), LK_LOCK=1, LK_UNLCK=0)
-
-
-def test_lock_exclusive_and_unlock_windows_use_msvcrt(tmp_path: Path) -> None:
-    """Verifies the Windows locking path byte-locks offset 0 via msvcrt."""
-    fake_msvcrt = _fake_msvcrt()
-    file_path = tmp_path / "sess_win.jsonl"
-    with (
-        patch("sys.platform", "win32"),
-        patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),
-        open(file_path, "a", encoding="utf-8") as f,
-    ):
-        _lock_exclusive(f)
-        fake_msvcrt.locking.assert_called_once_with(f.fileno(), 1, 1)
-        fake_msvcrt.locking.reset_mock()
-        _unlock(f)
-        fake_msvcrt.locking.assert_called_once_with(f.fileno(), 0, 1)
-
-
-def test_session_append_windows_locking(tmp_path: Path) -> None:
-    """Verifies Session.append locks, writes, and unlocks via msvcrt on Windows."""
-    fake_msvcrt = _fake_msvcrt()
-    file_path = tmp_path / "sess_win_append.jsonl"
-    session = Session(session_id="sess_win", storage_path=file_path)
-    with (
-        patch("sys.platform", "win32"),
-        patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),
-    ):
-        session.append(
-            EventType.USER_MESSAGE, {"text": "windows lock"}, surface_op="append"
-        )
-    assert len(session.events) == 1
-    assert fake_msvcrt.locking.call_count == 2
-    lock_call, unlock_call = fake_msvcrt.locking.call_args_list
-    assert lock_call.args[1:] == (1, 1)
-    assert unlock_call.args[1:] == (0, 1)
-    assert "windows lock" in file_path.read_text(encoding="utf-8")
-
-
-def _fake_fcntl() -> SimpleNamespace:
-    """A stub fcntl recording flock calls (drives the POSIX branch on Windows)."""
-    return SimpleNamespace(flock=MagicMock(), LOCK_EX=2, LOCK_UN=8)
-
-
-def test_lock_exclusive_and_unlock_posix_use_fcntl(tmp_path: Path) -> None:
-    """Verifies the POSIX locking path uses flock for lock and unlock."""
-    fake_fcntl = _fake_fcntl()
-    file_path = tmp_path / "sess_posix.jsonl"
-    with (
-        patch("sys.platform", "linux"),
-        patch.dict("sys.modules", {"fcntl": fake_fcntl}),
-        open(file_path, "a", encoding="utf-8") as f,
-    ):
-        _lock_exclusive(f)
-        fake_fcntl.flock.assert_called_once_with(f.fileno(), 2)
-        fake_fcntl.flock.reset_mock()
-        _unlock(f)
-        fake_fcntl.flock.assert_called_once_with(f.fileno(), 8)
-
-
-def test_session_append_lock_failure_is_best_effort(tmp_path: Path) -> None:
-    """Verifies Session.append still persists when locking raises."""
-    fake_msvcrt = SimpleNamespace(
-        locking=MagicMock(side_effect=OSError("lock failed")), LK_LOCK=1, LK_UNLCK=0
+    No id was requested when loading by path, so the file's own header
+    names the session; the filename stem is never consulted. (A log
+    opened by id through the backend is different: there the requested
+    id must match the header, or the log is refused as corruption.)
+    """
+    file_path = tmp_path / "some_stem.jsonl"
+    file_path.write_text(
+        _v4_header_line("header_named")
+        + "\n"
+        + _v4_row("user/message", 0, {"text": "hi"}, surfaceOp="append")
+        + "\n",
+        encoding="utf-8",
     )
-    file_path = tmp_path / "sess_lock_fail.jsonl"
-    session = Session(session_id="sess_lock_fail", storage_path=file_path)
-    with (
-        patch("sys.platform", "win32"),
-        patch.dict("sys.modules", {"msvcrt": fake_msvcrt}),
-    ):
-        session.append(
-            EventType.USER_MESSAGE,
-            {"text": "persisted despite lock failure"},
-            surface_op="append",
-        )
-    assert len(session.events) == 1
-    assert fake_msvcrt.locking.call_count == 2
-    assert "persisted despite lock failure" in file_path.read_text(encoding="utf-8")
+    loaded = Session.load(file_path)
+    assert loaded.session_id == "header_named"
+    assert len(loaded.events) == 1
 
 
 def test_session_load_nonexistent_or_empty(tmp_path: Path) -> None:
-    """Verifies Session.load on nonexistent or empty file."""
+    """Verifies Session.load on a nonexistent or empty file is not found.
+
+    The phantom empty session is deleted: a missing log is not found,
+    never synthesized.
+    """
     nonexistent = tmp_path / "nonexistent.jsonl"
-    s1 = Session.load(nonexistent)
-    assert s1.session_id == "nonexistent"
-    assert s1.events == []
+    with pytest.raises(SessionPersistenceNotFoundError, match="nonexistent.jsonl"):
+        Session.load(nonexistent)
 
     empty_file = tmp_path / "empty.jsonl"
     empty_file.write_text("", encoding="utf-8")
-    s2 = Session.load(empty_file)
-    assert s2.session_id == "empty"
-    assert s2.events == []
+    with pytest.raises(SessionPersistenceNotFoundError, match="empty.jsonl"):
+        Session.load(empty_file)
 
 
 def test_derive_messages_with_compaction_and_adjacent_fold() -> None:
@@ -1131,7 +1037,12 @@ def test_session_append_to_migrated_session_is_refused(tmp_path: Path) -> None:
 
 
 def test_session_append_to_current_v4_session_loads_back(tmp_path: Path) -> None:
-    """Verifies append still works on a current-version log (load, append, reload)."""
+    """Verifies append still works on a current-version log in memory.
+
+    The loaded session appends in memory only; the file is untouched,
+    so a reload still shows the stored two events. Persisting the
+    append is the service's job (see the service round-trip tests).
+    """
     file_path = tmp_path / "current_append.jsonl"
     file_path.write_text(
         _v4_header_line("current_append")
@@ -1153,13 +1064,14 @@ def test_session_append_to_current_v4_session_loads_back(tmp_path: Path) -> None
     )
     loaded = Session.load(file_path)
     loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
-    reloaded = Session.load(file_path)
-    assert [event.type for event in reloaded.events] == [
+    assert [event.type for event in loaded.events] == [
         EventType.TURN_START,
         EventType.TURN_END,
         EventType.USER_MESSAGE,
     ]
-    assert reloaded.events[2].payload == {"text": "after"}
+    assert loaded.events[2].payload == {"text": "after"}
+    reloaded = Session.load(file_path)
+    assert len(reloaded.events) == 2
 
 
 def _v4_file_with_two_events(file_path: Path, session_id: str) -> None:
@@ -1197,162 +1109,27 @@ def _v3_two_event_rows() -> list[dict]:
     ]
 
 
-def test_session_constructed_over_historical_file_refuses_append(
+def test_session_loaded_from_migrated_log_refuses_append(
     tmp_path: Path,
 ) -> None:
-    """Verifies constructing a Session over a historical log refuses append.
+    """Verifies a session restored from a historical log refuses append.
 
-    The load-path guard alone is not enough: a Session built directly over
-    an existing v3 log used to append a current-version row to it, bricking
-    the next load with a seq gap. Construction classifies the on-disk
-    header, so append refuses and the file stays byte-identical.
+    The load restores the migrated events in memory, but append stays
+    refused until the log is republished as current-version v4 through
+    the backend; the file stays byte-identical.
     """
-    file_path = tmp_path / "probe-bypass2.jsonl"
-    _write_history_file(file_path, 3, "probe-bypass2", _v3_two_event_rows())
+    file_path = tmp_path / "migrated.jsonl"
+    _write_history_file(file_path, 3, "migrated", _v3_two_event_rows())
     before = file_path.read_bytes()
-    session = Session(session_id="probe-bypass2", storage_path=file_path)
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
     with pytest.raises(
         SessionFormatUnsupportedError,
         match="cannot append to a migrated session until it is republished",
     ):
-        session.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
-    assert session.events == []
+        loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
+    assert len(loaded.events) == 2
     assert file_path.read_bytes() == before
-    assert len(Session.load(file_path).events) == 2
-
-
-def test_session_constructed_over_header_only_v4_file_appends(
-    tmp_path: Path,
-) -> None:
-    """Verifies constructing a Session over a header-only v4 log appends.
-
-    Positive control for the construction-time classification: a current
-    v4 header classifies as current, so append writes the first event row
-    under the existing header and the log reloads with one event.
-    """
-    file_path = tmp_path / "header_only.jsonl"
-    file_path.write_text(_v4_header_line("header_only") + "\n", encoding="utf-8")
-    session = Session(session_id="header_only", storage_path=file_path)
-    session.append(EventType.USER_MESSAGE, {"text": "first"}, surface_op="append")
-    reloaded = Session.load(file_path)
-    assert len(reloaded.events) == 1
-    assert reloaded.events[0].payload == {"text": "first"}
-
-
-def test_session_constructed_over_empty_file_writes_header(tmp_path: Path) -> None:
-    """Verifies constructing a Session over an empty file still writes a header."""
-    file_path = tmp_path / "empty.jsonl"
-    file_path.write_text("", encoding="utf-8")
-    session = Session(session_id="empty", storage_path=file_path)
-    session.append(EventType.USER_MESSAGE, {"text": "first"}, surface_op="append")
-    lines = file_path.read_text(encoding="utf-8").splitlines()
-    assert json.loads(lines[0])["version"] == 4
-    assert len(Session.load(file_path).events) == 1
-
-
-def test_session_constructed_over_newer_version_file_raises(tmp_path: Path) -> None:
-    """Verifies constructing a Session over a newer-version log fails loud."""
-    file_path = tmp_path / "newer.jsonl"
-    file_path.write_text(_v4_header_line("newer", version=5) + "\n", encoding="utf-8")
-    with pytest.raises(
-        SessionFormatUnsupportedError,
-        match="uses log format v5",
-    ):
-        Session(session_id="newer", storage_path=file_path)
-
-
-def test_session_constructed_over_malformed_header_raises(tmp_path: Path) -> None:
-    """Verifies constructing a Session over a corrupt header fails loud."""
-    file_path = tmp_path / "bad_header.jsonl"
-    file_path.write_text('{"bad json\n', encoding="utf-8")
-    with pytest.raises(
-        SessionPersistenceCorruptionError,
-        match="corrupt session header",
-    ):
-        Session(session_id="bad_header", storage_path=file_path)
-
-
-def test_session_append_to_blank_only_file_writes_header(tmp_path: Path) -> None:
-    """Verifies append to a blank-lines-only file writes a header first."""
-    file_path = tmp_path / "blank.jsonl"
-    file_path.write_text("\n\n", encoding="utf-8")
-    session = Session(session_id="blank", storage_path=file_path)
-    session.append(EventType.USER_MESSAGE, {"text": "first"}, surface_op="append")
-    lines = [
-        line
-        for line in file_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert json.loads(lines[0])["version"] == 4
-    assert len(Session.load(file_path).events) == 1
-
-
-def test_session_append_refuses_when_log_replaced_after_load(tmp_path: Path) -> None:
-    """Verifies append refuses when the on-disk log is replaced after load.
-
-    A session loaded from a current v4 log must not silently append to a
-    historical log swapped in underneath it: append re-classifies the
-    on-disk header before mutating, so the replacement stays untouched
-    and the in-memory log is unchanged.
-    """
-    file_path = tmp_path / "stale.jsonl"
-    _v4_file_with_two_events(file_path, "stale")
-    loaded = Session.load(file_path)
-    assert len(loaded.events) == 2
-    _write_history_file(file_path, 3, "stale", _v3_two_event_rows())
-    replacement = file_path.read_bytes()
-    with pytest.raises(
-        SessionFormatUnsupportedError,
-        match="cannot append to a migrated session until it is republished",
-    ):
-        loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
-    assert len(loaded.events) == 2
-    assert file_path.read_bytes() == replacement
-
-
-def test_session_append_refuses_when_log_replaced_with_newer_version(
-    tmp_path: Path,
-) -> None:
-    """Verifies append refuses when the log is replaced by a newer version."""
-    file_path = tmp_path / "stale_newer.jsonl"
-    _v4_file_with_two_events(file_path, "stale_newer")
-    loaded = Session.load(file_path)
-    assert len(loaded.events) == 2
-    file_path.write_text(
-        _v4_header_line("stale_newer", version=5) + "\n", encoding="utf-8"
-    )
-    replacement = file_path.read_bytes()
-    with pytest.raises(
-        SessionFormatUnsupportedError,
-        match="uses log format v5",
-    ):
-        loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
-    assert len(loaded.events) == 2
-    assert file_path.read_bytes() == replacement
-
-
-def test_session_append_uses_header_of_file_created_after_construction(
-    tmp_path: Path,
-) -> None:
-    """Verifies append adopts a v4 header written after construction.
-
-    A session built while no log exists must not write a second header
-    when a current-version log appears at its path before the first
-    append: append re-classifies the on-disk header and writes only the
-    event row under it.
-    """
-    file_path = tmp_path / "appears_late.jsonl"
-    session = Session(session_id="appears_late", storage_path=file_path)
-    file_path.write_text(_v4_header_line("appears_late") + "\n", encoding="utf-8")
-    session.append(EventType.USER_MESSAGE, {"text": "first"}, surface_op="append")
-    lines = [
-        line
-        for line in file_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-    assert len(lines) == 2
-    assert json.loads(lines[0])["version"] == 4
-    assert len(Session.load(file_path).events) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1467,21 +1244,22 @@ def _write_v4_file(file_path: Path, session_id: str, rows: list[str]) -> None:
     )
 
 
-def test_session_appends_all_62_types_and_replays_in_order(
+@pytest.mark.asyncio
+async def test_session_appends_all_62_types_and_replays_in_order(
     tmp_path: Path,
 ) -> None:
     """Verifies a session appends every known type and replays them in order."""
-    file_path = tmp_path / "all62.jsonl"
-    session = Session(
-        session_id="all62",
-        storage_path=file_path,
-        projections=[_ImageOffloadProjection()],  # type: ignore[list-item]
-    )
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    # Reloading a log holding image/offload needs its projection supplied.
+    service.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
+    session = service.create("all62")
     types = sorted(KNOWN_SESSION_EVENT_TYPES)
     assert len(types) == 62
     for seq, type in enumerate(types):
-        event = session.append(
-            type,
+        event = service.log_event(
+            session,
+            type,  # type: ignore[arg-type]
             _minimal_payload(type),
             surface_op="append" if type in SURFACE_EVENT_TYPES else None,
         )
@@ -1489,8 +1267,13 @@ def test_session_appends_all_62_types_and_replays_in_order(
         assert event.type == type
     assert [event.type for event in session.events] == types
     assert [event.seq for event in session.events] == list(range(62))
-    # Reloading a log holding image/offload needs its projection supplied.
-    reloaded = Session.load(file_path, projections=[_ImageOffloadProjection()])  # type: ignore[list-item]
+    await service.flush(session)
+    assert service.close("all62") is True
+    ctx2 = Context()
+    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
+    reloaded = service2.load("all62")
+    assert reloaded is not None
     assert [event.type for event in reloaded.events] == types
     assert [event.seq for event in reloaded.events] == list(range(62))
 
@@ -1784,7 +1567,7 @@ def test_session_append_refuses_admission_failures(tmp_path: Path) -> None:
     """Verifies append enforces the admission contract: an event that
     could not be reloaded must not be appended in the first place.
     """
-    session = Session(session_id="append-admission", storage_path=tmp_path / "a.jsonl")
+    session = Session(session_id="append-admission")
     with pytest.raises(ValueError, match="fails v4 admission"):
         session.append(
             "developer/message",
@@ -1993,48 +1776,6 @@ def test_session_append_rules() -> None:
     assert not hasattr(Session, "eventAt")
     assert not hasattr(Session, "snapshotEvents")
     assert not hasattr(Session, "ownEvents")
-
-
-def test_session_append_derives_seq_from_adopted_v4_log(tmp_path: Path) -> None:
-    """Verifies append to an adopted v4 log derives seq from the on-disk
-    log, not from the in-memory event count alone."""
-    file_path = tmp_path / "adopted.jsonl"
-    _write_v4_file(
-        file_path,
-        "adopted",
-        [
-            _v4_row("user/message", 0, {"text": "a"}, surfaceOp="append"),
-            _v4_row("user/message", 1, {"text": "b"}, surfaceOp="append"),
-        ],
-    )
-    session = Session(session_id="adopted", storage_path=file_path)
-    event = session.append("user/message", {"text": "c"}, surface_op="append")
-    assert event.seq == 2
-    reloaded = Session.load(file_path)
-    assert [event.seq for event in reloaded.events] == [0, 1, 2]
-    assert reloaded.events[2].payload == {"text": "c"}
-
-
-def test_session_append_writes_surface_op(tmp_path: Path) -> None:
-    """Verifies append writes surfaceOp and sourceEventSeqs to the log."""
-    file_path = tmp_path / "surface.jsonl"
-    session = Session(session_id="surface", storage_path=file_path)
-    session.append("user/message", {"text": "a"}, surface_op="append")
-    session.append(
-        "user/message",
-        {"text": "b"},
-        surface_op={"op": "replace", "startSeq": 0, "endSeq": 0},
-        source_event_seqs=[0],
-    )
-    reloaded = Session.load(file_path)
-    assert reloaded.events[0].surface_op == "append"
-    assert reloaded.events[1].surface_op == {
-        "op": "replace",
-        "startSeq": 0,
-        "endSeq": 0,
-    }
-    assert reloaded.events[1].source_event_seqs == [0]
-    assert reloaded.surface_nodes() == [1]
 
 
 def test_session_plugin_records() -> None:
@@ -2570,12 +2311,11 @@ def test_session_id_and_seq_properties() -> None:
 
 
 def test_session_load_blank_only_file(tmp_path: Path) -> None:
-    """Verifies a blank-lines-only file loads as an empty session."""
+    """Verifies a blank-lines-only file is not found, not an empty session."""
     file_path = tmp_path / "blank_only.jsonl"
     file_path.write_text("\n\n", encoding="utf-8")
-    loaded = Session.load(file_path)
-    assert loaded.session_id == "blank_only"
-    assert loaded.events == []
+    with pytest.raises(SessionPersistenceNotFoundError, match="blank_only.jsonl"):
+        Session.load(file_path)
 
 
 def test_session_load_refuses_corrupt_row(tmp_path: Path) -> None:

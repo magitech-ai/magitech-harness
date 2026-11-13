@@ -957,10 +957,15 @@ class JsonlSessionHandle(SessionHandle):
 
         One append-mode open carries the header line plus the batch;
         the file and, when it was created, its parent directory are
-        fsynced before the caller advances the in-memory log.
+        fsynced before the caller advances the in-memory log. A handle
+        created without a lease takes one here, right before its first
+        materializing write, so a second writer is refused from that
+        moment on; contention raises before anything is written.
         """
         created = not self._generation_path.exists()
         _ensure_session_dir(self._generation_path.parent)
+        if self._lease is None:
+            self._lease = KernelLease.acquire(self._generation_path.parent, self._id)
         wrote_header = not self._header_written
         with open(self._generation_path, "ab") as handle:
             if wrote_header:
