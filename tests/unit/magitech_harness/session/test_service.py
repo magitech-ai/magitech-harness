@@ -1,12 +1,16 @@
 """Unit tests for SessionService."""
 
+import json
 from pathlib import Path
 
 import pytest
 from anima import Context
 
 from magitech_harness.session.events import EventType
-from magitech_harness.session.format import SessionPersistenceCorruptionError
+from magitech_harness.session.format import (
+    SessionFormatUnsupportedError,
+    SessionPersistenceCorruptionError,
+)
 from magitech_harness.session.service import SessionService
 
 
@@ -105,3 +109,65 @@ def test_session_service_load_and_list_without_base_dir() -> None:
     assert service.load("missing") is None
     assert service.delete("in_memory") is True
     assert service.list_sessions() == []
+
+
+def test_session_service_create_over_historical_file_refuses_log_event(
+    tmp_path: Path,
+) -> None:
+    """Verifies create over an existing historical log refuses log_event.
+
+    SessionService.create takes an explicit session id with no existence
+    check, so creating over a v3 log used to append a current-version row
+    to it and brick the next load. Create still succeeds, but the first
+    log_event refuses, the file stays byte-identical, and nothing is
+    broadcast.
+    """
+    file_path = tmp_path / "probe-bypass1.jsonl"
+    file_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "session",
+                        "version": 3,
+                        "id": "probe-bypass1",
+                        "createdAt": 1000,
+                        "isSeeded": False,
+                        "delegationDepth": 0,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "turn/start",
+                        "seq": 0,
+                        "time": 1000,
+                        "data": {"turn": 1},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "turn/end",
+                        "seq": 1,
+                        "time": 1001,
+                        "data": {"turn": 1, "reason": {"kind": "done"}},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    before = file_path.read_bytes()
+    ctx = Context()
+    broadcast = []
+    ctx.on("session/event", lambda sess, ev: broadcast.append(ev.type))
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    session = service.create("probe-bypass1")
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        service.log_event(session, EventType.USER_MESSAGE, {"text": "after"})
+    assert session.events == []
+    assert broadcast == []
+    assert file_path.read_bytes() == before

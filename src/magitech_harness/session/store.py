@@ -182,9 +182,35 @@ class Session:
         # session loaded from a migrated log refuses append until the log
         # is republished as current-version v4.
         self._on_disk_current: bool = True
+        if (
+            storage_path is not None
+            and storage_path.exists()
+            and storage_path.stat().st_size > 0
+        ):
+            # Classify the log this session would append to. A historical
+            # log refuses append from construction; an unsupported or
+            # malformed header fails loud here, as it does on load.
+            header, self._on_disk_current = _on_disk_header(storage_path)
+            if header is not None:
+                self._header = header
 
     def append(self, event: SessionEvent) -> None:
         """Append event to in-memory log and persist to JSONL if configured."""
+        needs_header = self._header is None
+        if (
+            self.storage_path is not None
+            and self.storage_path.exists()
+            and self.storage_path.stat().st_size > 0
+        ):
+            # The log may predate this session (constructed over an existing
+            # file) or have been replaced on disk after load: re-classify
+            # its header before any mutation, so append still refuses a
+            # historical log instead of bricking it.
+            on_disk_header, on_disk_current = _on_disk_header(self.storage_path)
+            self._on_disk_current = on_disk_current
+            needs_header = self._header is None and on_disk_header is None
+            if on_disk_header is not None and self._header is None:
+                self._header = on_disk_header
         if not self._on_disk_current:
             raise SessionFormatUnsupportedError(
                 "cannot append to a migrated session until it is republished "
@@ -196,9 +222,6 @@ class Session:
         self.events.append(event)
         if self.storage_path:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-            needs_header = self._header is None and (
-                not self.storage_path.exists() or self.storage_path.stat().st_size == 0
-            )
             with open(self.storage_path, "a", encoding="utf-8") as f:
                 try:
                     _lock_exclusive(f)
@@ -368,17 +391,17 @@ def _load_migrated_rows(
     return events
 
 
-def _load_lines(
-    lines: list[str], storage_path: Path
-) -> tuple[dict[str, Any], list[SessionEvent], bool]:
-    """Classify one stored log's header, then decode or migrate its rows.
+def _classify_header_line(
+    line: str, storage_path: Path
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Classify one stored log's header line without decoding event rows.
 
-    The third return value reports whether the on-disk log is already
-    current-version v4; anything else is a migrated view that must not be
-    appended to until it is republished.
+    Returns the physical header value, the logical header, and whether the
+    log is already current-version v4. Unsupported and malformed headers
+    raise the same errors Session.load raises for them.
     """
     try:
-        header_value = json.loads(lines[0])
+        header_value = json.loads(line)
     except json.JSONDecodeError as error:
         raise SessionPersistenceCorruptionError(
             f"corrupt session header in {storage_path}: {error}"
@@ -407,9 +430,41 @@ def _load_lines(
     if read.status == "malformed":
         raise SessionFormatError(read.reason or "malformed session header")
     assert read.header is not None
-    session_id = read.header["id"]
-    if read.status == "current":
+    return header_value, read.header, read.status == "current"
+
+
+def _on_disk_header(storage_path: Path) -> tuple[dict[str, Any] | None, bool]:
+    """Classify the header line of an existing stored log, if it has one.
+
+    Returns the logical header and whether the log is current-version v4.
+    A file with no non-empty line has no header yet and reports
+    ``(None, True)``; it is treated as a fresh log. Unsupported and
+    malformed headers raise the same errors Session.load raises.
+    """
+    with open(storage_path, encoding="utf-8") as f:
+        for raw_line in f:
+            line = raw_line.strip()
+            if line:
+                _, header, is_current = _classify_header_line(line, storage_path)
+                return header, is_current
+    return None, True
+
+
+def _load_lines(
+    lines: list[str], storage_path: Path
+) -> tuple[dict[str, Any], list[SessionEvent], bool]:
+    """Classify one stored log's header, then decode or migrate its rows.
+
+    The third return value reports whether the on-disk log is already
+    current-version v4; anything else is a migrated view that must not be
+    appended to until it is republished.
+    """
+    header_value, header, on_disk_current = _classify_header_line(
+        lines[0], storage_path
+    )
+    session_id = header["id"]
+    if on_disk_current:
         events = _load_current_rows(lines, session_id, storage_path)
     else:
         events = _load_migrated_rows(lines, header_value, session_id, storage_path)
-    return read.header, events, read.status == "current"
+    return header, events, on_disk_current

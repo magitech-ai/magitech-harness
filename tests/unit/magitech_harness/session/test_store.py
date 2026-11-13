@@ -1110,3 +1110,245 @@ def test_session_append_to_current_v4_session_loads_back(tmp_path: Path) -> None
         EventType.USER_MESSAGE,
     ]
     assert reloaded.events[2].payload == {"text": "after"}
+
+
+def _v4_file_with_two_events(file_path: Path, session_id: str) -> None:
+    """Write a current-version v4 log with two events (load, append, reload)."""
+    file_path.write_text(
+        _v4_header_line(session_id)
+        + "\n"
+        + json.dumps(
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "turn/end",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _v3_two_event_rows() -> list[dict]:
+    """Two valid historical v3 rows (turn/start, turn/end)."""
+    return [
+        {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+        {
+            "type": "turn/end",
+            "seq": 1,
+            "time": 1001,
+            "data": {"turn": 1, "reason": {"kind": "done"}},
+        },
+    ]
+
+
+def test_session_constructed_over_historical_file_refuses_append(
+    tmp_path: Path,
+) -> None:
+    """Verifies constructing a Session over a historical log refuses append.
+
+    The load-path guard alone is not enough: a Session built directly over
+    an existing v3 log used to append a current-version row to it, bricking
+    the next load with a seq gap. Construction classifies the on-disk
+    header, so append refuses and the file stays byte-identical.
+    """
+    file_path = tmp_path / "probe-bypass2.jsonl"
+    _write_history_file(file_path, 3, "probe-bypass2", _v3_two_event_rows())
+    before = file_path.read_bytes()
+    session = Session(session_id="probe-bypass2", storage_path=file_path)
+    event = SessionEvent(
+        id="ev_after",
+        session_id="probe-bypass2",
+        type=EventType.USER_MESSAGE,
+        payload={"text": "after"},
+    )
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        session.append(event)
+    assert event.seq == 0
+    assert session.events == []
+    assert file_path.read_bytes() == before
+    assert len(Session.load(file_path).events) == 2
+
+
+def test_session_constructed_over_header_only_v4_file_appends(
+    tmp_path: Path,
+) -> None:
+    """Verifies constructing a Session over a header-only v4 log appends.
+
+    Positive control for the construction-time classification: a current
+    v4 header classifies as current, so append writes the first event row
+    under the existing header and the log reloads with one event.
+    """
+    file_path = tmp_path / "header_only.jsonl"
+    file_path.write_text(_v4_header_line("header_only") + "\n", encoding="utf-8")
+    session = Session(session_id="header_only", storage_path=file_path)
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="header_only",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    reloaded = Session.load(file_path)
+    assert len(reloaded.events) == 1
+    assert reloaded.events[0].payload == {"text": "first"}
+
+
+def test_session_constructed_over_empty_file_writes_header(tmp_path: Path) -> None:
+    """Verifies constructing a Session over an empty file still writes a header."""
+    file_path = tmp_path / "empty.jsonl"
+    file_path.write_text("", encoding="utf-8")
+    session = Session(session_id="empty", storage_path=file_path)
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="empty",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    lines = file_path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0])["version"] == 4
+    assert len(Session.load(file_path).events) == 1
+
+
+def test_session_constructed_over_newer_version_file_raises(tmp_path: Path) -> None:
+    """Verifies constructing a Session over a newer-version log fails loud."""
+    file_path = tmp_path / "newer.jsonl"
+    file_path.write_text(_v4_header_line("newer", version=5) + "\n", encoding="utf-8")
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="uses log format v5",
+    ):
+        Session(session_id="newer", storage_path=file_path)
+
+
+def test_session_constructed_over_malformed_header_raises(tmp_path: Path) -> None:
+    """Verifies constructing a Session over a corrupt header fails loud."""
+    file_path = tmp_path / "bad_header.jsonl"
+    file_path.write_text('{"bad json\n', encoding="utf-8")
+    with pytest.raises(
+        SessionPersistenceCorruptionError,
+        match="corrupt session header",
+    ):
+        Session(session_id="bad_header", storage_path=file_path)
+
+
+def test_session_append_to_blank_only_file_writes_header(tmp_path: Path) -> None:
+    """Verifies append to a blank-lines-only file writes a header first."""
+    file_path = tmp_path / "blank.jsonl"
+    file_path.write_text("\n\n", encoding="utf-8")
+    session = Session(session_id="blank", storage_path=file_path)
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="blank",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    lines = [
+        line
+        for line in file_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert json.loads(lines[0])["version"] == 4
+    assert len(Session.load(file_path).events) == 1
+
+
+def test_session_append_refuses_when_log_replaced_after_load(tmp_path: Path) -> None:
+    """Verifies append refuses when the on-disk log is replaced after load.
+
+    A session loaded from a current v4 log must not silently append to a
+    historical log swapped in underneath it: append re-classifies the
+    on-disk header before mutating, so the replacement stays untouched
+    and the in-memory log is unchanged.
+    """
+    file_path = tmp_path / "stale.jsonl"
+    _v4_file_with_two_events(file_path, "stale")
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
+    _write_history_file(file_path, 3, "stale", _v3_two_event_rows())
+    replacement = file_path.read_bytes()
+    event = SessionEvent(
+        id="ev_after",
+        session_id="stale",
+        type=EventType.USER_MESSAGE,
+        payload={"text": "after"},
+    )
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        loaded.append(event)
+    assert event.seq == 0
+    assert len(loaded.events) == 2
+    assert file_path.read_bytes() == replacement
+
+
+def test_session_append_refuses_when_log_replaced_with_newer_version(
+    tmp_path: Path,
+) -> None:
+    """Verifies append refuses when the log is replaced by a newer version."""
+    file_path = tmp_path / "stale_newer.jsonl"
+    _v4_file_with_two_events(file_path, "stale_newer")
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
+    file_path.write_text(
+        _v4_header_line("stale_newer", version=5) + "\n", encoding="utf-8"
+    )
+    replacement = file_path.read_bytes()
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="uses log format v5",
+    ):
+        loaded.append(
+            SessionEvent(
+                id="ev_after",
+                session_id="stale_newer",
+                type=EventType.USER_MESSAGE,
+                payload={"text": "after"},
+            )
+        )
+    assert len(loaded.events) == 2
+    assert file_path.read_bytes() == replacement
+
+
+def test_session_append_uses_header_of_file_created_after_construction(
+    tmp_path: Path,
+) -> None:
+    """Verifies append adopts a v4 header written after construction.
+
+    A session built while no log exists must not write a second header
+    when a current-version log appears at its path before the first
+    append: append re-classifies the on-disk header and writes only the
+    event row under it.
+    """
+    file_path = tmp_path / "appears_late.jsonl"
+    session = Session(session_id="appears_late", storage_path=file_path)
+    file_path.write_text(_v4_header_line("appears_late") + "\n", encoding="utf-8")
+    session.append(
+        SessionEvent(
+            id="ev_first",
+            session_id="appears_late",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "first"},
+        )
+    )
+    lines = [
+        line
+        for line in file_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert len(lines) == 2
+    assert json.loads(lines[0])["version"] == 4
+    assert len(Session.load(file_path).events) == 1
