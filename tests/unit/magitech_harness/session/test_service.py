@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import shutil
 import time
 from pathlib import Path
 
@@ -245,7 +244,8 @@ async def test_session_service_fork_append_failure_rolls_back(
     """Verifies a fork whose first write fails leaves no store entry or directory.
 
     The child's generation path is a directory, so the seed append fails
-    on open; the rollback closes the handle, removes the directory, and
+    on open; the errno text differs by platform, so either message is
+    accepted. The rollback closes the handle, removes the directory, and
     detaches the store entry, so a retry succeeds.
     """
     child_dir = session_dir(tmp_path, None, "child")
@@ -255,7 +255,7 @@ async def test_session_service_fork_append_failure_rolls_back(
     parent = service.create("parent")
     service.log_event(parent, "turn/start", {"turn": 1})
     await service.flush(parent)
-    with pytest.raises(OSError, match="Is a directory"):
+    with pytest.raises(OSError, match="Is a directory|Permission denied"):
         service.fork("parent", child_session_id="child")
     assert service.get("child") is None
     assert find_session_dir(tmp_path, "child") is None
@@ -729,9 +729,12 @@ async def test_session_service_flush_is_barrier_naming_failed_sessions(
     good_location = service.location("good")
     assert good_location is not None and good_location.exists()
 
-    broken_dir = find_session_dir(tmp_path, "broken")
-    assert broken_dir is not None
-    shutil.rmtree(broken_dir)
+    # Remove only the generation log, not the directory: the live write
+    # handle still holds the lock file, and removing a directory with an
+    # open handle fails on Windows. The handle opens the log per
+    # operation, so unlinking it is safe; the next flush fails opening
+    # the missing generation file.
+    service.session_path("broken").unlink()
     with pytest.raises(ExceptionGroup) as exc_info:
         await service.flush()
     assert "broken" in str(exc_info.value)
