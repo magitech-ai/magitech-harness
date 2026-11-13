@@ -3445,6 +3445,45 @@ def test_v01_decoder_recoverable_semantics() -> None:
         strict.decode_row("not an object", _Collector())
 
 
+def test_v01_decoder_malformed_non_json_row() -> None:
+    """Verifies a programmatic non-JSON row reaches the malformed-row handler.
+
+    JSON rows cannot reach it (their keys are always strings), but decode_row
+    takes Any and is a catalog entry point, so a packed row carrying a
+    non-serializable key fails inside exact_keys and must surface as a
+    malformed row instead of escaping the handler.
+    """
+    row: dict = {
+        "type": "text-chunks",
+        "seq0": 0,
+        "time0": 100,
+        object(): 1,
+        "data": {"turn": 1, "step": 1, "index": 0, "dt": [], "texts": ["a"]},
+    }
+    strict = _v0_decoder("strict")
+    with pytest.raises(
+        SessionFormatError, match="released Session row 0 is malformed"
+    ) as excinfo:
+        strict.decode_row(row, _Collector())
+    assert isinstance(excinfo.value.__cause__, TypeError)
+
+    recoverable = _v0_decoder("recoverable")
+    out = _Collector()
+    recoverable.decode_row(dict(row), out)
+    recoverable.decode_row(dict(row), out)
+    assert out.values == []
+    with pytest.raises(SessionFormatError, match="released Session row 0 is malformed"):
+        recoverable.decode_row(
+            {
+                "type": "turn/end",
+                "seq": 0,
+                "time": 101,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+            out,
+        )
+
+
 def test_v01_decoder_seq_gap_and_finish() -> None:
     strict = _v0_decoder("strict")
     out = _Collector()

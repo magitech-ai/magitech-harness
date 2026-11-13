@@ -686,3 +686,427 @@ def test_session_derive_messages_method() -> None:
     msgs = session.derive_messages()
     assert len(msgs) == 1
     assert msgs[0]["content"] == "hello"
+
+
+def _write_history_file(
+    file_path: Path, version: int, session_id: str, rows: list[dict]
+) -> None:
+    """Write one historical log (physical header + source rows) as JSONL."""
+    header: dict = {
+        "type": "session",
+        "version": version,
+        "id": session_id,
+        "createdAt": 1000,
+        "delegationDepth": 0,
+    }
+    if version >= 2:
+        header["isSeeded"] = False
+    file_path.write_text(
+        "\n".join([json.dumps(header)] + [json.dumps(row) for row in rows]) + "\n",
+        encoding="utf-8",
+    )
+
+
+#: Source rows of the end-to-end fixtures in test_format.py
+#: (test_e2e_v*_to_v4), paired with the migrated event types Session.load
+#: must produce for each.
+_E2E_HISTORY_CASES: list[tuple[int, str, list[dict], list[EventType]]] = [
+    (
+        0,
+        "e2e-v0",
+        [
+            {
+                "type": "turn/start",
+                "seq": 0,
+                "time": 1000,
+                "data": {"turn": 1, "trigger": {"kind": "user"}},
+            },
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "steering/message",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "turn": 1,
+                    "content": [{"type": "text", "text": "steer"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "compact/start",
+                "seq": 3,
+                "time": 1003,
+                "data": {"compactionId": "c1", "turn": 1},
+            },
+            {
+                "type": "step/end",
+                "seq": 4,
+                "time": 1004,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 5,
+                "time": 1005,
+                "data": {"turn": 1, "reason": {"kind": "aborted"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.SYSTEM_MESSAGE,
+            EventType.USER_MESSAGE,
+            EventType.COMPACTION_START,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+    (
+        1,
+        "e2e-v1",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "user/message",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "role": "user",
+                    "id": "m1",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "assistant/chunk",
+                "seq": 3,
+                "time": 1003,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "chunk": {"type": "text-delta", "index": 0, "text": "Hello"},
+                },
+            },
+            {
+                "type": "assistant/chunk",
+                "seq": 4,
+                "time": 1004,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "chunk": {"type": "text-delta", "index": 0, "text": " world"},
+                },
+            },
+            {
+                "type": "assistant/message",
+                "seq": 5,
+                "time": 1005,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "m2",
+                        "role": "assistant",
+                        "source": {"kind": "model"},
+                        "content": [{"type": "text", "text": "Hello world"}],
+                    },
+                },
+                "sourceEventSeqs": [3, 4],
+                "surfaceOp": "append",
+            },
+            {
+                "type": "step/end",
+                "seq": 6,
+                "time": 1006,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 7,
+                "time": 1007,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.SYSTEM_MESSAGE,
+            EventType.USER_MESSAGE,
+            EventType.ASSISTANT_MESSAGE,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+    (
+        2,
+        "e2e-v2",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "request/header",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "header": {"system": "Be helpful."},
+                    "reason": {"kind": "start"},
+                },
+            },
+            {
+                "type": "user/message",
+                "seq": 3,
+                "time": 1003,
+                "data": {
+                    "role": "user",
+                    "id": "m1",
+                    "content": [{"type": "text", "text": "hi"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "step/end",
+                "seq": 4,
+                "time": 1004,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 5,
+                "time": 1005,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.SYSTEM_MESSAGE,
+            EventType.SYSTEM_MESSAGE,
+            EventType.REQUEST_HEADER,
+            EventType.USER_MESSAGE,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+    (
+        3,
+        "e2e-v3",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "step/start",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "user/message",
+                "seq": 2,
+                "time": 1002,
+                "data": {
+                    "role": "user",
+                    "id": "m-user-1",
+                    "content": [{"type": "text", "text": "hello"}],
+                    "source": {"kind": "user"},
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "assistant/message",
+                "seq": 3,
+                "time": 1003,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "m-asst-1",
+                        "role": "assistant",
+                        "source": {"kind": "model"},
+                        "content": [{"type": "text", "text": "hi there"}],
+                    },
+                    "stream": [],
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "tool/call",
+                "seq": 4,
+                "time": 1004,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "callId": "c1",
+                    "name": "add",
+                    "arguments": {"a": 1},
+                },
+            },
+            {
+                "type": "tool/result",
+                "seq": 5,
+                "time": 1005,
+                "data": {
+                    "turn": 1,
+                    "step": 1,
+                    "message": {
+                        "id": "m-tool-1",
+                        "role": "user",
+                        "source": {"kind": "tool", "callId": "c1"},
+                        "content": [
+                            {
+                                "type": "tool-result",
+                                "toolCallId": "c1",
+                                "content": [{"type": "text", "text": "3"}],
+                            }
+                        ],
+                    },
+                },
+                "surfaceOp": "append",
+            },
+            {
+                "type": "step/end",
+                "seq": 6,
+                "time": 1006,
+                "data": {"turn": 1, "step": 1},
+            },
+            {
+                "type": "turn/end",
+                "seq": 7,
+                "time": 1007,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+        [
+            EventType.TURN_START,
+            EventType.STEP_START,
+            EventType.USER_MESSAGE,
+            EventType.ASSISTANT_MESSAGE,
+            EventType.TOOL_CALL,
+            EventType.TOOL_RESULT,
+            EventType.STEP_END,
+            EventType.TURN_END,
+        ],
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("version", "session_id", "rows", "expected_types"),
+    _E2E_HISTORY_CASES,
+    ids=["e2e-v0", "e2e-v1", "e2e-v2", "e2e-v3"],
+)
+def test_session_load_e2e_history_fixtures(
+    tmp_path: Path,
+    version: int,
+    session_id: str,
+    rows: list[dict],
+    expected_types: list[EventType],
+) -> None:
+    """Verifies each end-to-end history fixture loads through Session.load.
+
+    The inputs mirror test_e2e_v*_to_v4 in test_format.py; this pins the
+    store mapping against the migration's own validated output instead of
+    only the format-level byte encoding.
+    """
+    file_path = tmp_path / f"{session_id}.jsonl"
+    _write_history_file(file_path, version, session_id, rows)
+    loaded = Session.load(file_path)
+    assert loaded.session_id == session_id
+    assert [event.type for event in loaded.events] == expected_types
+
+
+def test_session_append_to_migrated_session_is_refused(tmp_path: Path) -> None:
+    """Verifies append fails closed on a migrated log instead of bricking it.
+
+    Appending a current-version row to a historical log corrupts the next
+    load (missing surfaceOp marker, seq drift from promoted events), so
+    append refuses until the session is republished as current-version v4.
+    """
+    file_path = tmp_path / "mig_append.jsonl"
+    _write_history_file(
+        file_path,
+        3,
+        "mig_append",
+        [
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}},
+            {
+                "type": "turn/end",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            },
+        ],
+    )
+    before = file_path.read_bytes()
+    loaded = Session.load(file_path)
+    assert len(loaded.events) == 2
+    with pytest.raises(
+        SessionFormatUnsupportedError,
+        match="cannot append to a migrated session until it is republished",
+    ):
+        loaded.append(
+            SessionEvent(
+                id="ev_after",
+                session_id="mig_append",
+                type=EventType.USER_MESSAGE,
+                payload={"text": "after"},
+            )
+        )
+    assert len(loaded.events) == 2
+    assert file_path.read_bytes() == before
+
+
+def test_session_append_to_current_v4_session_loads_back(tmp_path: Path) -> None:
+    """Verifies append still works on a current-version log (load, append, reload)."""
+    file_path = tmp_path / "current_append.jsonl"
+    file_path.write_text(
+        _v4_header_line("current_append")
+        + "\n"
+        + json.dumps(
+            {"type": "turn/start", "seq": 0, "time": 1000, "data": {"turn": 1}}
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "type": "turn/end",
+                "seq": 1,
+                "time": 1001,
+                "data": {"turn": 1, "reason": {"kind": "done"}},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    loaded = Session.load(file_path)
+    loaded.append(
+        SessionEvent(
+            id="ev_after",
+            session_id="current_append",
+            type=EventType.USER_MESSAGE,
+            payload={"text": "after"},
+        )
+    )
+    reloaded = Session.load(file_path)
+    assert [event.type for event in reloaded.events] == [
+        EventType.TURN_START,
+        EventType.TURN_END,
+        EventType.USER_MESSAGE,
+    ]
+    assert reloaded.events[2].payload == {"text": "after"}

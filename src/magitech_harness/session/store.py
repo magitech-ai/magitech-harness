@@ -178,9 +178,19 @@ class Session:
         self.events: list[SessionEvent] = []
         # Retained v4 logical header (set on load, built on first append).
         self._header: dict[str, Any] | None = None
+        # True when the on-disk log (if any) is current-version v4. A
+        # session loaded from a migrated log refuses append until the log
+        # is republished as current-version v4.
+        self._on_disk_current: bool = True
 
     def append(self, event: SessionEvent) -> None:
         """Append event to in-memory log and persist to JSONL if configured."""
+        if not self._on_disk_current:
+            raise SessionFormatUnsupportedError(
+                "cannot append to a migrated session until it is republished "
+                f"as current-version v4 (session {self.session_id!r}; "
+                f"raw log: {self.storage_path})"
+            )
         if event.seq == 0:
             event.seq = len(self.events) + 1
         self.events.append(event)
@@ -242,6 +252,7 @@ class Session:
         session_id = storage_path.stem
         header: dict[str, Any] | None = None
         events: list[SessionEvent] = []
+        on_disk_current = True
         if storage_path.exists():
             lines = [
                 line.strip()
@@ -249,11 +260,12 @@ class Session:
                 if line.strip()
             ]
             if lines:
-                header, events = _load_lines(lines, storage_path)
+                header, events, on_disk_current = _load_lines(lines, storage_path)
                 session_id = header["id"]
         sess = cls(session_id=session_id, storage_path=storage_path)
         sess.events = events
         sess._header = header
+        sess._on_disk_current = on_disk_current
         return sess
 
 
@@ -278,9 +290,10 @@ def _to_session_event(
 ) -> SessionEvent | None:
     """Map one v4 logical event to a SessionEvent.
 
-    Returns ``None`` for ignorable events outside this build's vocabulary
-    (opaque carry belongs to the event-vocabulary work). Unknown
-    non-ignorable events are refused.
+    Returns ``None`` for ignorable events outside this build's vocabulary.
+    Unknown non-ignorable events are refused. The vocabulary covers every
+    format-admitted v4 type, so the migration's own validated output loads;
+    per-type payload and lifecycle validation belongs to later work.
     """
     event_type = event.get("type")
     try:
@@ -357,8 +370,13 @@ def _load_migrated_rows(
 
 def _load_lines(
     lines: list[str], storage_path: Path
-) -> tuple[dict[str, Any], list[SessionEvent]]:
-    """Classify one stored log's header, then decode or migrate its rows."""
+) -> tuple[dict[str, Any], list[SessionEvent], bool]:
+    """Classify one stored log's header, then decode or migrate its rows.
+
+    The third return value reports whether the on-disk log is already
+    current-version v4; anything else is a migrated view that must not be
+    appended to until it is republished.
+    """
     try:
         header_value = json.loads(lines[0])
     except json.JSONDecodeError as error:
@@ -394,4 +412,4 @@ def _load_lines(
         events = _load_current_rows(lines, session_id, storage_path)
     else:
         events = _load_migrated_rows(lines, header_value, session_id, storage_path)
-    return read.header, events
+    return read.header, events, read.status == "current"

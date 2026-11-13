@@ -1135,11 +1135,13 @@ class _V01Decoder(_Decoder):
             if self._issue is None:
                 self._issue = error
             return
-        # pragma: no cover - unreachable from JSON rows: every failure inside
-        # the try raises SessionFormatError (all require_*/exact_keys paths
-        # raise it; the json.dumps calls only format serializable keys). A
-        # TypeError/ValueError here needs non-JSON programmatic misuse.
-        except (TypeError, ValueError) as error:  # pragma: no cover
+        # Reachable only through programmatic misuse: decode_row takes Any
+        # and is a catalog entry point, so a non-JSON row (for example a
+        # packed row carrying a non-serializable key, which fails inside
+        # exact_keys) lands here. JSON rows cannot reach it: their keys are
+        # always strings, and every other failure inside the try raises
+        # SessionFormatError.
+        except (TypeError, ValueError) as error:
             current = SessionFormatError(
                 f"released Session row {current_row} is malformed"
             )
