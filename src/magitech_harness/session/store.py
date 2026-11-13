@@ -4,10 +4,26 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from typing import Any, TextIO
 
 from magitech_harness.session.events import EventType, SessionEvent
+from magitech_harness.session.format import (
+    CURRENT_FORMAT_VERSION,
+    SESSION_FORMAT_CATALOG,
+    SessionFormatError,
+    SessionFormatUnsupportedError,
+    SessionFormatUnsupportedMigrationError,
+    SessionPersistenceCorruptionError,
+    create_session_format_catalog_with_children,
+    decode_envelope_row,
+    encode_envelope_event,
+    is_json_object,
+    require_count,
+    require_safe_integer,
+    session_format_version_refusal,
+)
 
 
 def _normalize_adjacent_messages(
@@ -160,6 +176,8 @@ class Session:
         self.session_id = session_id
         self.storage_path = storage_path
         self.events: list[SessionEvent] = []
+        # Retained v4 logical header (set on load, built on first append).
+        self._header: dict[str, Any] | None = None
 
     def append(self, event: SessionEvent) -> None:
         """Append event to in-memory log and persist to JSONL if configured."""
@@ -168,13 +186,38 @@ class Session:
         self.events.append(event)
         if self.storage_path:
             self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            needs_header = self._header is None and (
+                not self.storage_path.exists() or self.storage_path.stat().st_size == 0
+            )
             with open(self.storage_path, "a", encoding="utf-8") as f:
                 try:
                     _lock_exclusive(f)
                 except (ImportError, OSError, AttributeError):
                     pass
                 try:
-                    f.write(event.model_dump_json() + "\n")
+                    if needs_header:
+                        header: dict[str, Any] = {
+                            "version": CURRENT_FORMAT_VERSION,
+                            "id": self.session_id,
+                            "createdAt": int(time.time() * 1000),
+                            "isSeeded": False,
+                            "delegationDepth": 0,
+                        }
+                        physical = SESSION_FORMAT_CATALOG.encode_current_header(
+                            header, 0
+                        )
+                        f.write(json.dumps(physical) + "\n")
+                        self._header = header
+                    row = encode_envelope_event(
+                        {
+                            "type": event.type.value,
+                            "seq": event.seq,
+                            "time": int(event.timestamp * 1000),
+                            "data": event.payload,
+                            **({"ignorable": True} if event.ignorable else {}),
+                        }
+                    )
+                    f.write(json.dumps(row) + "\n")
                     f.flush()
                 finally:
                     try:
@@ -187,25 +230,168 @@ class Session:
         return derive_messages(self.events)
 
     @classmethod
-    def load(cls, storage_path: Path, *, repair_on_open: bool = True) -> Session:
-        """Load session from a JSONL file."""
-        events: list[SessionEvent] = []
+    def load(cls, storage_path: Path) -> Session:
+        """Load session from a JSONL file.
+
+        Refuses by default: a newer-version log, a malformed header, a
+        corrupt row, or an unmigratable history raises instead of being
+        silently truncated or repaired. Missing or empty files still load
+        as an empty (phantom) session; that ownership belongs to the
+        persistence rewrite.
+        """
         session_id = storage_path.stem
+        header: dict[str, Any] | None = None
+        events: list[SessionEvent] = []
         if storage_path.exists():
-            with open(storage_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    stripped = line.strip()
-                    if not stripped:
-                        continue
-                    try:
-                        data = json.loads(stripped)
-                        events.append(SessionEvent.model_validate(data))
-                    except Exception:
-                        if repair_on_open:
-                            continue
-                        raise
-            if events:
-                session_id = events[0].session_id
+            lines = [
+                line.strip()
+                for line in storage_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if lines:
+                header, events = _load_lines(lines, storage_path)
+                session_id = header["id"]
         sess = cls(session_id=session_id, storage_path=storage_path)
         sess.events = events
+        sess._header = header
         return sess
+
+
+def _parse_row(line: str, row_index: int, storage_path: Path) -> dict[str, Any]:
+    """Parse one JSONL row; corrupt JSON is corruption, never truncation."""
+    try:
+        row = json.loads(line)
+    except json.JSONDecodeError as error:
+        raise SessionPersistenceCorruptionError(
+            f"corrupt session row {row_index} in {storage_path}: {error}"
+        ) from error
+    if not isinstance(row, dict):
+        raise SessionPersistenceCorruptionError(
+            f"corrupt session row {row_index} in {storage_path}: "
+            "row must be a JSON object"
+        )
+    return row
+
+
+def _to_session_event(
+    event: dict[str, Any], session_id: str, storage_path: Path
+) -> SessionEvent | None:
+    """Map one v4 logical event to a SessionEvent.
+
+    Returns ``None`` for ignorable events outside this build's vocabulary
+    (opaque carry belongs to the event-vocabulary work). Unknown
+    non-ignorable events are refused.
+    """
+    event_type = event.get("type")
+    try:
+        mapped_type = EventType(event_type)
+    except ValueError:
+        if event.get("ignorable") is True:
+            return None
+        raise SessionFormatUnsupportedError(
+            f"session {session_id!r} contains unknown event type "
+            f"{json.dumps(event_type)}; this build cannot load it "
+            f"(raw log: {storage_path})"
+        ) from None
+    seq = require_count(event.get("seq"), f"session event {event_type} seq")
+    data = event.get("data")
+    return SessionEvent(
+        id=f"{session_id}:{seq}",
+        session_id=session_id,
+        type=mapped_type,
+        timestamp=require_safe_integer(
+            event.get("time"), f"session event {event_type} time"
+        )
+        / 1000.0,
+        payload=data if is_json_object(data) else {"value": data},
+        ignorable=event.get("ignorable") is True,
+        seq=seq,
+    )
+
+
+def _load_current_rows(
+    lines: list[str], session_id: str, storage_path: Path
+) -> list[SessionEvent]:
+    """Envelope-only read of a current-version file's event rows."""
+    events: list[SessionEvent] = []
+    for index, line in enumerate(lines[1:], start=1):
+        row = _parse_row(line, index, storage_path)
+        try:
+            decoded = decode_envelope_row(row, index, f"session {session_id}")
+        except SessionFormatError as error:
+            raise SessionPersistenceCorruptionError(str(error), error) from error
+        mapped = _to_session_event(decoded, session_id, storage_path)
+        if mapped is not None:
+            events.append(mapped)
+    return events
+
+
+def _load_migrated_rows(
+    lines: list[str],
+    header_value: dict[str, Any],
+    session_id: str,
+    storage_path: Path,
+) -> list[SessionEvent]:
+    """Restore a historical file through the catalog into v4 events."""
+    catalog = create_session_format_catalog_with_children([])
+    try:
+        restore = catalog.create_restore(
+            header_value, validation="transformed", recovery="strict"
+        )
+        for index, line in enumerate(lines[1:], start=1):
+            restore.decode_row(_parse_row(line, index, storage_path))
+        artifact = restore.finish()
+    except SessionFormatUnsupportedMigrationError as error:
+        raise SessionFormatUnsupportedError(
+            f"{error} (raw log: {storage_path})"
+        ) from error
+    except SessionFormatError as error:
+        raise SessionPersistenceCorruptionError(str(error), error) from error
+    events: list[SessionEvent] = []
+    for event in artifact.events:
+        mapped = _to_session_event(event, session_id, storage_path)
+        if mapped is not None:
+            events.append(mapped)
+    return events
+
+
+def _load_lines(
+    lines: list[str], storage_path: Path
+) -> tuple[dict[str, Any], list[SessionEvent]]:
+    """Classify one stored log's header, then decode or migrate its rows."""
+    try:
+        header_value = json.loads(lines[0])
+    except json.JSONDecodeError as error:
+        raise SessionPersistenceCorruptionError(
+            f"corrupt session header in {storage_path}: {error}"
+        ) from error
+    read = SESSION_FORMAT_CATALOG.read_header(header_value)
+    if read.status == "unsupported":
+        if (
+            read.stored_version is not None
+            and read.stored_version > CURRENT_FORMAT_VERSION
+        ):
+            header_id = (
+                header_value.get("id")
+                if is_json_object(header_value)
+                else storage_path.stem
+            )
+            message = session_format_version_refusal(
+                str(header_id), read.stored_version
+            )
+        else:
+            # Unreachable with the shipped catalog: a header that decodes
+            # cannot fail a later edge validation (all edges validate the
+            # same header fields), and the missing-codec path is excluded
+            # at catalog construction.
+            message = read.reason or "unsupported session format"  # pragma: no cover
+        raise SessionFormatUnsupportedError(f"{message} (raw log: {storage_path})")
+    if read.status == "malformed":
+        raise SessionFormatError(read.reason or "malformed session header")
+    assert read.header is not None
+    session_id = read.header["id"]
+    if read.status == "current":
+        events = _load_current_rows(lines, session_id, storage_path)
+    else:
+        events = _load_migrated_rows(lines, header_value, session_id, storage_path)
+    return read.header, events

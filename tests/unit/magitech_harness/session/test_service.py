@@ -2,9 +2,11 @@
 
 from pathlib import Path
 
+import pytest
 from anima import Context
 
 from magitech_harness.session.events import EventType
+from magitech_harness.session.format import SessionPersistenceCorruptionError
 from magitech_harness.session.service import SessionService
 
 
@@ -55,7 +57,8 @@ def test_session_service_load_list_and_delete(tmp_path: Path) -> None:
     # 2. Persist session 2 directly to disk to test cold loading
     s2_file = tmp_path / "sess_2.jsonl"
     s2_file.write_text(
-        '{"id":"e2","session_id":"sess_2","type":"user/message","timestamp":100.0,"payload":{"text":"cold"}}\n',
+        '{"type":"session","version":4,"id":"sess_2","createdAt":1000,"isSeeded":false,"delegationDepth":0}\n'
+        '{"type":"user/message","seq":1,"time":100000,"data":{"text":"cold"}}\n',
         encoding="utf-8",
     )
 
@@ -77,10 +80,11 @@ def test_session_service_load_list_and_delete(tmp_path: Path) -> None:
     # 6. Load nonexistent
     assert service.load("sess_missing") is None
 
-    # Cold load with repair_on_open
+    # Cold load with a corrupt file refuses instead of repairing it.
     s_corrupt = tmp_path / "sess_corrupt.jsonl"
     s_corrupt.write_text('{"bad json\n', encoding="utf-8")
-    assert service.load("sess_corrupt", repair_on_open=True) is not None
+    with pytest.raises(SessionPersistenceCorruptionError):
+        service.load("sess_corrupt")
 
     # 7. Delete s1 (both active and on disk)
     assert service.delete("sess_1") is True
