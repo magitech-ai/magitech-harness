@@ -61,10 +61,18 @@ class LLMProvider(Protocol):
 class MockLLMProvider:
     """Deterministic scriptable mock provider for offline tests and development."""
 
-    def __init__(self, responses: list[ModelResponse] | None = None) -> None:
+    def __init__(
+        self,
+        responses: list[ModelResponse] | None = None,
+        *,
+        default_model: str = "mock",
+    ) -> None:
         """Initializes MockLLMProvider with an optional pre-queued list of responses."""
         self.responses: list[ModelResponse] = responses or []
         self.call_history: list[dict[str, Any]] = []
+        # The mock declares a default like a real provider does, so a
+        # turn with no model slug resolves through the default path.
+        self.default_model = default_model
 
     def queue_response(
         self,

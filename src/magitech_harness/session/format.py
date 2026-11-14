@@ -1870,6 +1870,160 @@ def assert_v4_source_row_admission(row: Any) -> None:
             )
 
 
+def assert_v4_request_header_data(row: Any) -> None:
+    """Validate native v4 request/header payloads at load time.
+
+    The same predicate set the append layer enforces, except for the
+    one legacy form the migration itself emits: a header carried as
+    ``{"header": {}, "reason": {"kind": "start"}}``. That pair is
+    grandfathered; any other shape must carry a config with a nonempty
+    provider/model and a reason from the current taxonomy.
+    """
+    if not is_json_object(row) or row.get("type") != "request/header":
+        return
+    data = row.get("data")
+    if not is_json_object(data):
+        return
+    header = data.get("header")
+    if not is_json_object(header):
+        return
+    if header == {} and data.get("reason") == {"kind": "start"}:
+        return
+    subject = f"format v4 request/header at seq {row.get('seq')}"
+    config = header.get("config")
+    if (
+        not is_json_object(config)
+        or not isinstance(config.get("provider"), str)
+        or not config["provider"]
+        or not isinstance(config.get("model"), str)
+        or not config["model"]
+    ):
+        raise SessionFormatError(
+            f"{subject} requires a config with a nonempty provider and model"
+        )
+    reasoning_effort = config.get("reasoningEffort")
+    if reasoning_effort is not None and (
+        not isinstance(reasoning_effort, str) or not reasoning_effort
+    ):
+        raise SessionFormatError(
+            f"{subject} config reasoningEffort must be a nonempty string"
+        )
+    if data.get("reason") not in ("initial", "resume", "change", "series"):
+        raise SessionFormatError(
+            f'{subject} reason must be one of "initial", "resume", "change", "series"'
+        )
+    if "startsSeries" in data and data["startsSeries"] is not True:
+        raise SessionFormatError(f"{subject} startsSeries must be true when present")
+    defaults = header.get("adapterDefaults")
+    if defaults is not None:
+        if not is_json_object(defaults):
+            raise SessionFormatError(f"{subject} adapterDefaults must be an object")
+        for key in defaults:
+            if key not in ("reasoningEffort", "maxTokens"):
+                raise SessionFormatError(
+                    f"{subject} adapterDefaults carries unknown key {key!r}"
+                )
+        for marker in ("reasoningEffort", "maxTokens"):
+            if marker in defaults and defaults[marker] is not True:
+                raise SessionFormatError(
+                    f"{subject} adapterDefaults {marker} must be true when present"
+                )
+            if defaults.get(marker) is True and marker not in config:
+                raise SessionFormatError(
+                    f"{subject} adapterDefaults {marker} requires config {marker}"
+                )
+    tools = header.get("tools")
+    if tools is not None:
+        if not isinstance(tools, list):
+            raise SessionFormatError(f"{subject} header tools must be an array")
+        for tool in tools:
+            if not is_json_object(tool):
+                raise SessionFormatError(f"{subject} header tools must be objects")
+            if "deferLoading" in tool and tool["deferLoading"] is not True:
+                raise SessionFormatError(
+                    f"{subject} header tool deferLoading must be true when present"
+                )
+
+
+def assert_v4_request_context_data(row: Any) -> None:
+    """Validate native v4 request/context payloads at load time."""
+    if not is_json_object(row) or row.get("type") != "request/context":
+        return
+    data = row.get("data")
+    if not is_json_object(data):
+        return
+    subject = f"format v4 request/context at seq {row.get('seq')}"
+    if (
+        not isinstance(data.get("provider"), str)
+        or not data["provider"]
+        or not isinstance(data.get("model"), str)
+        or not data["model"]
+    ):
+        raise SessionFormatError(f"{subject} requires a nonempty provider and model")
+    context_window = data.get("contextWindow")
+    if context_window is not None and (
+        not _is_safe_integer(context_window) or context_window <= 0
+    ):
+        raise SessionFormatError(
+            f"{subject} contextWindow must be a positive safe integer when present"
+        )
+    if "systemPromptUpdate" in data and data["systemPromptUpdate"] != "in-history":
+        raise SessionFormatError(
+            f'{subject} systemPromptUpdate must be "in-history" when present'
+        )
+
+
+def assert_v4_assistant_settlement_data(row: Any) -> None:
+    """Validate assistant settlement payloads at load time.
+
+    Both settlement types require non-negative turn/step and a list
+    stream. An assistant message additionally requires an identified
+    model message. Provider/model attribution is required when the
+    source carries either key; a source carrying neither is
+    grandfathered, because migrated logs predate provider/model
+    attribution on assistant sources.
+    """
+    if not is_json_object(row) or row.get("type") not in (
+        "assistant/message",
+        "assistant/attempt",
+    ):
+        return
+    data = row.get("data")
+    if not is_json_object(data):
+        return
+    subject = f"format v4 {row.get('type')} at seq {row.get('seq')}"
+    for count_field in ("turn", "step"):
+        require_count(data.get(count_field), f"{subject} {count_field}")
+    if not isinstance(data.get("stream"), list):
+        raise SessionFormatError(f"{subject} stream must be an array")
+    if row.get("type") != "assistant/message":
+        return
+    if "tool_calls" in data:
+        raise SessionFormatError(f"{subject} must not carry tool_calls")
+    if "interrupted" in data and data["interrupted"] is not True:
+        raise SessionFormatError(f"{subject} interrupted must be true when present")
+    message = data.get("message")
+    if not is_json_object(message):
+        raise SessionFormatError(f"{subject} requires a message object")
+    source = message.get("source")
+    if (
+        not isinstance(message.get("id"), str)
+        or not message["id"]
+        or message.get("role") != "assistant"
+        or not isinstance(message.get("content"), list)
+        or not is_json_object(source)
+        or source.get("kind") != "model"
+    ):
+        raise SessionFormatError(f"{subject} requires an identified model message")
+    if ("provider" in source or "model" in source) and (
+        not isinstance(source.get("provider"), str)
+        or not source["provider"]
+        or not isinstance(source.get("model"), str)
+        or not source["model"]
+    ):
+        raise SessionFormatError(f"{subject} requires a nonempty provider and model")
+
+
 def assert_v4_row_admission(
     row: Any, known_event_types: frozenset[str] | None = None
 ) -> None:
@@ -1887,6 +2041,9 @@ def assert_v4_row_admission(
         assert_v4_developer_data(row)
     assert_v4_source_row_admission(row)
     assert_v4_retired_syntax(row)
+    assert_v4_request_header_data(row)
+    assert_v4_request_context_data(row)
+    assert_v4_assistant_settlement_data(row)
     assert_v4_system_message_fields(row)
     if not is_json_object(row) or row.get("type") != "tool/result":
         return

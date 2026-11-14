@@ -486,19 +486,18 @@ def test_current_route() -> None:
     _, service = _service()
     session = service.create("s1")
     assert current_route(session) is None
-    service.log_event(
-        session,
-        EventType.REQUEST_HEADER,
-        {"header": {"config": {}}, "reason": "initial"},
+    # A header record without a config mapping carries no route. A husk
+    # header is a restore-only form: it arrives by seed, never by append.
+    husk = SessionEvent(
+        id="husk",
+        session_id="s1-husk",
+        type="request/header",
+        timestamp=1000.0,
+        payload={"header": {}, "reason": {"kind": "start"}},
+        seq=0,
     )
-    assert current_route(session) is None
-    # A header record without a config mapping carries no route either.
-    service.log_event(
-        session,
-        EventType.REQUEST_HEADER,
-        {"header": {}, "reason": "initial"},
-    )
-    assert current_route(session) is None
+    seeded = Session.create("s1-husk", seed=[husk])
+    assert current_route(seeded) is None
     _header(session, service, provider="prov", model="mod")
     assert current_route(session) == {"provider": "prov", "model": "mod"}
     _header(session, service, provider="other", model="v2")
@@ -979,16 +978,46 @@ async def test_header_before_watermark_does_not_start_pending() -> None:
 
 async def test_header_without_route_keeps_pending() -> None:
     _, service = _service()
+    # A husk header is a restore-only form: it arrives by seed, never by
+    # append (fresh appends refuse it), and a seeded header never emits.
+    husk = SessionEvent(
+        id="husk",
+        session_id="s1",
+        type="request/header",
+        timestamp=1000.0,
+        payload={"header": {}, "reason": {"kind": "start"}},
+        seq=0,
+    )
+    session = service.store.create("s1", options={"seed": [husk]})
+    provider = _FakeProvider()
+    service.title_service.register(provider)
+    _user(session, service, "Explain quantum computing simply")
+    await _pump()
+    assert provider.requests == []
+    _header(session, service, provider="prov", model="mod")
+    await service.title_service.drain()
+    assert len(provider.requests) == 1
+
+
+async def test_routeless_header_event_keeps_pending() -> None:
+    """Verifies a route-less header event leaves pending title work alone."""
+    ctx, service = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     service.title_service.register(provider)
     _user(session, service, "Explain quantum computing simply")
     await _pump()
-    service.log_event(
-        session,
-        EventType.REQUEST_HEADER,
-        {"header": {"config": {}}, "reason": "initial"},
+    # Fresh appends refuse a header with no route, so such an event can
+    # only reach the listener over the bus; it must not start the work.
+    routeless = SessionEvent(
+        id="routeless",
+        session_id="s1",
+        type="request/header",
+        timestamp=1000.0,
+        payload={"header": {}, "reason": {"kind": "start"}},
+        seq=99,
     )
+    ctx.emit("session/event", session, routeless)
     await _pump()
     assert provider.requests == []
     _header(session, service, provider="prov", model="mod")
@@ -1530,3 +1559,19 @@ async def test_llm_stream_listener_ignores_after_dispose() -> None:
         chunks.append(chunk)
     assert chunks
     assert service.title_service.get(session) is None
+
+
+def test_route_from_header_variants() -> None:
+    """Verifies route extraction from header records, branch by branch."""
+    from magitech_harness.session.title import _route_from_header
+
+    assert _route_from_header({"config": {"provider": "p", "model": "m"}}) == {
+        "provider": "p",
+        "model": "m",
+    }
+    assert _route_from_header({"config": {}}) is None
+    assert _route_from_header({"config": {"provider": "p", "model": ""}}) is None
+    assert _route_from_header({"config": {"provider": "", "model": "m"}}) is None
+    assert _route_from_header({"config": "not-a-record"}) is None
+    assert _route_from_header("not-a-record") is None
+    assert _route_from_header({}) is None

@@ -343,23 +343,31 @@ def _developer(
     return _event(seq, "developer/message", payload, surface_op="append")
 
 
+def _search_tool() -> dict:
+    return {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Search the web",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
 def _header(seq: int, tools: list[dict]) -> SessionEvent:
     return _event(
         seq,
         "request/header",
-        {"header": {"config": {}, "tools": tools}, "reason": {"kind": "initial"}},
+        {
+            "header": {"config": {"provider": "p", "model": "m"}, "tools": tools},
+            "reason": "initial",
+        },
     )
 
 
 def test_fold_developer_header_seq_rules() -> None:
     """Verifies tool additions resolve against their named header."""
-    tools = [
-        {
-            "name": "search",
-            "description": "Search the web",
-            "parameters": {"type": "object", "properties": {}},
-        }
-    ]
+    tools = [_search_tool()]
     addition = {"type": "tool-addition", "toolName": "search"}
     events = [_header(0, tools), _developer(1, [addition], header_seq=0)]
     assert fold_surface(events).nodes == [1]
@@ -387,14 +395,59 @@ def test_fold_developer_header_seq_rules() -> None:
     with pytest.raises(SurfaceError, match="requires a complete tool definition"):
         fold_surface(
             [
-                _header(0, [{"name": "search"}]),
+                _header(0, [{"type": "function", "function": {"name": "search"}}]),
                 _developer(1, [addition], header_seq=0),
             ]
         )
-    # Referenced tool with deferLoading False.
+    # Addition naming a tool with no nested function object at all can
+    # never match by name, so the fold refuses it as unnamed.
+    with pytest.raises(SurfaceError, match="must name exactly one tool"):
+        fold_surface(
+            [
+                _header(0, [{"type": "function"}]),
+                _developer(1, [addition], header_seq=0),
+            ]
+        )
+    # Header tool that is not a record matches nothing.
+    with pytest.raises(SurfaceError, match="must name exactly one tool"):
+        fold_surface(
+            [
+                _header(0, ["not-a-record"]),
+                _developer(1, [addition], header_seq=0),
+            ]
+        )
+    # Referenced tool with deferLoading False on the envelope.
     bad_tools = [dict(tools[0], deferLoading=False)]
     with pytest.raises(SurfaceError, match="deferLoading must be true"):
         fold_surface([_header(0, bad_tools), _developer(1, [addition], header_seq=0)])
+    # Referenced tool with deferLoading False on the nested function object.
+    nested_bad = [
+        dict(tools[0], function=dict(tools[0]["function"], deferLoading=False))
+    ]
+    with pytest.raises(SurfaceError, match="deferLoading must be true"):
+        fold_surface([_header(0, nested_bad), _developer(1, [addition], header_seq=0)])
+    # Header tool with no nested function name matches nothing.
+    with pytest.raises(SurfaceError, match="must name exactly one tool"):
+        fold_surface(
+            [
+                _header(
+                    0,
+                    [
+                        {
+                            "type": "function",
+                            "function": {
+                                "description": "Search the web",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {},
+                                },
+                            },
+                        }
+                    ],
+                ),
+                _developer(1, [addition], header_seq=0),
+            ]
+        )
     # Inline tool definition on an addition.
     with pytest.raises(SurfaceError, match="must omit inline tool definitions"):
         fold_surface(
@@ -476,6 +529,12 @@ def test_validate_session_event_data_rules() -> None:
     )
     with pytest.raises(SurfaceError, match="must omit empty adapterDefaults"):
         validate_session_event_data(empty_defaults, "test")
+    # A husk header is grandfathered on the restore/seed path only: a
+    # fresh (strict) write refuses it for want of a config.
+    husk = _event(0, "request/header", {"header": {}, "reason": {"kind": "start"}})
+    validate_session_event_data(husk, "test")
+    with pytest.raises(SurfaceError, match="requires a nonempty provider and model"):
+        validate_session_event_data(husk, "test", strict=True)
     # tool/result error without message.isError.
     bad_result = _event(
         0,
@@ -632,13 +691,7 @@ def test_fold_source_seq_must_be_event_seq() -> None:
 
 def test_fold_developer_header_seq_must_be_earlier() -> None:
     """Verifies headerSeq must reference an earlier request/header."""
-    tools = [
-        {
-            "name": "search",
-            "description": "Search the web",
-            "parameters": {"type": "object", "properties": {}},
-        }
-    ]
+    tools = [_search_tool()]
     addition = {"type": "tool-addition", "toolName": "search"}
     # headerSeq equal to the developer event's own seq is not earlier.
     with pytest.raises(SurfaceError, match="must reference an earlier"):
@@ -647,13 +700,7 @@ def test_fold_developer_header_seq_must_be_earlier() -> None:
 
 def test_fold_developer_with_text_block_and_header_seq() -> None:
     """Verifies non-addition content blocks are skipped in header checks."""
-    tools = [
-        {
-            "name": "search",
-            "description": "Search the web",
-            "parameters": {"type": "object", "properties": {}},
-        }
-    ]
+    tools = [_search_tool()]
     blocks = [
         {"type": "text", "text": "note"},
         {"type": "tool-addition", "toolName": "search"},
@@ -743,3 +790,34 @@ def test_surface_manager_content_generation_processes_delta() -> None:
     )
     log.append(replacement)
     assert manager.content_generation == 1
+
+
+def test_complete_tool_definition_variants() -> None:
+    """Verifies the nested envelope completeness check, branch by branch."""
+    from magitech_harness.session.surface import _complete_tool_definition
+
+    complete = {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Search the web",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+    assert _complete_tool_definition(complete) is True
+    assert _complete_tool_definition({"type": "function"}) is False
+    assert _complete_tool_definition({"type": "function", "function": "x"}) is False
+    assert _complete_tool_definition("not-a-dict") is False
+    assert (
+        _complete_tool_definition({"type": "function", "function": {"name": "search"}})
+        is False
+    )
+    assert (
+        _complete_tool_definition(
+            {
+                "type": "function",
+                "function": {"name": "search", "description": "d"},
+            }
+        )
+        is False
+    )

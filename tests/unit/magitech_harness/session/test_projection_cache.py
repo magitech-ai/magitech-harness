@@ -1716,6 +1716,7 @@ def _append_golden_live(service: SessionService, session: Session) -> None:
                 "id": "a1",
                 "role": "assistant",
                 "content": [{"type": "text", "text": "Hi there"}],
+                "source": {"kind": "model", "provider": "p", "model": "m"},
             },
             "stream": [
                 {

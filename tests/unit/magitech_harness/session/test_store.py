@@ -5,6 +5,7 @@ import json
 import logging
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 from anima import Context
@@ -20,6 +21,11 @@ from magitech_harness.session.format import (
     SessionFormatUnsupportedError,
     SessionPersistenceCorruptionError,
 )
+from magitech_harness.session.messages import (
+    create_assistant_message,
+    create_tool_result_message,
+    create_user_message,
+)
 from magitech_harness.session.persistence import SessionPersistenceNotFoundError
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import (
@@ -27,7 +33,6 @@ from magitech_harness.session.store import (
     SessionForkError,
     SessionPreparation,
     SessionStore,
-    _normalize_adjacent_messages,
     _to_session_event,
     append_plugin_record,
     derive_messages,
@@ -36,42 +41,101 @@ from magitech_harness.session.store import (
 from magitech_harness.session.surface import SurfaceError, fold_surface
 
 
+def _ev(
+    seq: int,
+    type: str,
+    payload: dict,
+    surface_op: str | dict | None = None,
+) -> SessionEvent:
+    """One hand-built log event with an explicit sequence number."""
+    return SessionEvent(
+        id=f"s:{seq}",
+        session_id="s",
+        type=type,
+        timestamp=1000.0 + seq,
+        payload=payload,
+        seq=seq,
+        surface_op=surface_op,
+    )
+
+
+def _user_payload(text: str) -> dict:
+    """The canonical payload of one direct human message."""
+    return create_user_message(
+        content=[{"type": "text", "text": text}], source={"kind": "user"}
+    )
+
+
+def _assistant_payload(
+    text: str = "done",
+    *,
+    tool_calls: list | None = None,
+) -> dict:
+    """The canonical payload of one assistant message event."""
+    content: list = []
+    if text:
+        content.append({"type": "text", "text": text})
+    content.extend(tool_calls or [])
+    return {
+        "turn": 1,
+        "step": 1,
+        "message": create_assistant_message(content=content, provider="p", model="m"),
+        "stream": [],
+    }
+
+
 def test_derive_messages_ignores_unknown_and_handles_roles() -> None:
-    """Verifies that derive_messages correctly projects user, assistant, and tool messages."""
-    events = [
-        SessionEvent(id="1", session_id="s", type=EventType.TURN_START, payload={}),
-        SessionEvent(
-            id="2",
-            session_id="s",
-            type=EventType.USER_MESSAGE,
-            payload={"text": "hello"},
+    """Verifies derive_messages projects admission-shaped messages verbatim.
+
+    Unknown non-surface events project to nothing, and consecutive
+    same-role messages remain separate surface nodes.
+    """
+    user_one = _user_payload("hello")
+    user_two = _user_payload("hello again")
+    assistant = _assistant_payload(
+        "I can help",
+        tool_calls=[
+            {
+                "type": "tool-call",
+                "id": "c1",
+                "name": "test",
+                "arguments": "{}",
+            }
+        ],
+    )
+    tool_result = {
+        "turn": 1,
+        "step": 1,
+        "message": create_tool_result_message(
+            call_id="c1",
+            content=[{"type": "text", "text": "result_123"}],
         ),
-        SessionEvent(
-            id="3",
-            session_id="s",
-            type=EventType.ASSISTANT_MESSAGE,
-            payload={
-                "text": "I can help",
-                "tool_calls": [{"call_id": "c1", "name": "test", "arguments": {}}],
+    }
+    events = [
+        _ev(0, EventType.TURN_START, {"turn": 1}),
+        _ev(1, EventType.USER_MESSAGE, user_one, surface_op="append"),
+        _ev(2, EventType.USER_MESSAGE, user_two, surface_op="append"),
+        _ev(3, EventType.ASSISTANT_MESSAGE, assistant, surface_op="append"),
+        _ev(
+            4,
+            EventType.TOOL_CALL,
+            {
+                "turn": 1,
+                "step": 1,
+                "callId": "c1",
+                "name": "test",
+                "arguments": "{}",
             },
         ),
-        SessionEvent(
-            id="4",
-            session_id="s",
-            type=EventType.TOOL_RESULT,
-            payload={"call_id": "c1", "name": "test", "content": "result_123"},
-        ),
+        _ev(5, EventType.TOOL_RESULT, tool_result, surface_op="append"),
     ]
 
     msgs = derive_messages(events)
-    assert len(msgs) == 3
-    assert msgs[0]["role"] == "user"
-    assert msgs[0]["content"] == "hello"
-    assert msgs[1]["role"] == "assistant"
-    assert msgs[1]["content"] == "I can help"
-    assert msgs[2]["role"] == "tool"
-    assert msgs[2]["tool_call_id"] == "c1"
-    assert msgs[2]["content"] == "result_123"
+    assert len(msgs) == 4
+    assert msgs[0] == user_one
+    assert msgs[1] == user_two
+    assert msgs[2] == assistant["message"]
+    assert msgs[3] == tool_result["message"]
 
 
 def test_session_append_and_load() -> None:
@@ -79,21 +143,23 @@ def test_session_append_and_load() -> None:
     service's job (see the service round-trip tests)."""
     session = Session(session_id="sess_custom")
 
+    first = _user_payload("persisted text 1")
+    second = _user_payload("persisted text 2")
     event1 = session.append(
         EventType.USER_MESSAGE,
-        {"text": "persisted text 1"},
+        first,
         surface_op="append",
     )
     event2 = session.append(
         EventType.USER_MESSAGE,
-        {"text": "persisted text 2"},
+        second,
         surface_op="append",
     )
     assert event1.seq == 0
     assert event2.seq == 1
     assert session.events[0].id == "sess_custom:0"
     assert session.events[1].id == "sess_custom:1"
-    assert session.events[0].payload == {"text": "persisted text 1"}
+    assert session.events[0].payload == first
     assert session.events[0].seq == 0
     assert session.events[1].seq == 1
 
@@ -460,202 +526,213 @@ def test_session_load_nonexistent_or_empty(tmp_path: Path) -> None:
         Session.load(empty_file)
 
 
-def test_derive_messages_with_compaction_and_adjacent_fold() -> None:
-    """Verifies derive_messages folds prior history into compaction summary and merges consecutive user turns."""
-    events = [
-        SessionEvent(
-            id="1",
-            session_id="s",
-            type=EventType.USER_MESSAGE,
-            payload={"text": "Initial task"},
-        ),
-        SessionEvent(
-            id="2",
-            session_id="s",
-            type=EventType.ASSISTANT_MESSAGE,
-            payload={"text": "Step 1 done"},
-        ),
-        SessionEvent(
-            id="3",
-            session_id="s",
-            type="session/compaction",
-            payload={"summary": "Initial task: Step 1 is done."},
-        ),
-        SessionEvent(
-            id="4",
-            session_id="s",
-            type=EventType.USER_MESSAGE,
-            payload={"text": "Now step 2"},
-        ),
-        SessionEvent(
-            id="5",
-            session_id="s",
-            type=EventType.ASSISTANT_MESSAGE,
-            payload={"text": "Step 2 done"},
-        ),
-    ]
-
-    msgs = derive_messages(events)
-    # The compaction checkpoint user message and "Now step 2" user message fold into 1 user message
-    assert len(msgs) == 2
-    assert msgs[0]["role"] == "user"
-    assert (
-        "[Conversation summary up to checkpoint]:\nInitial task: Step 1 is done.\n\nNow step 2"
-        in msgs[0]["content"]
+def test_derive_messages_compaction_summary_is_log_only() -> None:
+    """Verifies a real compaction range replays through its replacement
+    message only: the summary event contributes no message, and the
+    replacement and the later user message stay separate nodes."""
+    summary_blocks = [{"type": "text", "text": "Initial task: Step 1 is done."}]
+    replacement = create_user_message(
+        content=[
+            {"type": "text", "text": "Summary of earlier conversation:\n"},
+            *summary_blocks,
+            {"type": "text", "text": "\nEnd of summary."},
+        ],
+        source={"kind": "compact-checkpoint", "compactionId": "c1"},
     )
-    assert msgs[1]["role"] == "assistant"
-    assert msgs[1]["content"] == "Step 2 done"
-
-
-def test_derive_messages_with_compaction_and_compacted_count() -> None:
-    """Verifies derive_messages uses compacted_count to keep non-compacted history."""
+    later = _user_payload("Now step 2")
     events = [
-        SessionEvent(
-            id="1",
-            session_id="s",
-            type=EventType.USER_MESSAGE,
-            payload={"text": "Old 1"},
+        _ev(0, "compaction/start", {"compactionId": "c1", "turn": 1}),
+        _ev(
+            1,
+            EventType.USER_MESSAGE,
+            _user_payload("Initial task"),
+            surface_op="append",
         ),
-        SessionEvent(
-            id="2",
-            session_id="s",
-            type=EventType.ASSISTANT_MESSAGE,
-            payload={"text": "Old 2"},
+        _ev(
+            2,
+            EventType.ASSISTANT_MESSAGE,
+            _assistant_payload("Step 1 done"),
+            surface_op="append",
         ),
-        SessionEvent(
-            id="3",
-            session_id="s",
-            type=EventType.USER_MESSAGE,
-            payload={"text": "Kept 3"},
-        ),
-        SessionEvent(
-            id="4",
-            session_id="s",
-            type="session/compaction",
-            payload={"summary": "Summary of 1 & 2", "compacted_count": 2},
-        ),
-    ]
-    msgs = derive_messages(events)
-    # Compaction summary (user) + Kept 3 (user) fold together
-    assert len(msgs) == 1
-    assert (
-        "[Conversation summary up to checkpoint]:\nSummary of 1 & 2\n\nKept 3"
-        == msgs[0]["content"]
-    )
-
-
-def test_normalize_adjacent_messages_branches() -> None:
-    """Verifies all branch edge cases in _normalize_adjacent_messages."""
-    assert _normalize_adjacent_messages([]) == []
-
-    # Single message
-    assert len(_normalize_adjacent_messages([{"role": "user", "content": "hi"}])) == 1
-
-    # Consecutive assistant messages without tool calls
-    msgs_asst = [
-        {"role": "assistant", "content": "Hello"},
-        {"role": "assistant", "content": "World"},
-    ]
-    norm_asst = _normalize_adjacent_messages(msgs_asst)
-    assert len(norm_asst) == 1
-    assert norm_asst[0]["content"] == "Hello\n\nWorld"
-
-    # Consecutive assistant with None content
-    msgs_none = [
-        {"role": "assistant", "content": None},
-        {"role": "assistant", "content": "Text"},
-    ]
-    norm_none = _normalize_adjacent_messages(msgs_none)
-    assert len(norm_none) == 1
-    assert norm_none[0]["content"] == "Text"
-
-    # Assistant with tool calls should NOT merge
-    msgs_tool_calls = [
-        {"role": "assistant", "content": "Text", "tool_calls": [{"id": "1"}]},
-        {"role": "assistant", "content": "Text 2"},
-    ]
-    assert len(_normalize_adjacent_messages(msgs_tool_calls)) == 2
-
-    # Tool role messages should NOT merge
-    msgs_tools = [
-        {"role": "tool", "tool_call_id": "c1", "content": "r1"},
-        {"role": "tool", "tool_call_id": "c2", "content": "r2"},
-    ]
-    assert len(_normalize_adjacent_messages(msgs_tools)) == 2
-
-
-def test_derive_messages_tool_result_message_shape() -> None:
-    """Verifies tool/result projection reads the tool-role message shape.
-
-    The tool name comes from the matching tool/call event; a result with
-    no matching call projects a null name. Non-text blocks project as
-    JSON; a string content projects as-is.
-    """
-    events = [
-        SessionEvent(
-            id="1",
-            session_id="s",
-            type=EventType.TOOL_CALL,
-            payload={"call_id": "c1", "name": "search"},
-        ),
-        SessionEvent(
-            id="2",
-            session_id="s",
-            type=EventType.TOOL_RESULT,
-            payload={
-                "message": {
-                    "toolCallId": "c1",
-                    "content": [
-                        {"type": "text", "text": "hit"},
-                        {"type": "image", "url": "u"},
-                        {"type": "text", "text": " again"},
-                        "raw",
-                    ],
-                }
+        _ev(
+            3,
+            "compaction/summary",
+            {
+                "compactionId": "c1",
+                "summary": summary_blocks,
+                "shadowedRange": {"start": 1, "end": 2},
+                "shadowedSeqs": [1, 2],
+                "shadowedTokenCount": 10,
+                "provider": "p",
+                "model": "m",
             },
         ),
-        SessionEvent(
-            id="3",
-            session_id="s",
-            type=EventType.TOOL_CALL,
-            payload={"call_id": 7, "name": "bad"},
+        _ev(
+            4,
+            EventType.USER_MESSAGE,
+            replacement,
+            surface_op={"op": "replace", "startSeq": 1, "endSeq": 2},
         ),
-        SessionEvent(
-            id="4",
-            session_id="s",
-            type=EventType.TOOL_RESULT,
-            payload={"message": {"toolCallId": "7", "content": "plain"}},
+        _ev(5, EventType.USER_MESSAGE, later, surface_op="append"),
+        _ev(
+            6,
+            EventType.ASSISTANT_MESSAGE,
+            _assistant_payload("Step 2 done"),
+            surface_op="append",
         ),
-        SessionEvent(
-            id="5",
-            session_id="s",
-            type=EventType.TOOL_RESULT,
-            payload={"message": {"toolCallId": "9", "content": {"k": "v"}}},
+    ]
+    events[4].source_event_seqs = [0, 3, 1, 2]
+
+    msgs = derive_messages(events)
+    assert len(msgs) == 3
+    assert msgs[0] == replacement
+    assert msgs[1] == later
+    assert msgs[2]["role"] == "assistant"
+    assert not any(
+        "[Conversation summary" in str(message.get("content")) for message in msgs
+    )
+
+
+def test_derive_messages_ignores_compacted_count() -> None:
+    """Verifies a compaction/summary event without its replacement
+    shadows nothing: the pre-compaction messages are all still derived
+    and no summary message appears."""
+    events = [
+        _ev(0, EventType.USER_MESSAGE, _user_payload("Old 1"), surface_op="append"),
+        _ev(
+            1,
+            EventType.ASSISTANT_MESSAGE,
+            _assistant_payload("Old 2"),
+            surface_op="append",
+        ),
+        _ev(2, EventType.USER_MESSAGE, _user_payload("Kept 3"), surface_op="append"),
+        _ev(
+            3,
+            "compaction/summary",
+            {
+                "compactionId": "c1",
+                "summary": [{"type": "text", "text": "Summary of 1 & 2"}],
+                "shadowedRange": {"start": 0, "end": 1},
+                "shadowedSeqs": [0, 1],
+                "shadowedTokenCount": 10,
+                "provider": "p",
+                "model": "m",
+            },
         ),
     ]
     msgs = derive_messages(events)
     assert len(msgs) == 3
-    assert msgs[0]["role"] == "tool"
-    assert msgs[0]["tool_call_id"] == "c1"
-    assert msgs[0]["name"] == "search"
-    assert msgs[0]["content"] == 'hit{"type": "image", "url": "u"} again'
-    assert msgs[1]["role"] == "tool"
-    assert msgs[1]["tool_call_id"] == "7"
-    assert msgs[1]["name"] is None
-    assert msgs[1]["content"] == "plain"
-    assert msgs[2]["role"] == "tool"
-    assert msgs[2]["tool_call_id"] == "9"
-    assert msgs[2]["name"] is None
-    assert msgs[2]["content"] == '{"k": "v"}'
+    assert [message["role"] for message in msgs] == ["user", "assistant", "user"]
+    assert not any(
+        "Summary of 1 & 2" in str(message.get("content")) for message in msgs
+    )
+
+
+def test_derive_messages_never_merges_adjacent_roles() -> None:
+    """Verifies consecutive same-role messages stay separate surface
+    nodes, and an empty-content assistant event projects to nothing
+    instead of coalescing."""
+    first_user = _user_payload("Hello")
+    second_user = _user_payload("World")
+    first_assistant = _assistant_payload("Hello")
+    second_assistant = _assistant_payload("World")
+    empty_assistant = _assistant_payload("")
+    events = [
+        _ev(0, EventType.USER_MESSAGE, first_user, surface_op="append"),
+        _ev(1, EventType.USER_MESSAGE, second_user, surface_op="append"),
+        _ev(2, EventType.ASSISTANT_MESSAGE, first_assistant, surface_op="append"),
+        _ev(3, EventType.ASSISTANT_MESSAGE, second_assistant, surface_op="append"),
+        _ev(4, EventType.ASSISTANT_MESSAGE, empty_assistant, surface_op="append"),
+    ]
+    msgs = derive_messages(events)
+    assert len(msgs) == 4
+    assert msgs[0] == first_user
+    assert msgs[1] == second_user
+    assert msgs[2] == first_assistant["message"]
+    assert msgs[3] == second_assistant["message"]
+
+
+def test_derive_messages_tool_result_message_shape() -> None:
+    """Verifies tool/result projection returns the stored tool-role
+    message verbatim: blocks are never stringified, no tool name is
+    recovered, and the tool/call events are irrelevant to the projection."""
+    first = {
+        "turn": 1,
+        "step": 1,
+        "message": {
+            "id": "t1",
+            "role": "tool",
+            "toolCallId": "c1",
+            "isError": False,
+            "source": {"kind": "tool", "callId": "c1"},
+            "content": [
+                {"type": "text", "text": "hit"},
+                {"type": "image", "attachment": {"attachmentId": "a1"}},
+                {"type": "text", "text": " again"},
+                "raw",
+            ],
+        },
+    }
+    second = {
+        "turn": 1,
+        "step": 1,
+        "message": {"id": "t2", "role": "tool", "toolCallId": "7", "content": "plain"},
+    }
+    third = {
+        "turn": 1,
+        "step": 1,
+        "message": {
+            "id": "t3",
+            "role": "tool",
+            "toolCallId": "9",
+            "content": {"k": "v"},
+        },
+    }
+    call = {
+        "turn": 1,
+        "step": 1,
+        "callId": "c1",
+        "name": "search",
+        "arguments": "{}",
+    }
+    with_calls = [
+        _ev(0, EventType.TOOL_CALL, call),
+        _ev(1, EventType.TOOL_RESULT, first, surface_op="append"),
+        _ev(2, EventType.TOOL_RESULT, second, surface_op="append"),
+        _ev(3, EventType.TOOL_RESULT, third, surface_op="append"),
+    ]
+    without_calls = [
+        _ev(0, EventType.TOOL_RESULT, first, surface_op="append"),
+        _ev(1, EventType.TOOL_RESULT, second, surface_op="append"),
+        _ev(2, EventType.TOOL_RESULT, third, surface_op="append"),
+    ]
+    msgs = derive_messages(with_calls)
+    assert msgs == [first["message"], second["message"], third["message"]]
+    assert derive_messages(without_calls) == msgs
+    assert not any("name" in message for message in msgs)
 
 
 def test_session_derive_messages_method() -> None:
-    """Verifies session.derive_messages() forwards to derive_messages."""
+    """Verifies session.derive_messages() caches the projection and
+    rebuilds it when a replacement bumps the content generation."""
     session = Session(session_id="test")
-    session.append(EventType.USER_MESSAGE, {"text": "hello"}, surface_op="append")
+    session.append(EventType.USER_MESSAGE, _user_payload("hello"), surface_op="append")
+    session.append(EventType.USER_MESSAGE, _user_payload("world"), surface_op="append")
     msgs = session.derive_messages()
-    assert len(msgs) == 1
-    assert msgs[0]["content"] == "hello"
+    assert len(msgs) == 2
+    assert msgs[0]["content"] == [{"type": "text", "text": "hello"}]
+    assert session.derive_messages() == msgs
+    replacement = _user_payload("replaced")
+    session.append(
+        EventType.USER_MESSAGE,
+        replacement,
+        surface_op={"op": "replace", "startSeq": 0, "endSeq": 0},
+        source_event_seqs=[0],
+    )
+    rebuilt = session.derive_messages()
+    assert len(rebuilt) == 2
+    assert rebuilt[0] == replacement
+    assert rebuilt[1]["content"] == [{"type": "text", "text": "world"}]
 
 
 def _write_history_file(
@@ -1031,7 +1108,9 @@ def test_session_append_to_migrated_session_is_refused(tmp_path: Path) -> None:
         SessionFormatUnsupportedError,
         match="cannot append to a migrated session until it is republished",
     ):
-        loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
+        loaded.append(
+            EventType.USER_MESSAGE, _user_payload("after"), surface_op="append"
+        )
     assert len(loaded.events) == 2
     assert file_path.read_bytes() == before
 
@@ -1063,13 +1142,14 @@ def test_session_append_to_current_v4_session_loads_back(tmp_path: Path) -> None
         encoding="utf-8",
     )
     loaded = Session.load(file_path)
-    loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
+    after = _user_payload("after")
+    loaded.append(EventType.USER_MESSAGE, after, surface_op="append")
     assert [event.type for event in loaded.events] == [
         EventType.TURN_START,
         EventType.TURN_END,
         EventType.USER_MESSAGE,
     ]
-    assert loaded.events[2].payload == {"text": "after"}
+    assert loaded.events[2].payload == after
     reloaded = Session.load(file_path)
     assert len(reloaded.events) == 2
 
@@ -1127,7 +1207,9 @@ def test_session_loaded_from_migrated_log_refuses_append(
         SessionFormatUnsupportedError,
         match="cannot append to a migrated session until it is republished",
     ):
-        loaded.append(EventType.USER_MESSAGE, {"text": "after"}, surface_op="append")
+        loaded.append(
+            EventType.USER_MESSAGE, _user_payload("after"), surface_op="append"
+        )
     assert len(loaded.events) == 2
     assert file_path.read_bytes() == before
 
@@ -1171,6 +1253,7 @@ def _minimal_payload(type: str) -> dict:
             "role": "user",
             "id": "m",
             "content": [{"type": "text", "text": "x"}],
+            "source": {"kind": "user"},
         }
     if type == "system/message":
         return {
@@ -1180,6 +1263,7 @@ def _minimal_payload(type: str) -> dict:
                 "id": "s",
                 "role": "system",
                 "content": [{"type": "text", "text": "x"}],
+                "source": {"kind": "system-prompt"},
             },
         }
     if type == "developer/message":
@@ -1201,9 +1285,14 @@ def _minimal_payload(type: str) -> dict:
                 "id": "a",
                 "role": "assistant",
                 "content": [{"type": "text", "text": "x"}],
+                "source": {"kind": "model", "provider": "p", "model": "m"},
             },
             "stream": [],
         }
+    if type == "assistant/attempt":
+        return {"turn": 1, "step": 1, "stream": []}
+    if type == "request/context":
+        return {"provider": "p", "model": "m"}
     if type == "tool/result":
         return {
             "turn": 1,
@@ -1218,7 +1307,10 @@ def _minimal_payload(type: str) -> dict:
             },
         }
     if type == "request/header":
-        return {"header": {"config": {}}, "reason": {"kind": "initial"}}
+        return {
+            "header": {"config": {"provider": "p", "model": "m"}},
+            "reason": "initial",
+        }
     return {}
 
 
@@ -1268,14 +1360,22 @@ async def test_session_appends_all_62_types_and_replays_in_order(
     assert [event.type for event in session.events] == types
     assert [event.seq for event in session.events] == list(range(62))
     await service.flush(session)
+    # The canonical user/message is title-eligible, so the title service
+    # commits a deterministic fallback title for it; drain the deferred
+    # work, persist it, and expect it as the log's final event.
+    await service.title_service.drain()
+    await service.flush(session)
     assert service.close("all62") is True
     ctx2 = Context()
     service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
     service2.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
     reloaded = service2.load("all62")
     assert reloaded is not None
-    assert [event.type for event in reloaded.events] == types
-    assert [event.seq for event in reloaded.events] == list(range(62))
+    assert [event.type for event in reloaded.events] == [*types, "session/title"]
+    assert [event.seq for event in reloaded.events] == list(range(63))
+    fallback = reloaded.events[62]
+    assert fallback.payload["title"] == "x"
+    assert fallback.payload["source"] == {"kind": "fallback"}
 
 
 def test_session_load_refuses_gapped_seq(tmp_path: Path) -> None:
@@ -2093,12 +2193,12 @@ def _live_source(store: SessionStore, session_id: str = "source") -> Session:
     session = store.create(session_id, options={"meta": {"cwd": "/tmp"}})
     session.append("turn/start", {"turn": 1})
     session.append("step/start", {"turn": 1, "step": 1})
-    session.append("user/message", {"text": "hi"}, surface_op="append")
+    session.append("user/message", _user_payload("hi"), surface_op="append")
     session.append("step/end", {"turn": 1, "step": 1})
     session.append("turn/end", {"turn": 1, "reason": {"kind": "completed"}})
     session.append("turn/start", {"turn": 2})
     session.append("step/start", {"turn": 2, "step": 1})
-    session.append("user/message", {"text": "go"}, surface_op="append")
+    session.append("user/message", _user_payload("go"), surface_op="append")
     return session
 
 
@@ -2212,6 +2312,7 @@ def test_store_fork_preserves_failed_calls_unchanged() -> None:
             "message": {
                 "id": "a2",
                 "role": "assistant",
+                "source": {"kind": "model", "provider": "p", "model": "m"},
                 "content": [
                     {
                         "type": "tool-call",
@@ -2555,3 +2656,412 @@ def test_session_append_non_json_surface_metadata() -> None:
             {"text": "x"},
             surface_op={"op": "append", "bad": {1, 2}},  # type: ignore[dict-item]
         )
+
+
+# ---------------------------------------------------------------------------
+# P2-6 request reconstruction: admission and fold tests
+# ---------------------------------------------------------------------------
+
+
+def _header_payload(**overrides: object) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "header": {"config": {"provider": "p", "model": "m"}},
+        "reason": "initial",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _tool_a() -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "a",
+            "description": "tool a",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    }
+
+
+def test_append_request_header_admission() -> None:
+    """Verifies request/header reason and field admission at append."""
+    session = Session(session_id="header-admission")
+    for reason in ("initial", "resume", "change", "series"):
+        session.append("request/header", _header_payload(reason=reason))
+    session.append(
+        "request/header",
+        _header_payload(
+            header={
+                "config": {
+                    "provider": "p",
+                    "model": "m",
+                    "reasoningEffort": "high",
+                    "maxTokens": 100,
+                },
+                "adapterDefaults": {"reasoningEffort": True, "maxTokens": True},
+            }
+        ),
+    )
+    bad: list[tuple[dict[str, Any], str]] = [
+        (_header_payload(reason="fallback"), "reason must be one of"),
+        (_header_payload(reason="bogus"), "reason must be one of"),
+        (_header_payload(reason={"kind": "initial"}), "reason must be one of"),
+        (_header_payload(startsSeries=False), "startsSeries must be true"),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "adapterDefaults": "yes",
+                }
+            ),
+            "adapterDefaults must be an object",
+        ),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "adapterDefaults": {"reasoningEffort": False},
+                }
+            ),
+            "adapterDefaults reasoningEffort must be true",
+        ),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "adapterDefaults": {"unknown": True},
+                }
+            ),
+            "adapterDefaults carries unknown key",
+        ),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "adapterDefaults": {"maxTokens": True},
+                }
+            ),
+            "adapterDefaults maxTokens requires config maxTokens",
+        ),
+        (
+            _header_payload(header={"config": {"model": "m"}}),
+            "header config requires a nonempty provider and model",
+        ),
+        (
+            _header_payload(header={"config": {"provider": "p"}}),
+            "header config requires a nonempty provider and model",
+        ),
+        (
+            _header_payload(
+                header={"config": {"provider": "p", "model": "m", "reasoningEffort": 3}}
+            ),
+            "header config reasoningEffort must be a nonempty string",
+        ),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "tools": {"type": "function"},
+                }
+            ),
+            "header tools must be an array",
+        ),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "tools": ["not-an-object"],
+                }
+            ),
+            "header tools must be objects",
+        ),
+        (
+            _header_payload(
+                header={
+                    "config": {"provider": "p", "model": "m"},
+                    "tools": [{"type": "function", "deferLoading": False}],
+                }
+            ),
+            "header tool deferLoading must be true",
+        ),
+    ]
+    for payload, match in bad:
+        with pytest.raises(ValueError, match=match):
+            session.append("request/header", payload)
+    assert len(session.events) == 5
+
+
+def test_append_request_context_admission() -> None:
+    """Verifies request/context field admission at append."""
+    session = Session(session_id="context-admission")
+    session.append("request/context", {"provider": "p", "model": "m"})
+    session.append(
+        "request/context",
+        {"provider": "p", "model": "m", "contextWindow": 4096},
+    )
+    session.append(
+        "request/context",
+        {"provider": "p", "model": "m", "systemPromptUpdate": "in-history"},
+    )
+    bad: list[tuple[dict[str, Any], str]] = [
+        ({"provider": "", "model": "m"}, "requires a nonempty provider and model"),
+        ({"provider": "p", "model": ""}, "requires a nonempty provider and model"),
+        ({"provider": "p", "model": "m", "contextWindow": 0}, "contextWindow"),
+        ({"provider": "p", "model": "m", "contextWindow": 1.5}, "contextWindow"),
+        (
+            {"provider": "p", "model": "m", "systemPromptUpdate": "replace"},
+            'systemPromptUpdate must be "in-history"',
+        ),
+    ]
+    for payload, match in bad:
+        with pytest.raises(ValueError, match=match):
+            session.append("request/context", payload)
+    assert len(session.events) == 3
+
+
+def test_append_assistant_settlement_admission() -> None:
+    """Verifies assistant/message and assistant/attempt admission at append."""
+    session = Session(session_id="settlement-admission")
+    session.append("assistant/attempt", {"turn": 1, "step": 1, "stream": []})
+    session.append(
+        "assistant/message", _minimal_payload("assistant/message"), surface_op="append"
+    )
+    message = _minimal_payload("assistant/message")
+    bad_message: list[tuple[dict[str, Any], str]] = [
+        ({**message, "turn": -1}, "turn must be a non-negative safe integer"),
+        ({**message, "step": 1.5}, "step must be a non-negative safe integer"),
+        ({**message, "stream": {}}, "stream must be an array"),
+        ({**message, "tool_calls": []}, "must not carry tool_calls"),
+        ({**message, "interrupted": False}, "interrupted must be true"),
+        (
+            {
+                **message,
+                "message": {
+                    **message["message"],  # type: ignore[dict-item]
+                    "source": {"kind": "model"},
+                },
+            },
+            "requires a model source with provider and model",
+        ),
+        (
+            {
+                **message,
+                "message": {
+                    **message["message"],  # type: ignore[dict-item]
+                    "source": {"kind": "model", "provider": "p"},
+                },
+            },
+            "requires a model source with provider and model",
+        ),
+    ]
+    for payload, match in bad_message:
+        with pytest.raises(ValueError, match=match):
+            session.append("assistant/message", payload, surface_op="append")
+    with pytest.raises(ValueError, match="turn must be a non-negative safe integer"):
+        session.append("assistant/attempt", {"turn": -1, "step": 1, "stream": []})
+    assert len(session.events) == 2
+
+
+def test_append_developer_plugin_source_refused() -> None:
+    """Verifies a developer message with a plugin source is refused."""
+    session = Session(session_id="plugin-source")
+    payload = _minimal_payload("developer/message")
+    payload["message"]["source"] = {"kind": "plugin"}  # type: ignore[index]
+    with pytest.raises(ValueError, match="plugin"):
+        session.append("developer/message", payload, surface_op="append")
+
+
+def test_session_request_folds_are_incremental_and_detached() -> None:
+    """Verifies request folds consume only new events and detach copies."""
+    session = Session(session_id="request-folds")
+    session.append(
+        "request/header",
+        {
+            "header": {
+                "config": {"provider": "p", "model": "m"},
+                "tools": [_tool_a()],
+            },
+            "reason": "initial",
+        },
+    )
+    header = session.request_header()
+    assert header is not None
+    assert header["config"] == {"provider": "p", "model": "m"}
+    assert header["tools"] == [_tool_a()]
+    assert session._header_fold_seq == 1
+    header["config"]["provider"] = "tampered"  # type: ignore[index]
+    assert session.request_header()["config"]["provider"] == "p"  # type: ignore[index]
+    assert session._header_fold_seq == 1
+    assert session.request_context() is None
+    session.append("request/context", {"provider": "p", "model": "m"})
+    context = session.request_context()
+    assert context == {"provider": "p", "model": "m"}
+    assert session._context_fold_seq == 2
+    context["provider"] = "tampered"  # type: ignore[index]
+    assert session.request_context() == {"provider": "p", "model": "m"}
+    history = session.tool_history()
+    assert history["tools"] == [_tool_a()]
+    assert history["updates"] == []
+    assert session._tool_history_seq == 2
+    # A context event changes nothing in the header fold or tool history.
+    assert session.request_header()["config"] == {"provider": "p", "model": "m"}  # type: ignore[index]
+    assert session._header_fold_seq == 2
+    assert session.tool_history() == history
+    assert session._tool_history_seq == 2
+    session.append(
+        "developer/message",
+        {
+            "turn": 1,
+            "step": 1,
+            "headerSeq": 0,
+            "message": {
+                "id": "d",
+                "role": "developer",
+                "source": {"kind": "tool-registry"},
+                "content": [{"type": "tool-addition", "toolName": "a"}],
+            },
+        },
+        surface_op="append",
+    )
+    history = session.tool_history()
+    assert history["updates"] == [{"messageId": "d", "additions": [_tool_a()]}]
+    assert session._tool_history_seq == 3
+
+
+def test_developer_tool_addition_absent_from_header_throws() -> None:
+    """Verifies a tool-addition naming an absent tool throws at append."""
+    session = Session(session_id="addition-absent")
+    session.append(
+        "request/header",
+        {
+            "header": {
+                "config": {"provider": "p", "model": "m"},
+                "tools": [_tool_a()],
+            },
+            "reason": "initial",
+        },
+    )
+    payload = {
+        "turn": 1,
+        "step": 1,
+        "headerSeq": 0,
+        "message": {
+            "id": "d",
+            "role": "developer",
+            "source": {"kind": "tool-registry"},
+            "content": [{"type": "tool-addition", "toolName": "missing"}],
+        },
+    }
+    with pytest.raises(ValueError, match="must name exactly one tool"):
+        session.append("developer/message", payload, surface_op="append")
+    # A headerSeq naming a non-header event throws the same way.
+    session.append("user/message", _user_payload("hi"), surface_op="append")
+    payload["message"]["content"] = [{"type": "tool-addition", "toolName": "a"}]  # type: ignore[index]
+    payload["headerSeq"] = 1
+    with pytest.raises(ValueError, match="must reference an earlier request/header"):
+        session.append("developer/message", payload, surface_op="append")
+
+
+def test_derive_messages_compaction_absence() -> None:
+    """Verifies derive needs no compaction event to reproduce history."""
+    session = Session(session_id="compaction-absence")
+    session.append("user/message", _user_payload("one"), surface_op="append")
+    session.append(
+        "assistant/message",
+        _assistant_payload("two"),
+        surface_op="append",
+    )
+    assert [message["role"] for message in session.derive_messages()] == [
+        "user",
+        "assistant",
+    ]
+    # A lone compaction/start with no summary changes nothing.
+    session.append("compaction/start", {"compactionId": "c1"})
+    assert [message["role"] for message in session.derive_messages()] == [
+        "user",
+        "assistant",
+    ]
+    assert not any("summary" in str(message) for message in session.derive_messages())
+
+
+def test_load_request_header_and_context_admission(tmp_path: Path) -> None:
+    """Verifies request rows are admitted or refused at load."""
+    file_path = tmp_path / "header-load.jsonl"
+    _write_v4_file(
+        file_path,
+        "header-load",
+        [
+            _v4_row(
+                "request/header",
+                0,
+                {
+                    "header": {"config": {"provider": "p", "model": "m"}},
+                    "reason": "bogus",
+                },
+            ),
+        ],
+    )
+    with pytest.raises(SessionFormatError, match="reason must be one of"):
+        Session.load(file_path)
+    _write_v4_file(
+        file_path,
+        "header-load",
+        [
+            _v4_row(
+                "request/context",
+                0,
+                {"provider": "p", "model": "m", "contextWindow": 0},
+            )
+        ],
+    )
+    with pytest.raises(SessionFormatError, match="contextWindow"):
+        Session.load(file_path)
+    # The migration's husk header loads and folds to no snapshot.
+    _write_v4_file(
+        file_path,
+        "header-load",
+        [
+            _v4_row(
+                "request/header",
+                0,
+                {"header": {}, "reason": {"kind": "start"}},
+            ),
+            _v4_row("user/message", 1, _user_payload("hi"), surfaceOp="append"),
+        ],
+    )
+    loaded = Session.load(file_path)
+    assert loaded.request_header() is None
+    assert [message["role"] for message in loaded.derive_messages()] == ["user"]
+
+
+def test_load_assistant_message_tool_calls_refused(tmp_path: Path) -> None:
+    """Verifies a loaded assistant/message carrying tool_calls is refused."""
+    file_path = tmp_path / "settlement-load.jsonl"
+    payload = _minimal_payload("assistant/message")
+    payload["tool_calls"] = []
+    _write_v4_file(
+        file_path, "settlement-load", [_v4_row("assistant/message", 0, payload)]
+    )
+    with pytest.raises(SessionFormatError, match="must not carry tool_calls"):
+        Session.load(file_path)
+
+
+def test_session_seed_rejects_malformed_assistant_message() -> None:
+    """Verifies a seed assistant message without an id is refused."""
+    event = _ev(
+        0,
+        "assistant/message",
+        {
+            "turn": 1,
+            "step": 1,
+            "message": {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "hi"}],
+            },
+            "stream": [],
+        },
+    )
+    with pytest.raises(
+        ValueError, match="assistant/message requires an identified model message"
+    ):
+        Session.create("bad-assistant-seed", seed=[event])
