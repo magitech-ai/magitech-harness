@@ -13,7 +13,7 @@ from typing import Any
 from anima import Context
 from anima.loader import load_profile
 
-from magitech_harness import create_harness
+from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.session.store import Session
 
@@ -241,6 +241,7 @@ async def main_async(argv: list[str] | None = None) -> None:
     storage_path = Path(args.storage) if args.storage and args.storage.strip() else None
     ctx = create_harness(storage_dir=storage_path)
     await ctx.flush()
+    check_bundle_entries(ctx)
 
     if args.profile:
         load_profile(ctx, args.profile)

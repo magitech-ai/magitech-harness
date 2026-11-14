@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 from anima import Context, EventMode
 
+import magitech_harness
 from magitech_harness import create_harness
 from magitech_harness.agent.cancellation import AbortError
 from magitech_harness.cli import (
@@ -290,6 +291,19 @@ async def test_run_repl_abort_error_and_turn_exception() -> None:
 
     assert any("Turn cancelled by user" in line for line in out_lines)
     assert any("Error during turn: LLM exploded" in line for line in out_lines)
+
+
+@pytest.mark.asyncio
+async def test_main_async_fails_loud_on_bad_bundle(tmp_path: Path, monkeypatch) -> None:
+    """Verifies the CLI boot audit fails loud on a bad bundle row."""
+    bundle_path = tmp_path / "bundle.yaml"
+    bundle_path.write_text(
+        "- id: bad-row\n  name: nonexistent.module:Nope\n  config: {}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", bundle_path)
+    with pytest.raises(RuntimeError, match="bad-row"):
+        await main_async(["--storage", str(tmp_path), "session", "list"])
 
 
 @pytest.mark.asyncio
