@@ -28,6 +28,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
+from anima import Context, Disposer, Service
+
 from magitech_harness.session.events import (
     KNOWN_SESSION_EVENT_TYPES,
     SessionEvent,
@@ -71,6 +73,7 @@ __all__ = [
     "JsonlLiveTracker",
     "JsonlSessionHandle",
     "JsonlSessionPersistence",
+    "JsonlSessionPersistenceService",
     "KernelLease",
     "ReadResult",
     "ScanResult",
@@ -1108,7 +1111,9 @@ class JsonlSessionPersistence(SessionPersistence):
     Implements the frozen persistence contract. ``root`` is required:
     no default keeps session files from scattering as the working
     directory changes. ``live_batch_delay`` is kept for the live
-    routing tracker; no timer logic lives here. Pending entries
+    routing tracker; no timer logic lives here. The backend owns its
+    live tracker: the tracker is constructed here, uninstalled, and
+    installed by the row that owns this backend. Pending entries
     (created but unmaterialized) and in-process write claims are
     guarded by one lock; handle operations are never run while it is
     held, so a handle closing can never deadlock against the service.
@@ -1117,9 +1122,32 @@ class JsonlSessionPersistence(SessionPersistence):
     def __init__(self, root: Path, *, live_batch_delay: float = 0.2) -> None:
         self._root = root
         self._live_batch_delay = live_batch_delay
+        self._tracker = JsonlLiveTracker(self)
         self._pending: dict[str, _PendingEntry] = {}
         self._claims: dict[str, JsonlSessionHandle] = {}
         self._lock = threading.Lock()
+
+    @property
+    def root(self) -> Path:
+        """The storage root this backend writes under."""
+        return self._root
+
+    def install_tracker(self, ctx: Any) -> Callable[[], None]:
+        """Install the backend-owned live tracker on ``ctx``.
+
+        Returns the tracker's disposer; the tracker stays uninstalled
+        until this runs, so constructing a backend starts no timers.
+        """
+        return self._tracker.install(ctx)
+
+    def drain_live(self, session_id: str | None = None) -> None:
+        """Drain buffered live events through their write handles.
+
+        Drains one session when an id is given, every session's when
+        it is None. A drain failure raises loudly; sessions after a
+        failing one stay buffered for the next call.
+        """
+        self._tracker.drain_live(session_id)
 
     # -- helpers ---------------------------------------------------------
 
@@ -1572,6 +1600,60 @@ class JsonlSessionPersistence(SessionPersistence):
             raise ExceptionGroup(
                 f"session flush failed for: {', '.join(failed_ids)}", failures
             )
+
+
+class JsonlSessionPersistenceService(Service):
+    """Row service owning the JSONL persistence backend.
+
+    A row service providing ``sessionPersistence``. With a storage root
+    configured it constructs the backend and installs the backend's
+    live tracker on the context; with no root it activates hollow —
+    the slot exists but carries no backend, and sessions resolve
+    nothing from it. Row unload uninstalls the tracker.
+    """
+
+    def __init__(
+        self,
+        ctx: Context,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        """Build the service; the backend exists only with a root configured.
+
+        ``config`` carries ``root`` and ``live_batch_delay``; a falsy
+        root activates the service hollow.
+        """
+        super().__init__(ctx, "sessionPersistence")
+        cfg = config or {}
+        root = cfg.get("root") or None
+        self._backend: JsonlSessionPersistence | None = None
+        self._tracker_dispose: Disposer | None = None
+        if root is not None:
+            backend = JsonlSessionPersistence(
+                Path(root),
+                live_batch_delay=cfg.get("live_batch_delay", 0.2),
+            )
+            self._backend = backend
+            self._tracker_dispose = backend.install_tracker(ctx)
+        # Row unload runs this: the tracker must stop routing once the
+        # row is gone, which slot removal alone would not ensure.
+        ctx.effect(lambda: self.dispose)
+
+    @property
+    def backend(self) -> JsonlSessionPersistence | None:
+        """The owned backend, or ``None`` when the row is hollow."""
+        return self._backend
+
+    @property
+    def active(self) -> bool:
+        """Whether this row owns a live backend."""
+        return self._backend is not None
+
+    def dispose(self) -> None:
+        """Uninstall the live tracker. Idempotent."""
+        if self._tracker_dispose is not None:
+            dispose = self._tracker_dispose
+            self._tracker_dispose = None
+            dispose()
 
 
 # ---------------------------------------------------------------------------

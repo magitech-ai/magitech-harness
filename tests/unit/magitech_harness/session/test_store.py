@@ -27,6 +27,12 @@ from magitech_harness.session.messages import (
     create_user_message,
 )
 from magitech_harness.session.persistence import SessionPersistenceNotFoundError
+from magitech_harness.session.persistence_jsonl import (
+    JsonlSessionPersistenceService,
+)
+from magitech_harness.session.projection_cache import (
+    SessionProjectionCacheService,
+)
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import (
@@ -1345,7 +1351,9 @@ async def test_session_appends_all_62_types_and_replays_in_order(
     """Verifies a session appends every known type and replays them in order."""
     ctx = Context()
     SessionProjectionRegistry(ctx)
+    JsonlSessionPersistenceService(ctx, {"root": tmp_path})
     service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    SessionProjectionCacheService(ctx, {"root": tmp_path})
     title = SessionTitleService(
         ctx,
         {
@@ -1378,6 +1386,7 @@ async def test_session_appends_all_62_types_and_replays_in_order(
     await service.flush(session)
     assert service.close("all62") is True
     ctx2 = Context()
+    JsonlSessionPersistenceService(ctx2, {"root": tmp_path})
     service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
     service2.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
     reloaded = service2.load("all62")

@@ -113,7 +113,8 @@ def create_harness(
     storage dir from ``MAGITECH_SESSIONS_DIR`` in the environment
     passed to the loader: ``storage_dir`` sets it, and
     ``storage_dir=None`` removes it, so an ambient value cannot turn a
-    memory-only boot into a persisted one.
+    memory-only boot into a persisted one. The persistence and
+    projection-cache rows read the same variable for their roots.
 
     The optional ``prepare`` hook runs after the loader installs and
     before the bundle loads: no bundle slot is reachable inside it, and

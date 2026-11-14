@@ -14,10 +14,14 @@ import pytest
 from anima import Context
 
 from magitech_harness.session.events import SessionEvent
-from magitech_harness.session.persistence_jsonl import encode_segment
+from magitech_harness.session.persistence_jsonl import (
+    JsonlSessionPersistenceService,
+    encode_segment,
+)
 from magitech_harness.session.projection_cache import (
     ProjectionCacheConfig,
     SessionProjectionCache,
+    SessionProjectionCacheService,
     current_lifecycle_matches,
     identity_matches,
     identity_of,
@@ -1785,7 +1789,9 @@ def _service(config: dict[str, Any] | None = None) -> SessionService:
     """A sessions service with the registry and the five units mounted.
 
     The units register through the rows' own entry points, as the
-    bundle does; the cache then checkpoints the same five rows.
+    bundle does; the cache then checkpoints the same five rows. With
+    a storage dir configured the persistence + cache rows mount too,
+    as the bundle mounts them.
     """
     ctx = Context()
     SessionProjectionRegistry(ctx)
@@ -1794,7 +1800,21 @@ def _service(config: dict[str, Any] | None = None) -> SessionService:
     apply_session_stats_projection(ctx)
     apply_turn_outline_projection(ctx)
     apply_working_directory_projection(ctx)
-    return SessionService(ctx, config or {})
+    config = config or {}
+    root = config.get("base_storage_dir")
+    if root is None:
+        return SessionService(ctx, config)
+    JsonlSessionPersistenceService(ctx, {"root": root})
+    service = SessionService(ctx, config)
+    cache_config: dict[str, Any] = {"root": root}
+    if "projection_cache_write_every_events" in config:
+        cache_config["write_every_events"] = config[
+            "projection_cache_write_every_events"
+        ]
+    if "projection_cache_write_interval_ms" in config:
+        cache_config["write_interval_ms"] = config["projection_cache_write_interval_ms"]
+    SessionProjectionCacheService(ctx, cache_config)
+    return service
 
 
 def test_service_memory_only_has_no_cache() -> None:

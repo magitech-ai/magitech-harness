@@ -36,10 +36,12 @@ from magitech_harness.session.persistence_jsonl import (
     JsonlLiveTracker,
     JsonlSessionHandle,
     JsonlSessionPersistence,
+    JsonlSessionPersistenceService,
 )
 from magitech_harness.session.projection_cache import (
     ProjectionCacheConfig,
     SessionProjectionCache,
+    SessionProjectionCacheService,
     current_lifecycle_matches,
     identity_matches,
     identity_of,
@@ -135,6 +137,7 @@ __all__ = [
     "JsonlLiveTracker",
     "JsonlSessionHandle",
     "JsonlSessionPersistence",
+    "JsonlSessionPersistenceService",
     "MessageProjection",
     "PluginRecord",
     "ProjectionCacheConfig",
@@ -159,6 +162,7 @@ __all__ = [
     "SessionPersistenceSnapshot",
     "SessionPreparation",
     "SessionProjectionCache",
+    "SessionProjectionCacheService",
     "SessionProjectionRegistry",
     "SessionReadOnlyError",
     "SessionService",
