@@ -661,18 +661,20 @@ def test_hydrate_installs_cells_and_later_drive_advances_once() -> None:
 
 
 def test_hydrate_fast_path_uses_live_cells_without_refolding() -> None:
-    """When every cell is already at the cut, hydrate refolds nothing."""
+    """When every active cell is already at the cut, hydrate refolds nothing."""
     ctx = Context()
     registry = SessionProjectionRegistry(ctx)
     definition, calls = _counting_definition()
     registry.register(definition)
-    registry.register(TITLE_INPUT_PROJECTION)
+    title_handle = registry.register(TITLE_INPUT_PROJECTION)
     session = Session.create("s1", seed=[], header=dict(HEADER))
     session.append("approval/policy", {"policy": "x"})
     session.append("approval/policy", {"policy": "y"})
     calls.clear()
     registry.snapshot(session)
     assert calls == [0, 1, 2]
+    # snapshot only materializes wire units; advance host-only cell before fast hydrate.
+    assert title_handle.state_of(session) is not None
     calls.clear()
     snapshot = registry.hydrate(session, {}, list(session.events), 0)
     assert snapshot == {"as_of_seq": 2, "values": {"counter": 3}}
@@ -929,3 +931,206 @@ def test_unit_cell_and_checkpoint_row_shapes() -> None:
     assert cell.views == [None, None]
     row = CheckpointRow(ver=1, seq=3, val={"a": 1})
     assert row == {"ver": 1, "seq": 3, "val": {"a": 1}}
+
+
+def test_released_unit_is_retained_only_for_checkpoint_until_reregistered() -> None:
+    """Releasing the last handle retains checkpoint cells until replaced."""
+    ctx, registry = _registry()
+    secondary_calls: list[int] = []
+    secondary = ProjectionDefinition(
+        key="secondary",
+        state_schema=lambda value: value,
+        init=lambda header, inherited: 0,
+        apply=lambda state, event: secondary_calls.append(event.seq) or state + 1,
+        wire=WireView(view_schema=lambda value: value, view=lambda state: state),
+        state_version=1,
+    )
+    handle = registry.register(secondary)
+    session = Session.create("s1", seed=[], header=dict(HEADER))
+    ev0 = session.append("approval/policy", {"policy": "p0"})
+    ctx.emit("session/event", session, ev0)
+    assert handle.state_of(session) == 2
+
+    # Dispose removes the unit from live views/restores/drives, not checkpoint.
+    handle.dispose()
+    assert "secondary" not in registry.summary_keys()
+    assert registry.restore_floor({}) == 0
+    assert "secondary" not in registry.snapshot(session)["values"]
+    assert "secondary" not in registry.cached_snapshot(session)["values"]
+    empty = Session.create("s-empty", seed=[], header=dict(HEADER))
+    ctx.emit("session/created", empty)
+    # Released unit is not pre-seeded for new sessions, and absent cell omits row.
+    assert "secondary" not in registry.checkpoint(empty)
+
+    # New events advance live units while the released unit stays at ev0.
+    ev1 = session.append("approval/policy", {"policy": "p1"})
+    ctx.emit("session/event", session, ev1)
+    assert registry.checkpoint(session)["secondary"]["seq"] == ev0.seq
+    assert registry.checkpoint(session)["secondary"]["val"] == 2
+
+    # A retained handle read still advances the released cell for checkpoint.
+    assert handle.state_of(session) == 3
+    assert registry.checkpoint(session)["secondary"]["seq"] == ev1.seq
+    assert registry.checkpoint(session)["secondary"]["val"] == 3
+
+    # restore, view_checkpoint, and hydrate ignore the released predecessor.
+    cp = registry.checkpoint(session)
+    restored = registry.restore(cp, list(session.events), 0, HEADER, 0)
+    assert "secondary" not in restored.checkpoint
+    assert "secondary" not in registry.view_checkpoint(cp)
+    registry.hydrate(session, cp, list(session.events), 0)
+    other = Session.create("s-hydrate", seed=list(session.events), header=dict(HEADER))
+    registry.hydrate(other, {}, list(other.events), 0)
+
+    # Re-registering the same key replaces the released entry, even with new version/summary.
+    replacement = registry.register(
+        ProjectionDefinition(
+            key="secondary",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: "fresh",
+            apply=lambda state, event: state,
+            wire=WireView(
+                view_schema=lambda value: value,
+                view=lambda state: state,
+                summary=False,
+            ),
+            state_version=2,
+        )
+    )
+    assert replacement.state_of(session) == "fresh"
+    assert registry.checkpoint(session)["secondary"]["ver"] == 2
+
+
+def test_snapshot_selective_materializes_only_requested_wire_keys() -> None:
+    """snapshot(session, keys) never folds unselected wire or host-only units."""
+    ctx = Context()
+    registry = SessionProjectionRegistry(ctx)
+    a_calls: list[int] = []
+    b_calls: list[int] = []
+    host_calls: list[int] = []
+    registry.register(
+        ProjectionDefinition(
+            key="a",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: 0,
+            apply=lambda state, event: a_calls.append(event.seq) or state + 1,
+            wire=WireView(view_schema=lambda value: value, view=lambda s: s),
+            state_version=1,
+        )
+    )
+    registry.register(
+        ProjectionDefinition(
+            key="b",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: 0,
+            apply=lambda state, event: b_calls.append(event.seq) or state + 1,
+            wire=WireView(view_schema=lambda value: value, view=lambda s: s),
+            state_version=1,
+        )
+    )
+    registry.register(
+        ProjectionDefinition(
+            key="host",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: 0,
+            apply=lambda state, event: host_calls.append(event.seq) or state + 1,
+            wire=None,
+            state_version=1,
+        )
+    )
+    session = Session.create("sel", seed=[], header=dict(HEADER))
+    session.append("approval/policy", {"policy": "x"})
+    snap = registry.snapshot(session, ["a"])
+    assert snap["values"] == {"a": 2}
+    assert len(a_calls) == len(session.events)
+    assert b_calls == []
+    assert host_calls == []
+
+
+def test_on_event_changed_batches_changes_and_delivers_on_throw(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """on_event_changed runs once after on_changed and survives mid-drive throws."""
+    ctx = Context()
+    registry = SessionProjectionRegistry(ctx)
+    registry.register(
+        ProjectionDefinition(
+            key="alpha",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: 0,
+            apply=lambda state, event: (
+                state + 1 if event.type == "approval/policy" else state
+            ),
+            wire=WireView(view_schema=lambda value: value, view=lambda s: {"v": s}),
+            state_version=1,
+        )
+    )
+    registry.register(
+        ProjectionDefinition(
+            key="hostOnly",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: 0,
+            apply=lambda state, event: state + 1,
+            wire=None,
+            state_version=1,
+        )
+    )
+    registry.register(
+        ProjectionDefinition(
+            key="beta",
+            state_schema=lambda value: value,
+            init=lambda header, inherited: 0,
+            apply=lambda state, event: (
+                state + 10 if event.type == "approval/policy" else state
+            ),
+            wire=WireView(view_schema=lambda value: value, view=lambda s: {"v": s}),
+            state_version=1,
+        )
+    )
+    order: list[str] = []
+    event_batches: list[tuple[list[dict[str, Any]], int]] = []
+    off_key = registry.on_changed(lambda s, k, v, seq: order.append(f"key:{k}"))
+    off_ev = registry.on_event_changed(
+        lambda s, changes, seq: (
+            order.append("event"),
+            event_batches.append((changes, seq)),
+        )[-1]
+    )
+    session = Session.create("ev-feed", seed=[], header=dict(HEADER))
+    ev = session.append("approval/policy", {"policy": "x"})
+    ctx.emit("session/event", session, ev)
+    assert order == ["key:alpha", "key:beta", "event"]
+    assert event_batches == [
+        ([{"key": "alpha", "val": {"v": 1}}, {"key": "beta", "val": {"v": 10}}], ev.seq)
+    ]
+    # Non-changing event for wire units emits nothing even though hostOnly changed.
+    ev_noop = session.append("turn/start", {"turn": 1})
+    ctx.emit("session/event", session, ev_noop)
+    assert len(event_batches) == 1
+
+    # Throwing unit/listener after partial changes still delivers collected changes.
+    def _boom_on_beta(s: Session, k: str, v: Any, seq: int) -> None:
+        if k == "beta":
+            raise RuntimeError("boom")
+
+    off_boom = registry.on_changed(_boom_on_beta)
+    ev2 = session.append("approval/policy", {"policy": "y"})
+    with caplog.at_level("ERROR"):
+        ctx.emit("session/event", session, ev2)
+    assert "boom" in caplog.text
+    assert len(event_batches) == 2
+    assert event_batches[1][0] == [
+        {"key": "alpha", "val": {"v": 2}},
+        {"key": "beta", "val": {"v": 20}},
+    ]
+    off_boom()
+    off_key()
+    # Event listener alone still receives changes once per-key listeners are removed.
+    ev_solo = session.append("approval/policy", {"policy": "solo"})
+    ctx.emit("session/event", session, ev_solo)
+    assert len(event_batches) == 3
+    off_ev()
+    off_ev()  # idempotent
+    ev3 = session.append("approval/policy", {"policy": "z"})
+    ctx.emit("session/event", session, ev3)
+    assert len(event_batches) == 3

@@ -33,19 +33,21 @@ def test_event_type_covers_known_session_event_types() -> None:
     assert FORMAT_KNOWN_TYPES <= {member.value for member in EventType}
 
 
-def test_registry_is_exactly_62_types() -> None:
-    """Verifies the canonical inventory is exactly 62 types."""
-    assert len(KNOWN_SESSION_EVENT_TYPES) == 62
+def test_registry_is_exactly_63_types() -> None:
+    """Verifies the canonical inventory is exactly 63 types."""
+    assert len(KNOWN_SESSION_EVENT_TYPES) == 63
     assert len(CORE_EVENT_TYPES) == 14
-    assert len({member.value for member in EventType}) == 62
+    assert len({member.value for member in EventType}) == 63
     assert {member.value for member in EventType} == KNOWN_SESSION_EVENT_TYPES
     assert FORMAT_KNOWN_TYPES == KNOWN_SESSION_EVENT_TYPES
+    assert EventType.TEAM_MODE.value == "team/mode"
+    assert "team/mode" in OWNER_EVENT_TYPES["experimental/agent-team"]
 
 
 def test_registry_reproduces_the_owner_merge() -> None:
-    """Verifies the registry is the core 14 plus 48 owner-merged types."""
+    """Verifies the registry is the core 14 plus 49 owner-merged types."""
     owner_types = set().union(*OWNER_EVENT_TYPES.values())
-    assert len(owner_types) == 48
+    assert len(owner_types) == 49
     assert owner_types.isdisjoint(CORE_EVENT_TYPES)
     assert owner_types | CORE_EVENT_TYPES == KNOWN_SESSION_EVENT_TYPES
     # Spot-check provenance of a few merged types.

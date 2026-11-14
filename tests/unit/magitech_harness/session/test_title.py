@@ -282,6 +282,7 @@ def test_title_service_requires_config() -> None:
         ("a\u200bb\u200ec", "abc"),
         ("a\ufeffb", "ab"),
         ("one\ntwo\tthree", "one two three"),
+        ("hi \ud800 there \udc00", "hi \ufffd there \ufffd"),
         ("", ""),
         ("   ", ""),
     ],
@@ -300,6 +301,10 @@ def test_clean_title_text(raw: str, expected: str) -> None:
         ("a😀b", 4, "a"),
         ("a😀b", 5, "a😀"),
         ("a😀b", 8, "a😀b"),
+        ("\ud800", 2, ""),
+        ("\ud800", 3, "\ufffd"),
+        ("a\ud800b", 10, "a\ufffdb"),
+        ("a\udc00b", 4, "a\ufffd"),
     ],
 )
 def test_truncate_title_utf8(text: str, max_bytes: int, expected: str) -> None:

@@ -280,20 +280,19 @@ async def test_cli_commands_end_to_end_on_row_boot(
 # ---------------------------------------------------------------------------
 
 
-async def test_check_bundle_entries_vacuous_before_flush_on_loop_path() -> None:
-    """The audit passes before flush on the loop path: no entries exist yet.
+async def test_check_bundle_entries_fails_before_flush_on_loop_path() -> None:
+    """The audit fails loud before flush on the loop path when no entries exist.
 
     Under a running loop the bundle rows have no loader entries until
-    the caller's flush, so the audit iterates zero entries and passes
-    vacuously. That is the behaviour as it stands: a guard that fails
-    on zero entries is a follow-up for a later phase, not part of this
-    change, which adds no production code. After the flush the audit
-    checks all twenty rows.
+    the caller's flush, so checking before flush raises RuntimeError
+    reporting zero entries rather than passing vacuously. After the flush
+    the audit checks all twenty rows.
     """
     ctx = create_harness()
     loader = ctx.get("loader", None, strict=False)
     assert list(loader.entries()) == []
-    check_bundle_entries(ctx)
+    with pytest.raises(RuntimeError, match="no bundle entries"):
+        check_bundle_entries(ctx)
     await ctx.flush()
     assert len(list(loader.entries())) == 20
     check_bundle_entries(ctx)

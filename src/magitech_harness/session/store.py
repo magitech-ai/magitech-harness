@@ -612,9 +612,9 @@ class Session:
         """Project current model-visible messages from the event log.
 
         Cached on the live session: pure tail growth costs O(new
-        nodes); a content-generation bump rebuilds from scratch. The
-        returned messages are read-only cached copies: callers must
-        not mutate them.
+        nodes); a content-generation bump rebuilds from scratch. Each
+        call returns isolated deep copies so caller mutations cannot
+        corrupt the cache.
         """
         nodes = self._surface_manager.nodes
         generation = self._surface_manager.content_generation
@@ -627,7 +627,7 @@ class Session:
             if message is not None:
                 self._derived.append(copy.deepcopy(message))
         self._derived_nodes = len(nodes)
-        return list(self._derived)
+        return [copy.deepcopy(message) for message in self._derived]
 
     def request_header(self) -> dict[str, Any] | None:
         """The latest folded request header, or ``None`` before any header.

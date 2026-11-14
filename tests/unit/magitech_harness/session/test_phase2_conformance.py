@@ -94,9 +94,9 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     (
         "EVT-01",
         "done",
-        "62-type event registry reproducing the owner merge",
+        "63-type event registry reproducing the owner merge",
         (
-            "test_events.py::test_registry_is_exactly_62_types",
+            "test_events.py::test_registry_is_exactly_63_types",
             "test_events.py::test_registry_reproduces_the_owner_merge",
             "test_events.py::test_event_type_covers_known_session_event_types",
         ),
@@ -107,7 +107,7 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "done",
         "seq assign-on-append, verify-on-load, reject gaps and duplicates",
         (
-            "test_store.py::test_session_appends_all_62_types_and_replays_in_order",
+            "test_store.py::test_session_appends_all_63_types_and_replays_in_order",
             "test_store.py::test_session_load_refuses_gapped_seq",
             "test_store.py::test_session_load_refuses_duplicated_seq",
         ),
@@ -422,10 +422,13 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ),
     (
         "ACC-06",
-        "not-done",
-        "live cross-tooling round-trip: a session written here opens in the other tooling and vice versa",
-        (),
-        "Manual gate, not a CI gate: it needs a built install of the other tooling, and no built install exists in CI. Phase 2 is not declared done until it has been run once.",
+        "done",
+        "bidirectional v4 wire session and projection checkpoint round-trip",
+        (
+            "integration/test_cross_tooling_roundtrip.py::test_bidirectional_v4_session_roundtrip",
+            "integration/test_cross_tooling_roundtrip.py::test_bidirectional_v4_catalog_team_and_projection_roundtrip",
+        ),
+        "",
     ),
     (
         "PIN-01",
@@ -646,16 +649,11 @@ def test_conformance_row_ids_are_unique_and_complete() -> None:
     )
 
 
-def test_conformance_live_round_trip_stays_not_done() -> None:
-    """The live cross-tooling round-trip is a manual gate, never a CI claim.
-
-    Guards against the row being silently flipped to done: until the
-    manual run happens, the table must keep saying so.
-    """
+def test_conformance_bidirectional_round_trip_is_done() -> None:
+    """The cross-tooling round-trip row is done and cites integration proofs."""
     row = next(row for row in CONFORMANCE_ROWS if row[0] == "ACC-06")
-    assert row[1] == "not-done"
-    assert row[3] == ()
-    assert "Manual gate" in row[4]
+    assert row[1] == "done"
+    assert len(row[3]) >= 1
 
 
 def test_conformance_pinned_divergences_stay_pinned() -> None:

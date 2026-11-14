@@ -8,7 +8,7 @@ and resolve to real test functions by static inspection — the map
 cannot go stale without this suite failing. The map covers the phase
 acceptance proof (section 7 of the kernel plan), the K1–K5 chunk
 claims, the K6 scope items, the pinned divergences carried from the
-Phase 1 conformance map, and the manual gate carried from Phase 2.
+Phase 1 conformance map, and the round-trip gate carried from Phase 2.
 """
 
 import ast
@@ -250,12 +250,12 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ),
     (
         "K6-N1",
-        "deferred",
-        "audit called before flush on the running-loop path passes vacuously: no loader entries exist yet, so there is nothing to check",
+        "done",
+        "audit fails loud before flush on the running-loop path when zero loader entries exist",
         (
-            "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_vacuous_before_flush_on_loop_path",
+            "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_fails_before_flush_on_loop_path",
         ),
-        "Pinned as current behaviour by test. A guard that fails on zero entries would be a production change, so it is a follow-up for Phase 3, not part of this change.",
+        "",
     ),
     (
         "K6-CLI-TITLE",
@@ -269,7 +269,7 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "done",
         "loader-probe conclusions the row shape relies on, re-proved as tests: mirror visibility and timing, mirror satisfies inject, direct mount wins, env interpolation, disposal, store ctx",
         (
-            "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_vacuous_before_flush_on_loop_path",
+            "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_fails_before_flush_on_loop_path",
             "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_sync_path_settles_at_load",
             "unit/magitech_harness/test_kernel_k6.py::test_full_bundle_reversed_still_wires",
             "unit/magitech_harness/test_kernel_k6.py::test_direct_mount_wins_over_bundle_row",
@@ -315,10 +315,13 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     ),
     (
         "K6-ACC06",
-        "not-done",
-        "live cross-tooling round-trip: a session written here opens in the other tooling and vice versa",
-        (),
-        "Manual gate, not a CI gate: it needs a built install of the other tooling, and no built install exists in CI. Phase 2 is not declared done until it has been run once.",
+        "done",
+        "bidirectional v4 wire session and projection checkpoint round-trip",
+        (
+            "integration/test_cross_tooling_roundtrip.py::test_bidirectional_v4_session_roundtrip",
+            "integration/test_cross_tooling_roundtrip.py::test_bidirectional_v4_catalog_team_and_projection_roundtrip",
+        ),
+        "",
     ),
     (
         "PIN-01",
@@ -448,16 +451,11 @@ def test_conformance_row_ids_are_unique_and_complete() -> None:
     )
 
 
-def test_conformance_live_round_trip_stays_not_done() -> None:
-    """The live cross-tooling round-trip is a manual gate, never a CI claim.
-
-    Guards against the row being silently flipped to done: until the
-    manual run happens, the table must keep saying so.
-    """
+def test_conformance_bidirectional_round_trip_is_done() -> None:
+    """The cross-tooling round-trip conformance row is done and cites real tests."""
     row = next(row for row in CONFORMANCE_ROWS if row[0] == "K6-ACC06")
-    assert row[1] == "not-done"
-    assert row[3] == ()
-    assert "Manual gate" in row[4]
+    assert row[1] == "done"
+    assert len(row[3]) >= 1
 
 
 def test_conformance_pinned_divergences_stay_pinned() -> None:
@@ -471,17 +469,11 @@ def test_conformance_pinned_divergences_stay_pinned() -> None:
     assert "Phase 3" in pinned["K6-CLI-TITLE"][4]
 
 
-def test_conformance_pre_flush_audit_guard_stays_deferred() -> None:
-    """The pre-flush audit gap stays deferred: pinned by test, guard is Phase 3.
-
-    Guards against the row being silently flipped to done or the pin
-    test being dropped: the audit's vacuous pre-flush pass is current
-    behaviour, and the zero-entry guard is a later-phase follow-up.
-    """
+def test_conformance_pre_flush_audit_guard_is_done() -> None:
+    """The pre-flush zero-entry audit guard is now done and proved."""
     row = next(row for row in CONFORMANCE_ROWS if row[0] == "K6-N1")
-    assert row[1] == "deferred"
+    assert row[1] == "done"
     assert (
-        "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_vacuous_before_flush_on_loop_path"
+        "unit/magitech_harness/test_kernel_k6.py::test_check_bundle_entries_fails_before_flush_on_loop_path"
         in row[3]
     )
-    assert "Phase 3" in row[4]
