@@ -17,7 +17,7 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from anima import Context, Service
 
@@ -69,15 +69,16 @@ class SessionService(Service):
     exactly the same, nothing is persisted, and no tracker is installed.
 
     The projection registry is not owned here: it arrives from the
-    ``sessionProjections`` row, which the bundle lists before this
-    row so the registry is active when this service constructs. The
-    service deliberately declares no inject for it: a host that mounts
-    this service alone (direct construction, or ``ctx.use`` without
-    the registry row) still gets a working service. The projection
-    cache is installed only when a registry is present; without one,
-    projection reads fail loud at use while the store and persistence
-    keep working.
+    ``sessionProjections`` row, declared as a required injection, so
+    the fiber stays pending until the registry is active and the row
+    order cannot leave this service constructed without one. A host
+    that constructs this service directly, bypassing the loader,
+    still gets a working service: the projection cache is installed
+    only when a registry is present; without one, projection reads
+    fail loud at use while the store and persistence keep working.
     """
+
+    inject: ClassVar[list[str]] = ["sessionProjections"]
 
     def __init__(self, ctx: Context, config: dict | None = None) -> None:
         super().__init__(ctx, "sessions")
@@ -89,11 +90,11 @@ class SessionService(Service):
         root = cfg.get("base_storage_dir") or None
         self.base_storage_dir = Path(root) if root is not None else None
         self._store = SessionStore(ctx)
-        # The bundle lists the registry row before this one, so the row
-        # path always resolves it here. A context that carries the slot
-        # but does not resolve it is a framework inconsistency, not a
-        # missing row: fail loud instead of silently running without
-        # projections.
+        # Through the loader the injection guarantees the registry is
+        # active before this constructs. Direct construction bypasses
+        # that guarantee: a context that carries the slot but does not
+        # resolve it is a framework inconsistency, not a missing row:
+        # fail loud instead of silently running without projections.
         if ctx.has("sessionProjections"):
             registry = ctx.get("sessionProjections", None, strict=False)
             if registry is None:
