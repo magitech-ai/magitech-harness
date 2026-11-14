@@ -913,13 +913,10 @@ def test_registry_dispose_unregisters_listeners() -> None:
 
 
 def test_registry_dispose_tolerates_non_callable_disposers() -> None:
-    """Dispose skips listeners whose context offers no unregister call."""
-
-    class _StubContext:
-        def on(self, *args: Any, **kwargs: Any) -> None:
-            return None
-
-    registry = SessionProjectionRegistry(_StubContext())
+    """Dispose skips listeners whose disposer is not callable."""
+    registry = SessionProjectionRegistry(Context())
+    registry._created_disposer = None  # type: ignore[assignment]
+    registry._event_disposer = None  # type: ignore[assignment]
     registry.dispose()
     registry.dispose()
 

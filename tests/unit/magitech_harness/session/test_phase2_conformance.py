@@ -302,7 +302,7 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         (
             "test_title.py::test_resolve_title_config_valid",
             "test_title.py::test_resolve_title_config_missing",
-            "test_title.py::test_title_service_direct_construction_requires_config",
+            "test_title.py::test_title_service_requires_config",
             "test_title.py::test_service_config_defaults_fallback_words",
         ),
         "",

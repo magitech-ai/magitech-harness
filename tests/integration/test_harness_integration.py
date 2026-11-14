@@ -143,7 +143,7 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
     # 7. Verify JSONL file persistence on disk: one v4 header line plus
     # one physical row per event. The deferred fallback title commits on
     # drain, so the file holds the 14 turn events plus the title event.
-    await ctx.sessions.title_service.drain()
+    await ctx.sessionTitle.drain()
     await ctx.sessions.flush()
     titles = [ev for ev in session.events if ev.type == EventType.SESSION_TITLE]
     assert len(titles) == 1
@@ -346,7 +346,7 @@ async def test_replay_reproduces_identical_message_sequence(tmp_path: Path):
     assert not any("partial output" in str(m) for m in live)
     assert not any("[Conversation summary" in str(m) for m in live)
 
-    await ctx.sessions.title_service.drain()
+    await ctx.sessionTitle.drain()
     await ctx.sessions.flush()
     location = ctx.sessions.location(session.session_id)
     assert location is not None
@@ -425,7 +425,7 @@ async def test_run_turn_and_stream_turn_log_identical_messages(tmp_path: Path):
         stream_session.derive_messages()
     )
 
-    await ctx.sessions.title_service.drain()
+    await ctx.sessionTitle.drain()
     await ctx.sessions.flush()
     for session in (run_session, stream_session):
         titles = [ev for ev in session.events if ev.type == EventType.SESSION_TITLE]

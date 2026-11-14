@@ -13,9 +13,8 @@ import sys
 from pathlib import Path
 
 import pytest
-from anima import Context
 
-from magitech_harness.session.service import SessionService
+from magitech_harness import create_harness
 
 _CHILD = Path(__file__).with_name("_projcache_crash_child.py")
 
@@ -40,7 +39,8 @@ def _record_rows(root: Path) -> dict[str, int]:
 
 
 def _log_events(root: Path) -> list[dict]:
-    service = SessionService(Context(), {"base_storage_dir": root})
+    ctx = create_harness(storage_dir=root)
+    service = ctx.sessions
     path = service.location("s1")
     assert path is not None
     lines = path.read_text(encoding="utf-8").splitlines()
@@ -87,13 +87,16 @@ def test_child_roundtrip_cold_read(tmp_path: Path) -> None:
     result = _run_child(tmp_path, "roundtrip")
     assert result.returncode == 0, result.stderr
     assert _record_rows(tmp_path)["title"] == 9
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    ctx = create_harness(storage_dir=tmp_path)
+    service = ctx.sessions
     snapshot = service.read_projections("s1")
     assert snapshot is not None
     _assert_full_golden(snapshot)
     loaded = service.load("s1")
     assert loaded is not None
-    _assert_full_golden(service.projections.snapshot(loaded))
+    snapshot = service.read_projections("s1")
+    assert snapshot is not None
+    _assert_full_golden(snapshot)
     assert service.projection_cache is not None
     service.projection_cache.dispose()
 
@@ -110,10 +113,13 @@ def test_kill_at_put_cache_never_ahead_of_log(tmp_path: Path) -> None:
     # The create-point record is the only durable cache row.
     assert _record_rows(tmp_path)["title"] == -1
     assert _record_rows(tmp_path)["title"] <= events[-1]["seq"]
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    ctx = create_harness(storage_dir=tmp_path)
+    service = ctx.sessions
     loaded = service.load("s1")
     assert loaded is not None
-    _assert_partial_golden(service.projections.snapshot(loaded))
+    snapshot = service.read_projections("s1")
+    assert snapshot is not None
+    _assert_partial_golden(snapshot)
     # The load's create-point write folds the durable log into the cache.
     assert _record_rows(tmp_path)["title"] == 7
     assert service.projection_cache is not None
@@ -130,10 +136,13 @@ def test_kill_mid_put_record_intact_and_tmp_ignored(tmp_path: Path) -> None:
     assert len(leftovers) == 1
     # The old record still parses: no torn document.
     assert _record_rows(tmp_path)["title"] == -1
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    ctx = create_harness(storage_dir=tmp_path)
+    service = ctx.sessions
     loaded = service.load("s1")
     assert loaded is not None
-    _assert_partial_golden(service.projections.snapshot(loaded))
+    snapshot = service.read_projections("s1")
+    assert snapshot is not None
+    _assert_partial_golden(snapshot)
     # The next open ignores the leftover temp instead of choking on it.
     assert list(sessions_dir.glob("*.tmp")) == leftovers
     assert _record_rows(tmp_path)["title"] == 7

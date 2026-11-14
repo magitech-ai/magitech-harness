@@ -31,6 +31,11 @@ from magitech_harness.session.projections import (
     TITLE_PROJECTION,
     TURN_OUTLINE_PROJECTION,
     WORKING_DIRECTORY_PROJECTION,
+    apply_session_stats_projection,
+    apply_title_input_projection,
+    apply_title_projection,
+    apply_turn_outline_projection,
+    apply_working_directory_projection,
 )
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session
@@ -1776,15 +1781,31 @@ def _assert_live_golden(snapshot: dict[str, Any]) -> None:
         assert 0 <= stats[key] < 60000
 
 
+def _service(config: dict[str, Any] | None = None) -> SessionService:
+    """A sessions service with the registry and the five units mounted.
+
+    The units register through the rows' own entry points, as the
+    bundle does; the cache then checkpoints the same five rows.
+    """
+    ctx = Context()
+    SessionProjectionRegistry(ctx)
+    apply_title_projection(ctx)
+    apply_title_input_projection(ctx)
+    apply_session_stats_projection(ctx)
+    apply_turn_outline_projection(ctx)
+    apply_working_directory_projection(ctx)
+    return SessionService(ctx, config or {})
+
+
 def test_service_memory_only_has_no_cache() -> None:
     """A memory-only service runs without a cache."""
-    service = SessionService(Context())
+    service = _service()
     assert service.projection_cache is None
 
 
 def test_service_create_writes_create_point_record(tmp_path: Path) -> None:
     """Service creation installs the cache and writes the seed cut."""
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    service = _service({"base_storage_dir": tmp_path})
     assert service.projection_cache is not None
     session = service.create("s1")
     path = _record_path(tmp_path)
@@ -1800,13 +1821,15 @@ def test_service_create_writes_create_point_record(tmp_path: Path) -> None:
 
 def test_service_golden_live_write_points(tmp_path: Path) -> None:
     """turn/end writes after the log flush; detach writes the final cut."""
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    service = _service({"base_storage_dir": tmp_path})
     session = service.create("s1")
     _append_golden_live(service, session)
     # The turn/end write landed at seq 7; the title/cwd tail stayed dirty.
     assert _row_seqs(tmp_path)["title"] == 7
-    assert service.projections.snapshot(session)["as_of_seq"] == 9
-    _assert_live_golden(service.projections.snapshot(session))
+    snapshot = service.read_projections("s1")
+    assert snapshot is not None
+    assert snapshot["as_of_seq"] == 9
+    _assert_live_golden(snapshot)
     service.close("s1")
     assert _row_seqs(tmp_path) == {
         "title": 9,
@@ -1829,7 +1852,7 @@ def test_service_golden_live_write_points(tmp_path: Path) -> None:
 
 def test_service_turn_end_write_is_at_seq_seven(tmp_path: Path) -> None:
     """The turn/end cache row claims exactly the turn/end cut, never more."""
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    service = _service({"base_storage_dir": tmp_path})
     session = service.create("s1")
     service.log_event(session, "turn/start", {"turn": 1})
     service.log_event(
@@ -1852,17 +1875,19 @@ def test_service_turn_end_write_is_at_seq_seven(tmp_path: Path) -> None:
 
 def test_service_load_hydrates_from_cache(tmp_path: Path) -> None:
     """A cold load seeds its cells from the cache and serves live values."""
-    first = SessionService(Context(), {"base_storage_dir": tmp_path})
+    first = _service({"base_storage_dir": tmp_path})
     session = first.create("s1")
     _append_golden_live(first, session)
     first.close("s1")
     assert first.projection_cache is not None
     first.projection_cache.dispose()
-    second = SessionService(Context(), {"base_storage_dir": tmp_path})
+    second = _service({"base_storage_dir": tmp_path})
     loaded = second.load("s1")
     assert loaded is not None
-    _assert_live_golden(second.projections.snapshot(loaded))
-    cached = second.projections.cached_snapshot(loaded)
+    snapshot = second.read_projections("s1")
+    assert snapshot is not None
+    _assert_live_golden(snapshot)
+    cached = second.ctx.sessionProjections.cached_snapshot(loaded)
     assert cached is not None
     assert cached["as_of_seq"] == 9
     assert second.projection_cache is not None
@@ -1871,13 +1896,13 @@ def test_service_load_hydrates_from_cache(tmp_path: Path) -> None:
 
 def test_service_read_projections_cold_read(tmp_path: Path) -> None:
     """read_projections cold-reads a stored session and writes the row back."""
-    first = SessionService(Context(), {"base_storage_dir": tmp_path})
+    first = _service({"base_storage_dir": tmp_path})
     session = first.create("s1")
     _append_golden_live(first, session)
     first.close("s1")
     assert first.projection_cache is not None
     first.projection_cache.dispose()
-    second = SessionService(Context(), {"base_storage_dir": tmp_path})
+    second = _service({"base_storage_dir": tmp_path})
     # Remove the record from disk: the cold read must rewrite it.
     _record_path(tmp_path).unlink()
     snapshot = second.read_projections("s1")
@@ -1891,7 +1916,7 @@ def test_service_read_projections_cold_read(tmp_path: Path) -> None:
 
 def test_service_read_projections_live_and_missing(tmp_path: Path) -> None:
     """read_projections reads live sessions from the registry, missing as None."""
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    service = _service({"base_storage_dir": tmp_path})
     session = service.create("s1")
     _append_golden_live(service, session)
     live = service.read_projections("s1")
@@ -1906,7 +1931,7 @@ def test_service_read_projections_live_and_missing(tmp_path: Path) -> None:
 
 def test_service_read_projections_store_only_session(tmp_path: Path) -> None:
     """read_projections reads a store-live session from the registry."""
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    service = _service({"base_storage_dir": tmp_path})
     session = service.store.create("store-only")
     assert session is not None
     snapshot = service.read_projections("store-only")
@@ -1940,28 +1965,25 @@ def test_dispose_tolerates_non_callable_disposers(tmp_path: Path) -> None:
 
 def test_service_read_projections_memory_only(tmp_path: Path) -> None:
     """A memory-only service has no stored session to cold-read."""
-    service = SessionService(Context())
+    service = _service()
     assert service.read_projections("s1") is None
 
 
 def test_service_cache_config_validation(tmp_path: Path) -> None:
     """Bad cache throttles fail service construction loudly."""
     with pytest.raises(ValueError, match="write_every_events"):
-        SessionService(
-            Context(),
+        _service(
             {"base_storage_dir": tmp_path, "projection_cache_write_every_events": 0},
         )
     with pytest.raises(ValueError, match="write_interval_ms"):
-        SessionService(
-            Context(),
+        _service(
             {"base_storage_dir": tmp_path, "projection_cache_write_interval_ms": 0},
         )
 
 
 def test_service_cache_custom_count_threshold(tmp_path: Path) -> None:
     """The service passes its cache config through to the cache."""
-    service = SessionService(
-        Context(),
+    service = _service(
         {
             "base_storage_dir": tmp_path,
             "projection_cache_write_every_events": 3,
@@ -1990,16 +2012,17 @@ def test_service_delete_and_recreate_never_seeds_stale_state(
     tmp_path: Path,
 ) -> None:
     """A deleted-then-recreated id never seeds state from the unrelated log."""
-    first = SessionService(Context(), {"base_storage_dir": tmp_path})
+    first = _service({"base_storage_dir": tmp_path})
     session = first.create("s1")
     _append_golden_live(first, session)
     first.close("s1")
     assert first.delete("s1") is True
     assert first.projection_cache is not None
     first.projection_cache.dispose()
-    second = SessionService(Context(), {"base_storage_dir": tmp_path})
+    second = _service({"base_storage_dir": tmp_path})
     recreated = second.create("s1")
-    snapshot = second.projections.snapshot(recreated)
+    snapshot = second.read_projections("s1")
+    assert snapshot is not None
     assert snapshot["values"]["title"] is None
     assert snapshot["values"]["turnOutline"] == []
     second.log_event(recreated, "turn/start", {"turn": 1})
@@ -2012,10 +2035,14 @@ def test_service_delete_and_recreate_never_seeds_stale_state(
         },
     )
     # The outline prompt comes from the new log only.
-    assert second.projections.snapshot(recreated)["values"]["turnOutline"] == [
+    snapshot = second.read_projections("s1")
+    assert snapshot is not None
+    assert snapshot["values"]["turnOutline"] == [
         {"turn": 1, "seq": 0, "prompt": "Fresh start", "response": ""}
     ]
-    assert second.projections.snapshot(recreated)["values"]["title"] is None
+    snapshot = second.read_projections("s1")
+    assert snapshot is not None
+    assert snapshot["values"]["title"] is None
     second.close("s1")
     assert second.projection_cache is not None
     second.projection_cache.dispose()

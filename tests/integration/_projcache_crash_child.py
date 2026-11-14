@@ -15,8 +15,7 @@ import signal
 import sys
 from pathlib import Path
 
-from anima import Context
-
+from magitech_harness import create_harness
 from magitech_harness.session.service import SessionService
 
 
@@ -133,7 +132,8 @@ def main(argv: list[str]) -> int:
     root, session_id, mode = argv[1], argv[2], argv[3]
     if mode == "kill-mid-put":
         _kill_mid_put()
-    service = SessionService(Context(), {"base_storage_dir": Path(root)})
+    ctx = create_harness(storage_dir=Path(root))
+    service = ctx.sessions
     if mode == "kill-at-put":
         _kill_at_put(service)
     session = service.create(session_id)
