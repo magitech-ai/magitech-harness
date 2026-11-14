@@ -13,6 +13,7 @@ from magitech_harness import EventType, check_bundle_entries, create_harness
 from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.components.layers import LayerResolutionService
+from magitech_harness.components.service import ComponentService
 from magitech_harness.llm.service import LLMService
 from magitech_harness.session.persistence_jsonl import (
     JsonlSessionPersistenceService,
@@ -56,6 +57,11 @@ EXPECTED_ROWS = [
     {
         "id": "layers",
         "name": "magitech_harness.components.layers:LayerResolutionService",
+        "config": {},
+    },
+    {
+        "id": "components",
+        "name": "magitech_harness.components.service:ComponentService",
         "config": {},
     },
     {
@@ -113,6 +119,17 @@ EXPECTED_ROWS = [
         },
     },
     {
+        "id": "session-title-first-prompt",
+        "name": "magitech_harness.session.title_first_prompt:apply",
+        "config": {
+            "target_words": 5,
+            "target_cjk_characters": 10,
+            "max_input_bytes": 4096,
+            "max_output_tokens": 4096,
+            "timeout_ms": 60000,
+        },
+    },
+    {
         "id": "session-checkpoint-policy",
         "name": "magitech_harness.session.checkpoint_policy:apply",
         "config": {},
@@ -135,7 +152,7 @@ EXPECTED_ROWS = [
 
 
 def test_base_bundle_rows() -> None:
-    """Verifies the default bundle file carries exactly the eighteen rows."""
+    """Verifies the default bundle file carries exactly the twenty rows."""
     bundle_path = (
         Path(magitech_harness.__file__).resolve().parent / "profiles" / "base.yaml"
     )
@@ -145,7 +162,7 @@ def test_base_bundle_rows() -> None:
 
 
 def test_bundle_slots_are_row_services() -> None:
-    """Verifies the eighteen bundle slots resolve to the row services."""
+    """Verifies the twenty bundle slots resolve to the row services."""
     ctx = create_harness()
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
@@ -153,6 +170,7 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.shell, LocalShellService)
     assert isinstance(ctx.approvals, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
+    assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
     assert isinstance(ctx.sessions, SessionService)
     assert isinstance(ctx.sessionTitle, SessionTitleService)
@@ -187,6 +205,7 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert not ctx.has("sessionPersistence")
     assert not ctx.has("sessionProjectionCache")
     assert not ctx.has("agent_loop")
+    assert not ctx.has("components")
     await ctx.flush()
     assert ctx.has("tools")
     assert ctx.has("llm")
@@ -196,6 +215,8 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert ctx.has("sessionPersistence")
     assert ctx.has("sessionProjectionCache")
     assert ctx.has("agent_loop")
+    assert ctx.has("components")
+    assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.tools, ToolService)
     assert isinstance(ctx.llm, LLMService)
     assert isinstance(ctx.sessions, SessionService)

@@ -9,12 +9,14 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
+from anima import Context
 
 from magitech_harness import create_harness
 from magitech_harness.agent.cancellation import AbortSignal
+from magitech_harness.llm.service import MockLLMProvider
 from magitech_harness.llm.types import ModelChunk, ModelResponse
 from magitech_harness.session.events import EventType, ToolCallData
 from magitech_harness.tools.definition import define_tool
@@ -24,6 +26,15 @@ CANONICAL_ABORT_ERROR = {
     "message": "tool call aborted before dispatch",
     "info": {"name": "AbortError", "code": "ABORTED_BEFORE_DISPATCH"},
 }
+
+
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
 
 
 class RecordingProvider:
@@ -65,7 +76,8 @@ async def _drain(stream: Any) -> list[Any]:
 @pytest.mark.asyncio
 async def test_llm_stream_flushes_before_first_chunk(tmp_path: Path) -> None:
     """Verifies the flush completes before the adapter runs or a chunk yields."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     provider = _install_recording_provider(ctx, order)
@@ -99,7 +111,8 @@ async def test_llm_stream_flushes_before_first_chunk(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_llm_stream_without_session_id_passes_through(tmp_path: Path) -> None:
     """Verifies a request naming no session dispatches without checkpointing."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     provider = _install_recording_provider(ctx, order)
@@ -116,7 +129,8 @@ async def test_llm_stream_without_session_id_passes_through(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_llm_stream_unknown_session_passes_through(tmp_path: Path) -> None:
     """Verifies a request naming an unknown session dispatches uncheckpointed."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     provider = _install_recording_provider(ctx, order)
@@ -133,7 +147,8 @@ async def test_llm_stream_unknown_session_passes_through(tmp_path: Path) -> None
 @pytest.mark.asyncio
 async def test_llm_stream_failing_flush_never_dispatches(tmp_path: Path) -> None:
     """Verifies a rejected checkpoint prevents adapter dispatch entirely."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     provider = _install_recording_provider(ctx, order)
@@ -153,7 +168,8 @@ async def test_llm_stream_failing_flush_never_dispatches(tmp_path: Path) -> None
 @pytest.mark.asyncio
 async def test_llm_stream_log_is_durable_before_first_chunk(tmp_path: Path) -> None:
     """Verifies the logged prefix reaches disk before the first chunk yields."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     _install_recording_provider(ctx, order)
@@ -175,7 +191,8 @@ async def test_llm_stream_log_is_durable_before_first_chunk(tmp_path: Path) -> N
 @pytest.mark.asyncio
 async def test_tool_execute_flushes_before_top_level_body(tmp_path: Path) -> None:
     """Verifies a top-level tool call flushes before its body runs."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     session = ctx.sessions.create("tool-checkpoint")
@@ -216,7 +233,8 @@ async def test_tool_execute_flushes_before_top_level_body(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_tool_execute_failing_flush_never_runs_body(tmp_path: Path) -> None:
     """Verifies a rejected checkpoint yields an error result, body unrun."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("tool-failure")
     ran = False
@@ -251,7 +269,8 @@ async def test_tool_execute_abort_during_flush_returns_canonical_result(
     tmp_path: Path,
 ) -> None:
     """Verifies an abort landing during the flush yields the canonical result."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     session = ctx.sessions.create("tool-checkpoint-cancel")
@@ -299,7 +318,8 @@ async def test_tool_execute_aborted_signal_before_flush_returns_canonical_result
     tmp_path: Path,
 ) -> None:
     """Verifies a pre-aborted signal still flushes first, then returns canonical."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("tool-pre-aborted")
     signal = AbortSignal()
@@ -333,7 +353,8 @@ async def test_tool_execute_aborted_signal_before_flush_returns_canonical_result
 @pytest.mark.asyncio
 async def test_tool_execute_without_session_passes_through(tmp_path: Path) -> None:
     """Verifies a tool call naming no session dispatches without checkpointing."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     flushes: list[str] = []
     ctx.on("session/flush", lambda s: flushes.append(s.session_id))
@@ -362,7 +383,8 @@ async def test_tool_execute_nested_call_reuses_outer_checkpoint(
     tmp_path: Path,
 ) -> None:
     """Verifies a nested dispatch (explicit parent) performs no extra flush."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("nested-tool")
     flushes: list[str] = []
@@ -387,7 +409,8 @@ async def test_tool_execute_reentrant_body_reuses_outer_checkpoint(
     tmp_path: Path,
 ) -> None:
     """Verifies a body that re-enters execute flushes once, for the outer call."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("reentrant-tool")
     flushes: list[str] = []
@@ -426,7 +449,8 @@ async def test_tool_execute_reentrant_body_reuses_outer_checkpoint(
 @pytest.mark.asyncio
 async def test_pre_step_flushes_before_step(tmp_path: Path) -> None:
     """Verifies the pre-step waterfall flushes the step's session first."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("pre-step")
     flushes: list[str] = []
@@ -445,7 +469,8 @@ async def test_pre_step_flushes_before_step(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_pre_step_without_session_passes_through(tmp_path: Path) -> None:
     """Verifies a pre-step decision naming no session passes through unflushed."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     flushes: list[str] = []
     ctx.on("session/flush", lambda s: flushes.append(s.session_id))
@@ -463,7 +488,8 @@ async def test_pre_step_without_session_passes_through(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_pre_step_failing_flush_never_enters_step(tmp_path: Path) -> None:
     """Verifies a rejected pre-step checkpoint aborts the turn before dispatch."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("pre-step-failure")
 
@@ -483,7 +509,8 @@ async def test_pre_step_failing_flush_never_enters_step(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_turn_end_performs_no_flush(tmp_path: Path) -> None:
     """Verifies a full turn flushes at pre-step only, never at turn/end."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("turn-end")
     flushes: list[str] = []
@@ -502,7 +529,8 @@ async def test_turn_end_performs_no_flush(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_stream_turn_flushes_at_pre_step_and_llm_stream(tmp_path: Path) -> None:
     """Verifies a streaming turn checkpoints at pre-step and before dispatch."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("stream-turn")
     flushes: list[str] = []
@@ -519,7 +547,8 @@ async def test_stream_turn_flushes_at_pre_step_and_llm_stream(tmp_path: Path) ->
 @pytest.mark.asyncio
 async def test_policy_dispose_removes_all_wrappers(tmp_path: Path) -> None:
     """Verifies disposing the policy stops checkpointing on every point."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     provider = _install_recording_provider(ctx, order)

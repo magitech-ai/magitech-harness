@@ -30,7 +30,20 @@ async def test_tool_service_register_unregister_and_get() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tool_service_execute_tool_not_found() -> None:
+async def test_tool_service_tools_property_returns_copy() -> None:
+    """Verifies the tools mapping is a copy: mutating it leaves the registry alone."""
+    ctx = Context()
+    service = ToolService(ctx)
+
+    tool = define_tool(name="calc", description="calculator", execute=lambda a: 1)
+    service.register(tool)
+
+    mapping = service.tools
+    assert mapping == {"calc": tool}
+    mapping["spoof"] = tool
+    mapping.clear()
+    assert service.get("calc") is tool
+    assert service.tools == {"calc": tool}
     """Verifies execution of nonexistent tool returns error result and emits event."""
     ctx = Context()
     service = ToolService(ctx)

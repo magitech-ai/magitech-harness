@@ -12,11 +12,12 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
+from anima import Context
 
-from magitech_harness import create_harness
+from magitech_harness import MockLLMProvider, create_harness
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.types import ModelChunk, ModelResponse
 from magitech_harness.session.events import EventType, ToolCallData
@@ -34,6 +35,15 @@ from magitech_harness.session.persistence_jsonl import JsonlSessionPersistence
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session
 from magitech_harness.tools.definition import define_tool
+
+
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
 
 
 def _dump(value: Any) -> str:
@@ -699,6 +709,11 @@ async def test_acceptance_rename_pins_against_auto_title(tmp_path: Path) -> None
     session = service.create("pinned")
     provider = _FakeTitleProvider()
     provider.gate = asyncio.Event()
+    # The bundle's first-prompt row is displaced here so this test can
+    # register its own gated provider; the row's own behaviour is
+    # covered by the kernel K5 tests.
+    loader = ctx.get("loader", None, strict=False)
+    await loader.disable("session-title-first-prompt")
     title.register(provider)
     _log_user(service, session, "Explain quantum computing simply")
     _log_header(service, session)
@@ -776,7 +791,8 @@ async def test_acceptance_failing_flush_blocks_llm_and_tool_dispatch(
     invocation, and a top-level tool call returns an error result with
     its body never run. A healthy flush lets both proceed.
     """
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     order: list[str] = []
     provider = _RecordingProvider(order)

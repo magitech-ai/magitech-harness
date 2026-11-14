@@ -1,8 +1,9 @@
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
-from anima import EventMode
+from anima import Context, EventMode
 
 from magitech_harness import (
     EventType,
@@ -16,11 +17,28 @@ from magitech_harness.session.messages import create_user_message
 from magitech_harness.session.store import Session
 
 
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
+
+
 @pytest.mark.asyncio
 async def test_full_turn_with_tool_call(tmp_path: Path):
     # 1. Boot harness
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
+
+    # The bundle's first-prompt row is displaced here: this test drives
+    # the turn from an exact queued-response sequence, and a live title
+    # call would consume one queued response. The row's own behaviour
+    # is covered by the kernel K5 tests.
+    loader = ctx.get("loader", None, strict=False)
+    await loader.disable("session-title-first-prompt")
 
     # Verify all 6 capability seams are active
     assert ctx.has("sessions")
@@ -167,7 +185,8 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_waterfall_guard_pre_step_veto(tmp_path: Path):
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     # Install a security component via waterfall hook on agent/pre-step
@@ -229,7 +248,8 @@ async def test_replay_reproduces_identical_message_sequence(tmp_path: Path):
     """Headline acceptance: replay of a recorded session reproduces the
     identical message sequence — same messages, same order, same system
     prompt, no merged nodes, no invented user messages."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     ctx.system_prompt.register_section("main", "You are a calculator.")
@@ -358,8 +378,14 @@ async def test_replay_reproduces_identical_message_sequence(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_run_turn_and_stream_turn_log_identical_messages(tmp_path: Path):
     """Verifies a run_turn and a stream_turn log the identical messages."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
+
+    # The bundle's first-prompt row is displaced here, for the same
+    # exact queued-response sequence as the turn test above.
+    loader = ctx.get("loader", None, strict=False)
+    await loader.disable("session-title-first-prompt")
 
     ctx.tools.register(
         define_tool(

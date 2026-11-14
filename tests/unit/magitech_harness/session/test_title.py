@@ -3,7 +3,7 @@
 import asyncio
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from anima import Context, EventMode
@@ -1474,9 +1474,24 @@ async def test_append_fallback_underivable_returns_none() -> None:
 # ---------------------------------------------------------------------------
 
 
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
+
+
 async def _stream_harness(tmp_path: Path) -> Any:
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
+    # The bundle's first-prompt row is displaced here so the tests below
+    # can register their own scripted provider; the row's own behaviour
+    # is covered by the kernel K5 tests.
+    loader = ctx.get("loader", None, strict=False)
+    await loader.disable("session-title-first-prompt")
     ctx.llm.set_active_provider("mock")
     return ctx
 

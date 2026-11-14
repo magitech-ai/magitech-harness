@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from anima import Context, Disposer
+
 from magitech_harness.session.title import (
     TitleProviderRequest,
     TitleProviderResult,
@@ -296,3 +298,29 @@ class FirstPromptTitleProvider:
             "messageSeqs": [first["seq"]],
             "model": route,
         }
+
+
+def apply(ctx: Context, config: dict[str, Any] | None = None) -> Disposer:
+    """Register the first-prompt model title provider as a bundle row.
+
+    Builds the provider over the context's model service and registers
+    it with the title service under the row id, so automatic titles
+    come from the model once a main request route is logged. The
+    returned disposer unregisters the provider when the row unloads.
+    Raises ``RuntimeError`` when the title or model service is absent,
+    and ``ValueError`` when the config is missing or invalid.
+    """
+    title_service = ctx.get("sessionTitle", None, strict=False)
+    if title_service is None:
+        raise RuntimeError(
+            "session-title-first-prompt requires the sessionTitle service"
+        )
+    llm = ctx.get("llm", None, strict=False)
+    if llm is None:
+        raise RuntimeError("session-title-first-prompt requires the llm service")
+    provider = FirstPromptTitleProvider(config, llm, "session-title-first-prompt")
+    disposer: Disposer = title_service.register(provider)
+    return disposer
+
+
+apply.inject = ["sessionTitle", "llm", "sessions"]  # type: ignore[attr-defined]

@@ -20,3 +20,25 @@ We decouple application launching into a lightweight profile bootstrapper:
 - The launcher binary remains thin and decoupled from specific UI or terminal dependencies.
 - Headless, automated, or embedded applications use the exact same launcher substrate without starting a terminal REPL.
 - Command-line argument semantics for inner features are owned by the profile and components that consume them.
+
+## Amendment (2026-11-14) — boot shape kept as `main_async`
+
+The Decision above was not implemented as written: no profile
+bootstrapper, `ctx.cmdline_args`, `ctx.app_exit`, or REPL-as-component
+exists, and the CLI never parsed only launcher-level configuration.
+What ships instead is the `main_async` sequence in `cli.py`, kept
+deliberately during the all-plugin kernel rework:
+
+1. `create_harness` loads the default bundle rows and settles them.
+2. The boot audit (`check_bundle_entries`) fails loud on any row that
+   did not activate.
+3. A user `--profile` loads after the bundle rows.
+4. When no provider is registered, the offline mock provider registers
+   as the fallback.
+5. Dispatch runs (`run`, `session`, `component`, or the REPL).
+
+The bootstrapper shape in the Decision is set aside, not silently
+replaced: this amendment records that the `main_async` sequence is the
+accepted boot shape, and the earlier design stays unimplemented until
+a later decision revives it. The original Decision text above is kept
+unchanged as the record of what was first decided.

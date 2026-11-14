@@ -152,7 +152,13 @@ class ComponentService(Service):
             The loaded Anima Fiber instance.
         """
         target = resolve_entry_point(manifest)
-        fiber = self.ctx.use(target, **config)
+        # Mount on the root context, not this service's own context: as
+        # a bundle row the service lives on a loader entry context, and
+        # a component mounted there settles only when that entry
+        # context flushes, which a root flush never awaits. The root is
+        # the context callers flush, so mounting there restores the
+        # settle contract: active after one root flush.
+        fiber = self.ctx.root.use(target, **config)
         self._mounted_components[manifest.name] = (manifest, fiber)
 
         def _unregister() -> None:

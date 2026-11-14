@@ -1,8 +1,20 @@
 """Unit tests for magitech_harness package exports."""
 
+from typing import ClassVar
+
 from anima import Context
 
 import magitech_harness
+from magitech_harness import MockLLMProvider
+
+
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
 
 
 def test_package_exports() -> None:
@@ -28,6 +40,7 @@ def test_create_harness_default() -> None:
     assert ctx.has("components")
     assert not ctx.llm.providers
 
-    # With mock_provider=True
-    ctx_mock = magitech_harness.create_harness(mock_provider=True)
+    # With the mock provider mounted as a test-only component
+    ctx_mock = magitech_harness.create_harness()
+    ctx_mock.use(_MockProviderComponent)
     assert "mock" in ctx_mock.llm.providers
