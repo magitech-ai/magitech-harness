@@ -14,7 +14,7 @@ from __future__ import annotations
 import math
 import os
 import re
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Self, cast
 
 from anima import Context, Disposer
 from pydantic import (
@@ -744,7 +744,7 @@ def apply_title_projection(
     return handle.dispose
 
 
-apply_title_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+cast(Any, apply_title_projection).inject = ["sessionProjections"]
 
 
 def apply_title_input_projection(
@@ -757,7 +757,7 @@ def apply_title_input_projection(
     return handle.dispose
 
 
-apply_title_input_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+cast(Any, apply_title_input_projection).inject = ["sessionProjections"]
 
 
 def apply_session_stats_projection(
@@ -770,7 +770,7 @@ def apply_session_stats_projection(
     return handle.dispose
 
 
-apply_session_stats_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+cast(Any, apply_session_stats_projection).inject = ["sessionProjections"]
 
 
 def apply_turn_outline_projection(
@@ -783,7 +783,7 @@ def apply_turn_outline_projection(
     return handle.dispose
 
 
-apply_turn_outline_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+cast(Any, apply_turn_outline_projection).inject = ["sessionProjections"]
 
 
 def apply_working_directory_projection(
@@ -796,4 +796,4 @@ def apply_working_directory_projection(
     return handle.dispose
 
 
-apply_working_directory_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+cast(Any, apply_working_directory_projection).inject = ["sessionProjections"]

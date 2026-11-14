@@ -411,7 +411,7 @@ class SessionService(Service):
         if cache is None:
             raise RuntimeError(
                 "session projections are unavailable: no "
-                "sessionProjections service on this context"
+                "sessionProjectionCache service on this context"
             )
         try:
             handle = persistence.open(session_id, "read")

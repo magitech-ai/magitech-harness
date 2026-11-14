@@ -52,10 +52,15 @@ def _check_bundle_entries(loader: LoaderService) -> None:
 
     A row that fails to mount never raises through load or flush: the
     failure is visible only on the entry fiber's state, so it is
-    checked here. Disabled rows are intentionally unmounted and skipped.
+    checked here. Zero entries (e.g. auditing before flushing a running
+    event loop) also fails loud instead of passing vacuously. Disabled
+    rows are intentionally unmounted and skipped.
     """
+    entries = list(loader.entries())
+    if not entries:
+        raise RuntimeError("default bundle failed to mount: no bundle entries loaded")
     problems: list[str] = []
-    for entry in loader.entries():
+    for entry in entries:
         if entry.disabled:
             continue
         fiber = entry.fiber

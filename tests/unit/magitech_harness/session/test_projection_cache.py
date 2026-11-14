@@ -6,6 +6,7 @@ import logging
 import math
 import stat
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -2066,3 +2067,42 @@ def test_service_delete_and_recreate_never_seeds_stale_state(
     second.close("s1")
     assert second.projection_cache is not None
     second.projection_cache.dispose()
+
+
+def test_dispose_joins_inflight_interval_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Dispose waits for an already-firing interval timer callback to finish."""
+    ctx, registry = _registry()
+    cache = _cache_with_listeners(
+        tmp_path, registry, ctx, write_every_events=200, write_interval_ms=10
+    )
+    started = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+    original_write = cache.write
+
+    def _blocking_write(session: Session) -> None:
+        started.set()
+        release.wait(timeout=2.0)
+        original_write(session)
+        finished.set()
+
+    monkeypatch.setattr(cache, "write", _blocking_write)
+    session = Session.create("s1", seed=[], header=dict(HEADER))
+    _append_policy(ctx, session)
+    assert started.wait(timeout=2.0)
+    dispose_done = threading.Event()
+
+    def _run_dispose() -> None:
+        cache.dispose()
+        dispose_done.set()
+
+    disposer_thread = threading.Thread(target=_run_dispose)
+    disposer_thread.start()
+    time.sleep(0.05)
+    assert not dispose_done.is_set()
+    release.set()
+    disposer_thread.join(timeout=2.0)
+    assert dispose_done.is_set()
+    assert finished.is_set()

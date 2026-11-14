@@ -1319,6 +1319,8 @@ def _minimal_payload(type: str) -> dict:
             "header": {"config": {"provider": "p", "model": "m"}},
             "reason": "initial",
         }
+    if type == "team/mode":
+        return {"enabled": True}
     return {}
 
 
@@ -1345,7 +1347,7 @@ def _write_v4_file(file_path: Path, session_id: str, rows: list[str]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_appends_all_62_types_and_replays_in_order(
+async def test_session_appends_all_63_types_and_replays_in_order(
     tmp_path: Path,
 ) -> None:
     """Verifies a session appends every known type and replays them in order."""
@@ -1364,9 +1366,9 @@ async def test_session_appends_all_62_types_and_replays_in_order(
     )
     # Reloading a log holding image/offload needs its projection supplied.
     service.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
-    session = service.create("all62")
+    session = service.create("all63")
     types = sorted(KNOWN_SESSION_EVENT_TYPES)
-    assert len(types) == 62
+    assert len(types) == 63
     for seq, type in enumerate(types):
         event = service.log_event(
             session,
@@ -1377,23 +1379,23 @@ async def test_session_appends_all_62_types_and_replays_in_order(
         assert event.seq == seq
         assert event.type == type
     assert [event.type for event in session.events] == types
-    assert [event.seq for event in session.events] == list(range(62))
+    assert [event.seq for event in session.events] == list(range(63))
     await service.flush(session)
     # The canonical user/message is title-eligible, so the title service
     # commits a deterministic fallback title for it; drain the deferred
     # work, persist it, and expect it as the log's final event.
     await title.drain()
     await service.flush(session)
-    assert service.close("all62") is True
+    assert service.close("all63") is True
     ctx2 = Context()
     JsonlSessionPersistenceService(ctx2, {"root": tmp_path})
     service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
     service2.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
-    reloaded = service2.load("all62")
+    reloaded = service2.load("all63")
     assert reloaded is not None
     assert [event.type for event in reloaded.events] == [*types, "session/title"]
-    assert [event.seq for event in reloaded.events] == list(range(63))
-    fallback = reloaded.events[62]
+    assert [event.seq for event in reloaded.events] == list(range(64))
+    fallback = reloaded.events[63]
     assert fallback.payload["title"] == "x"
     assert fallback.payload["source"] == {"kind": "fallback"}
 
@@ -3085,3 +3087,44 @@ def test_session_seed_rejects_malformed_assistant_message() -> None:
         ValueError, match="assistant/message requires an identified model message"
     ):
         Session.create("bad-assistant-seed", seed=[event])
+
+
+def test_derive_messages_returns_isolated_copies() -> None:
+    """Mutating derive_messages() results never corrupts the internal cache."""
+    session = Session.create("isolated-derive")
+    session.append(
+        "user/message",
+        {
+            "role": "user",
+            "id": "u1",
+            "content": [{"type": "text", "text": "hello"}],
+            "source": {"kind": "user"},
+        },
+        surface_op="append",
+    )
+    first = session.derive_messages()
+    assert first[0]["content"][0]["text"] == "hello"
+    first[0]["role"] = "assistant"
+    first[0]["content"][0]["text"] = "corrupted"
+    second = session.derive_messages()
+    assert second[0]["role"] == "user"
+    assert second[0]["content"][0]["text"] == "hello"
+    session.append(
+        "assistant/message",
+        {
+            "turn": 1,
+            "step": 1,
+            "message": {
+                "id": "a1",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "reply"}],
+                "source": {"kind": "model", "provider": "p", "model": "m"},
+            },
+            "stream": [],
+        },
+        surface_op="append",
+    )
+    third = session.derive_messages()
+    third[1]["content"][0]["text"] = "mutated-reply"
+    fourth = session.derive_messages()
+    assert [msg["content"][0]["text"] for msg in fourth] == ["hello", "reply"]

@@ -17,6 +17,11 @@ from magitech_harness.session.projections import (
     TURN_OUTLINE_PROJECTION,
     WORKING_DIRECTORY_PROJECTION,
     _output_tokens,
+    apply_session_stats_projection,
+    apply_title_input_projection,
+    apply_title_projection,
+    apply_turn_outline_projection,
+    apply_working_directory_projection,
     first_token_time,
     preview,
     validate_session_stats_state,
@@ -1449,3 +1454,11 @@ def test_rows_wire_the_five_units() -> None:
         {"turn": 1, "seq": 0, "prompt": "Hello", "response": ""}
     ]
     assert registry.checkpoint(session)["titleInput"]["val"]["count"] == 1
+    for entrypoint in (
+        apply_title_projection,
+        apply_title_input_projection,
+        apply_session_stats_projection,
+        apply_turn_outline_projection,
+        apply_working_directory_projection,
+    ):
+        assert entrypoint.inject == ["sessionProjections"]

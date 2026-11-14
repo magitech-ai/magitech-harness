@@ -349,6 +349,7 @@ class SessionProjectionCache:
         self._sessions_dir = self._base_storage_dir / _DOMAIN_NAME / _TABLE_DIR
         self._records: dict[str, dict[str, Any]] = {}
         self._dirty: dict[str, _DirtyState] = {}
+        self._timers: set[threading.Timer] = set()
         self._disposers: list[Any] = []
         self._installed = False
         self._load_all()
@@ -438,6 +439,10 @@ class SessionProjectionCache:
             if dirty.timer is not None:
                 dirty.timer.cancel()
         self._dirty.clear()
+        while self._timers:
+            timer = self._timers.pop()
+            timer.cancel()
+            timer.join()
 
     def record_for(
         self, session_id: str, expected: dict[str, Any]
@@ -608,6 +613,7 @@ class SessionProjectionCache:
         state.pending = 0
         if state.timer is not None:
             state.timer.cancel()
+            self._timers.discard(state.timer)
             state.timer = None
 
     def put(
@@ -653,12 +659,22 @@ class SessionProjectionCache:
                 self.flush_soft(session, "count threshold")
                 return
             if state.timer is None:
-                state.timer = threading.Timer(
+                timer: threading.Timer
+
+                def _fire() -> None:
+                    try:
+                        self.flush_soft(session, "interval")
+                    finally:
+                        self._timers.discard(timer)
+
+                timer = threading.Timer(
                     self._config.write_interval_ms / 1000,
-                    lambda: self.flush_soft(session, "interval"),
+                    _fire,
                 )
-                state.timer.daemon = True
-                state.timer.start()
+                self._timers.add(timer)
+                state.timer = timer
+                timer.daemon = True
+                timer.start()
         except Exception as error:  # noqa: BLE001 - listeners never raise out of the bus
             logger.warning(
                 'session projection cache: event listener for "%s" failed '

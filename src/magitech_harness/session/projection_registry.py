@@ -156,10 +156,17 @@ class SessionProjectionRegistry(Service):
         self._ctx = ctx
         self._registrations: dict[str, _Registration] = {}
         self._listeners: set[Callable[..., None]] = set()
+        self._event_listeners: set[
+            Callable[[Session, list[dict[str, Any]], int], None]
+        ] = set()
         self._summary_key_set: frozenset[str] | None = None
         self._disposed = False
         self._created_disposer = ctx.on("session/created", self._on_created)
         self._event_disposer = ctx.on("session/event", self._on_event)
+
+    def _active_registrations(self) -> list[_Registration]:
+        """Registrations with at least one live handle."""
+        return [reg for reg in self._registrations.values() if reg.refs > 0]
 
     def dispose(self) -> None:
         """Unregister both listeners; idempotent."""
@@ -184,12 +191,12 @@ class SessionProjectionRegistry(Service):
                 f"a non-negative integer, got {version!r}"
             )
         existing = self._registrations.get(definition.key)
-        if existing is None:
+        if existing is None or existing.refs == 0:
             registration = _Registration(
                 definition=definition, cells=WeakKeyDictionary(), refs=1
             )
             self._registrations[definition.key] = registration
-            # A new key changes the table; a refcount increment does not.
+            # A new key or replacement changes the table; refcount increments do not.
             self._summary_key_set = None
         else:
             if existing.definition.state_version != version:
@@ -211,10 +218,9 @@ class SessionProjectionRegistry(Service):
         return ProjectionHandle(self, registration)
 
     def _release(self, registration: _Registration) -> None:
-        """Drop one reference; the last one out removes the key."""
+        """Drop one reference; released entries keep cells only for checkpoints."""
         registration.refs -= 1
         if registration.refs == 0:
-            del self._registrations[registration.definition.key]
             self._summary_key_set = None
 
     def on_changed(
@@ -234,6 +240,17 @@ class SessionProjectionRegistry(Service):
 
         return disposer
 
+    def on_event_changed(
+        self, listener: Callable[[Session, list[dict[str, Any]], int], None]
+    ) -> Callable[[], None]:
+        """Subscribe to per-event batched change feeds; returns an idempotent disposer."""
+        self._event_listeners.add(listener)
+
+        def disposer() -> None:
+            self._event_listeners.discard(listener)
+
+        return disposer
+
     @staticmethod
     def _selected_keys(
         keys: list[str] | set[str] | frozenset[str] | None,
@@ -250,18 +267,17 @@ class SessionProjectionRegistry(Service):
         session: Session,
         keys: list[str] | set[str] | frozenset[str] | None = None,
     ) -> ProjectionSnapshot:
-        """One consistent cut over every registered client-visible unit.
+        """One consistent cut over selected registered client-visible units.
 
-        Materializes every unit's cell at the session's current cursor
-        first, then reads each selected wire unit's view through its
+        Materializes only the selected wire units' cells at the session's
+        current cursor, then reads each selected wire unit's view through its
         ``view_schema`` (raises on an invalid view). ``as_of_seq`` is
         the shared log cursor (``-1`` for an empty log). Host-only units
         never appear.
         """
         selected = self._selected_keys(keys)
-        self._materialize_cells(session)
         values: dict[str, Any] = {}
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             definition = registration.definition
             if definition.wire is None:
                 continue
@@ -285,7 +301,7 @@ class SessionProjectionRegistry(Service):
         selected = self._selected_keys(keys)
         values: dict[str, Any] = {}
         as_of_seq: int | None = None
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             definition = registration.definition
             if definition.wire is None:
                 continue
@@ -310,21 +326,26 @@ class SessionProjectionRegistry(Service):
         if self._summary_key_set is None:
             self._summary_key_set = frozenset(
                 registration.definition.key
-                for registration in self._registrations.values()
+                for registration in self._active_registrations()
                 if registration.definition.wire is not None
                 and registration.definition.wire.summary
             )
         return self._summary_key_set
 
     def checkpoint(self, session: Session) -> dict[str, CheckpointRow]:
-        """One row per registered key (host-only units included).
+        """One row per registered key (including released predecessors with cells).
 
         Each row is detached: the returned ``val`` never aliases the
         live cell.
         """
         rows: dict[str, CheckpointRow] = {}
         for registration in self._registrations.values():
-            cell = self._cell_for(registration, session)
+            if registration.refs == 0:
+                cell = registration.cells.get(session)
+                if cell is None:
+                    continue
+            else:
+                cell = self._cell_for(registration, session)
             rows[registration.definition.key] = CheckpointRow(
                 ver=registration.definition.state_version,
                 seq=cell.observed_seq,
@@ -341,7 +362,7 @@ class SessionProjectionRegistry(Service):
         unit is registered.
         """
         floor: int | None = None
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             row = checkpoint.get(registration.definition.key)
             need = 0
             if isinstance(row, dict):
@@ -403,7 +424,7 @@ class SessionProjectionRegistry(Service):
         before_base = base_seq - 1
         values: dict[str, Any] = {}
         refreshed: dict[str, CheckpointRow] = {}
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             definition = registration.definition
             row = checkpoint.get(definition.key)
             usable = self._row_usable(row, definition, before_base, end_seq)
@@ -455,7 +476,7 @@ class SessionProjectionRegistry(Service):
         """
         selected = self._selected_keys(keys)
         values: dict[str, Any] = {}
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             definition = registration.definition
             if definition.wire is None:
                 continue
@@ -496,14 +517,14 @@ class SessionProjectionRegistry(Service):
         """
         end_seq = events[-1].seq if events else base_seq - 1
         complete = True
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             cell = registration.cells.get(session)
             if cell is None or cell.observed_seq != end_seq:
                 complete = False
                 break
         if complete:
             values: dict[str, Any] = {}
-            for registration in self._registrations.values():
+            for registration in self._active_registrations():
                 definition = registration.definition
                 if definition.wire is None:
                     continue
@@ -518,7 +539,7 @@ class SessionProjectionRegistry(Service):
             session.header,
             session.inherited_event_count,
         )
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             row = restored.checkpoint[registration.definition.key]
             current = registration.cells.get(session)
             if current is not None and current.observed_seq > row["seq"]:
@@ -527,11 +548,6 @@ class SessionProjectionRegistry(Service):
                 state=row["val"], observed_seq=row["seq"], views=[None, None]
             )
         return restored.snapshot
-
-    def _materialize_cells(self, session: Session) -> None:
-        """Bring every registered unit's cell to the session's cursor."""
-        for registration in self._registrations.values():
-            self._cell_for(registration, session)
 
     def _build_cell(
         self,
@@ -587,10 +603,10 @@ class SessionProjectionRegistry(Service):
             cell.observed_seq = seq
 
     def _on_created(self, session: Session) -> None:
-        """Pre-seed one cell per registered unit for a genuinely empty log."""
+        """Pre-seed one cell per active unit for a genuinely empty log."""
         if session.seq != 0:
             return
-        for registration in self._registrations.values():
+        for registration in self._active_registrations():
             if session in registration.cells:
                 continue
             registration.cells[session] = UnitCell(
@@ -606,48 +622,56 @@ class SessionProjectionRegistry(Service):
         self._drive(session, event)
 
     def _drive(self, session: Session, event: SessionEvent) -> None:
-        """Eager drive: pass one committed event through every unit."""
-        for registration in self._registrations.values():
-            definition = registration.definition
-            cell = registration.cells.get(session)
-            if cell is not None and cell.observed_seq >= event.seq:
-                continue
-            if cell is None:
-                # Late build mid-stream: fold history before this event,
-                # then take the normal gate below.
-                cell = self._build_cell(
-                    definition,
-                    session.header,
-                    session.inherited_event_count,
-                    list(session.events[0 : event.seq]),
-                )
-                registration.cells[session] = cell
-            else:
-                self._advance_cell(
-                    definition,
-                    cell,
-                    session,
-                    -1 if event.seq == 0 else event.seq - 1,
-                )
-            previous = cell.state
-            next_state = definition.apply(previous, event)
-            changed = next_state is not previous
-            cell.state = next_state
-            cell.observed_seq = event.seq
-            wire = definition.wire
-            if changed and wire is not None:
-                views = cell.views
-                views[0] = views[1]
-                if self._listeners:
-                    views[1] = wire.view(next_state)
-                    if views[0] is not views[1]:
-                        value = wire.view_schema(views[1])
-                        for listener in list(self._listeners):
-                            listener(session, definition.key, value, event.seq)
+        """Eager drive: pass one committed event through every active unit."""
+        observed = bool(self._listeners or self._event_listeners)
+        changes: list[dict[str, Any]] = []
+        try:
+            for registration in self._active_registrations():
+                definition = registration.definition
+                cell = registration.cells.get(session)
+                if cell is not None and cell.observed_seq >= event.seq:
+                    continue
+                if cell is None:
+                    # Late build mid-stream: fold history before this event,
+                    # then take the normal gate below.
+                    cell = self._build_cell(
+                        definition,
+                        session.header,
+                        session.inherited_event_count,
+                        list(session.events[0 : event.seq]),
+                    )
+                    registration.cells[session] = cell
                 else:
-                    views[1] = None
-            # An unchanged state keeps its current view as the valid
-            # comparison value for the next state change.
+                    self._advance_cell(
+                        definition,
+                        cell,
+                        session,
+                        -1 if event.seq == 0 else event.seq - 1,
+                    )
+                previous = cell.state
+                next_state = definition.apply(previous, event)
+                changed = next_state is not previous
+                cell.state = next_state
+                cell.observed_seq = event.seq
+                wire = definition.wire
+                if changed and wire is not None:
+                    views = cell.views
+                    views[0] = views[1]
+                    if observed:
+                        views[1] = wire.view(next_state)
+                        if views[0] is not views[1]:
+                            value = wire.view_schema(views[1])
+                            changes.append({"key": definition.key, "val": value})
+                            for listener in list(self._listeners):
+                                listener(session, definition.key, value, event.seq)
+                    else:
+                        views[1] = None
+                # An unchanged state keeps its current view as the valid
+                # comparison value for the next state change.
+        finally:
+            if changes and self._event_listeners:
+                for event_listener in list(self._event_listeners):
+                    event_listener(session, changes, event.seq)
 
     def _view_cell(self, registration: _Registration, cell: UnitCell) -> Any:
         """One schema-validated wire value."""

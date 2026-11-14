@@ -121,7 +121,7 @@ async def test_direct_construction_degrades_without_projections(
     JsonlSessionPersistenceService(ctx, {"root": tmp_path})
     service = SessionService(ctx, {"base_storage_dir": tmp_path})
     assert service.projection_cache is None
-    with pytest.raises(RuntimeError, match="sessionProjections"):
+    with pytest.raises(RuntimeError, match="sessionProjectionCache"):
         service.read_projections("s1")
     session = service.create("s1")
     service.log_event(session, "turn/start", {"turn": 1})

@@ -64,12 +64,19 @@ _CONTROL_CHARACTER = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _DIRECTIONAL_CONTROL = re.compile(
     r"[\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u206f\ufeff]"
 )
+_LONE_SURROGATE = re.compile(r"[\ud800-\udfff]")
 _WHITESPACE_RUN = re.compile(r"\s+")
+
+
+def _sanitize_lone_surrogates(text: str) -> str:
+    """Replace unpaired UTF-16 surrogates with U+FFFD for UTF-8 safety."""
+    return _LONE_SURROGATE.sub("\ufffd", text)
 
 
 def clean_title_text(text: str) -> str:
     """Strip escape sequences and controls; collapse whitespace runs; trim."""
-    cleaned = _OSC_SEQUENCE.sub("", text)
+    cleaned = _sanitize_lone_surrogates(text)
+    cleaned = _OSC_SEQUENCE.sub("", cleaned)
     cleaned = _CSI_SEQUENCE.sub("", cleaned)
     cleaned = _ESC_SEQUENCE.sub("", cleaned)
     cleaned = _CONTROL_CHARACTER.sub("", cleaned)
@@ -85,9 +92,10 @@ def truncate_title_utf8(text: str, max_bytes: int) -> str:
     """
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes <= 0:
         raise ValueError("session-title: max_bytes must be a positive integer")
-    encoded = text.encode("utf-8")
+    sanitized = _sanitize_lone_surrogates(text)
+    encoded = sanitized.encode("utf-8")
     if len(encoded) <= max_bytes:
-        return text
+        return sanitized
     # A cut inside a multi-byte character leaves an incomplete trailing
     # sequence, which decoding ignores; no code point is ever split.
     return encoded[:max_bytes].decode("utf-8", errors="ignore")

@@ -13,14 +13,13 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
-# Event vocabulary: the 62-type registry, reproduced as a merge.
+# Event vocabulary: the 63-type registry, reproduced as a merge.
 #
-# The core map declares 14 types; the other 48 arrive by declaration
+# The core map declares 14 types; the other 49 arrive by declaration
 # merging from their owner packages. The registry is built the same way:
 # a core set plus an owner -> types mapping whose union is the known set.
-# No 63rd type exists; the retired ``session/compaction`` spelling is not
-# a known type and is refused as unknown unless an event carries it with
-# ``ignorable: true``.
+# The retired ``session/compaction`` spelling is not a known type and is
+# refused as unknown unless an event carries it with ``ignorable: true``.
 # ---------------------------------------------------------------------------
 
 CORE_EVENT_TYPES: frozenset[str] = frozenset(
@@ -81,6 +80,7 @@ OWNER_EVENT_TYPES: dict[str, tuple[str, ...]] = {
         "team/member",
         "team/message/delivered",
         "team/message/queued",
+        "team/mode",
         "team/task",
     ),
     "todo/tool-todo": ("todo/write",),
@@ -95,13 +95,13 @@ OWNER_EVENT_TYPES: dict[str, tuple[str, ...]] = {
     "session/working-directory": ("working-directory/change",),
     "deliverables/workspace-changes": ("workspace/changes",),
 }
-"""Owner package -> the event types it merges into the vocabulary (48)."""
+"""Owner package -> the event types it merges into the vocabulary (49)."""
 
 KNOWN_SESSION_EVENT_TYPES: frozenset[str] = frozenset(
     set(CORE_EVENT_TYPES)
     | {event_type for types in OWNER_EVENT_TYPES.values() for event_type in types}
 )
-"""Every event type this build understands at format v4 (62)."""
+"""Every event type this build understands at format v4 (63)."""
 
 SURFACE_EVENT_TYPES: frozenset[str] = frozenset(
     [
@@ -133,7 +133,7 @@ def is_plugin_record_type(value: str) -> bool:
 
 
 class EventType(str, Enum):
-    """Every known event type the store can carry (62)."""
+    """Every known event type the store can carry (63)."""
 
     TURN_START = "turn/start"
     TURN_END = "turn/end"
@@ -186,6 +186,7 @@ class EventType(str, Enum):
     TEAM_MEMBER = "team/member"
     TEAM_MESSAGE_DELIVERED = "team/message/delivered"
     TEAM_MESSAGE_QUEUED = "team/message/queued"
+    TEAM_MODE = "team/mode"
     TEAM_TASK = "team/task"
     TODO_WRITE = "todo/write"
     TOOL_WORKFLOW_AGENT_END = "tool-workflow/agent-end"

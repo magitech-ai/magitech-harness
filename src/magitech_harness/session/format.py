@@ -10,13 +10,8 @@ Adjacent versions are connected by frozen migrations (v0->v1->v2->v3->v4) and
 nothing else: a stored log is either current, migratable through the chain,
 or refused. Corrupt or foreign logs are refused, never silently repaired.
 
-Storage is plain JSONL for Phase 2: no compression framing. The reference
-implementation defaults to checksummed compressed frames, one per header or
-batch; this port records the plain-JSONL call here deliberately (see the
-module note in the project plan) and revisits it only with evidence of size
-pressure. The only behavioral differences are the filename suffix, no
-checksum protection, and no frame boundaries, so torn-tail detection rests
-on the JSONL newline/record rules.
+Storage is plain JSONL: one JSON object per line with no compression framing.
+Torn-tail detection rests on JSONL newline and record validation rules.
 """
 
 from __future__ import annotations
@@ -24,6 +19,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TypeGuard, cast
@@ -452,8 +448,9 @@ RELEASED_V0_EVENT_DISPOSITIONS: dict[str, _PayloadDisposition] = {
     "step/end": _disp(["turn", "step"]),
     "step/start": _disp(["turn", "step"]),
     "subagent/descriptor": _disp(
-        ["mode", "version", "provider"],
+        ["version", "provider"],
         [
+            "mode",
             "label",
             "agentProvider",
             "agentModel",
@@ -600,10 +597,11 @@ KNOWN_SESSION_EVENT_TYPES: frozenset[str] = frozenset(
         "developer/message",
         "job/registered",
         "job/settled",
+        "team/mode",
         "working-directory/change",
     }
 )
-"""Every event type this build understands at format v4 (62)."""
+"""Every event type this build understands at format v4 (63)."""
 
 # ---------------------------------------------------------------------------
 # Artifacts, runs, envelopes
@@ -737,14 +735,63 @@ def encode_envelope_event(event: JsonObject) -> JsonObject:
     }
 
 
+SUBAGENT_DESCRIPTOR_VERSIONS: tuple[int, ...] = (1, 2, 3)
+"""`subagent/descriptor` versions contained in released format v0 logs."""
+
+
+def _descriptor_string(value: Any, label: str, *, strict: bool) -> None:
+    if not isinstance(value, str) or (strict and not value):
+        kind = "a non-empty string" if strict else "a string"
+        raise SessionFormatError(f"{label} must be {kind}")
+
+
+def _subagent_descriptor_value(data: JsonObject, label: str) -> None:
+    _descriptor_string(data.get("provider"), f"{label} provider", strict=True)
+    composition = ("agentProvider", "agentModel", "persona", "toolFilter")
+    descriptor_version = data.get("version")
+    if descriptor_version == 1:
+        exact_keys(data, ["version", "provider", "label"], composition, f"{label} data")
+    elif data.get("mode") == "one-shot":
+        exact_keys(data, ["mode", "version", "provider"], ["label"], f"{label} data")
+        if "label" in data:
+            _descriptor_string(data["label"], f"{label} label", strict=False)
+        return
+    else:
+        if data.get("mode") != "continuable":
+            raise SessionFormatError(f"{label} mode must be 'continuable'")
+        opt: tuple[str, ...] = (
+            (*composition, "agentReasoningEffort")
+            if descriptor_version == 3
+            else composition
+        )
+        exact_keys(data, ["mode", "version", "provider", "label"], opt, f"{label} data")
+    strict = descriptor_version == 3
+    _descriptor_string(data.get("label"), f"{label} label", strict=strict)
+    for key in ("agentProvider", "agentModel", "agentReasoningEffort", "persona"):
+        if key in data:
+            _descriptor_string(data[key], f"{label} {key}", strict=strict)
+    if strict and (("agentProvider" in data) != ("agentModel" in data)):
+        raise SessionFormatError(f"{label} agentProvider and agentModel must be paired")
+    if "toolFilter" in data:
+        tool_filter = require_record(data["toolFilter"], f"{label} toolFilter")
+        exact_keys(tool_filter, [], ["allow", "deny"], f"{label} toolFilter")
+        if "allow" not in tool_filter and "deny" not in tool_filter:
+            raise SessionFormatError(f"{label} toolFilter requires allow or deny")
+        for fkey in ("allow", "deny"):
+            if fkey in tool_filter:
+                items = tool_filter[fkey]
+                if not isinstance(items, list):
+                    raise SessionFormatError(f"{label} {fkey} must be an array")
+                for item in items:
+                    _descriptor_string(item, f"{label} {fkey}", strict=strict)
+
+
 def assert_released_event_payload(event: JsonObject, version: int) -> None:
     """Validate one exact known payload after legacy normalization.
 
-    Applies the frozen disposition's exact member rules plus the targeted
-    semantic checks the migration edges depend on (retry and compaction
-    identity fields, subagent descriptor versions). The full per-payload
-    semantic validation of the reference implementation is not ported here;
-    it belongs to the event-vocabulary work that owns the 62-type registry.
+    Applies the frozen disposition's exact member rules plus targeted
+    semantic checks that migration edges depend on (retry and compaction
+    identity fields, subagent descriptor versions).
     """
     event_type = event.get("type")
     disposition = RELEASED_V0_EVENT_DISPOSITIONS.get(str(event_type))
@@ -755,9 +802,13 @@ def assert_released_event_payload(event: JsonObject, version: int) -> None:
             "unknown historical events even when ignorable"
         )
     data = require_record(event.get("data"), f"{event_type} {event.get('seq')} data")
-    if event_type == "subagent/descriptor" and data.get("version") != 3:
+    descriptor_version_raw = data.get("version")
+    if event_type == "subagent/descriptor" and (
+        type(descriptor_version_raw) is not int
+        or descriptor_version_raw not in SUBAGENT_DESCRIPTOR_VERSIONS
+    ):
         descriptor_version = require_count(
-            data.get("version"), f"{event_type} {event.get('seq')} version"
+            descriptor_version_raw, f"{event_type} {event.get('seq')} version"
         )
         if version == 0:
             raise SessionFormatUnsupportedMigrationError(
@@ -774,6 +825,8 @@ def assert_released_event_payload(event: JsonObject, version: int) -> None:
         optional,
         f"{event_type} {event.get('seq')} data",
     )
+    if event_type == "subagent/descriptor":
+        _subagent_descriptor_value(data, f"{event_type} {event.get('seq')}")
     if event_type == "llm/retry":
         retry_id = data.get("retryId")
         if not isinstance(retry_id, str) or not retry_id:
@@ -5181,6 +5234,31 @@ _V2_SURFACE_OPTIONAL = ("ignorable", "sourceEventSeqs", "surfaceOp")
 _V2_LOG_OPTIONAL = ("ignorable",)
 
 
+_NATIVE_CATALOG_NAME_RE = re.compile(r"\A[a-z][a-z0-9-]{0,31}\Z")
+
+
+def _native_catalog_fact(value: Any) -> JsonObject:
+    """Validate an own native v4 catalog payload (historical or v3 named)."""
+    if not is_json_object(value) or value.get("version") != 3:
+        return catalog_fact(value)
+    name = value.get("name")
+    mode = value.get("mode")
+    if (
+        not isinstance(value.get("childId"), str)
+        or mode not in ("continuable", "external")
+        or not isinstance(name, str)
+        or not _NATIVE_CATALOG_NAME_RE.match(name)
+        or name == "lead"
+        or (mode == "continuable" and not isinstance(value.get("label"), str))
+        or ("label" in value and not isinstance(value["label"], str))
+    ):
+        raise SessionFormatError(
+            "subagent/catalog requires a supported versioned catalog fact"
+        )
+    require_count(value.get("childCreatedAt"), "catalog child creation time")
+    return value
+
+
 def assert_released_v4_relationships(
     artifact: SessionFormatArtifact, known_event_types: frozenset[str]
 ) -> None:
@@ -5190,6 +5268,7 @@ def assert_released_v4_relationships(
     belong to installed Session validation and are a P2-1 follow-up.
     """
     ids: set[str] = set()
+    names: set[str] = set()
     for event in artifact.events:
         if event.get("type") not in known_event_types:
             continue
@@ -5208,11 +5287,17 @@ def assert_released_v4_relationships(
             event.get("type") == "subagent/catalog"
             and event.get("seq", 0) >= artifact.inherited_event_count
         ):
-            fact = catalog_fact(event.get("data"))
+            fact = _native_catalog_fact(event.get("data"))
             child_id = fact["childId"]
             if child_id in ids:
                 raise SessionFormatError(f"duplicate catalog child {child_id}")
             ids.add(child_id)
+            if fact.get("version") != 3:
+                continue
+            name = fact["name"]
+            if name in names:
+                raise SessionFormatError(f"duplicate catalog child name {name}")
+            names.add(name)
 
 
 def restore_released_v4_artifact(

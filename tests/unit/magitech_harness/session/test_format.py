@@ -4882,6 +4882,179 @@ def test_restore_v4_relationships() -> None:
         },
     ]
     assert_released_v4_relationships(_artifact(4, events), KNOWN_SESSION_EVENT_TYPES)
+    # team/mode is v4-native (admitted in KNOWN_SESSION_EVENT_TYPES, not v3).
+    assert "team/mode" in KNOWN_SESSION_EVENT_TYPES
+    assert "team/mode" not in RELEASED_V3_EVENT_TYPES
+    team_mode_events = [
+        {"type": "team/mode", "seq": 0, "time": 100, "data": {"enabled": True}},
+    ]
+    restored_team_mode = restore_released_v4_artifact(
+        _artifact(4, team_mode_events), KNOWN_SESSION_EVENT_TYPES
+    )
+    assert restored_team_mode.events == team_mode_events
+    # Native catalog v3 validation: valid named entries and sibling uniqueness.
+    v3_continuable = {
+        "type": "subagent/catalog",
+        "seq": 0,
+        "time": 100,
+        "data": {
+            "version": 3,
+            "childId": "c1",
+            "childCreatedAt": 500,
+            "mode": "continuable",
+            "label": "Named",
+            "name": "reviewer",
+        },
+    }
+    v3_external = {
+        "type": "subagent/catalog",
+        "seq": 1,
+        "time": 101,
+        "data": {
+            "version": 3,
+            "childId": "c2",
+            "childCreatedAt": 501,
+            "mode": "external",
+            "name": "auditor",
+        },
+    }
+    v3_external_labeled = {
+        "type": "subagent/catalog",
+        "seq": 2,
+        "time": 102,
+        "data": {
+            "version": 3,
+            "childId": "c3",
+            "childCreatedAt": 502,
+            "mode": "external",
+            "label": "With label",
+            "name": "checker",
+        },
+    }
+    assert_released_v4_relationships(
+        _artifact(4, [v3_continuable, v3_external, v3_external_labeled]),
+        KNOWN_SESSION_EVENT_TYPES,
+    )
+    # Duplicate sibling name in own catalog facts raises.
+    with pytest.raises(
+        SessionFormatError, match="duplicate catalog child name reviewer"
+    ):
+        assert_released_v4_relationships(
+            _artifact(
+                4,
+                [
+                    v3_continuable,
+                    {
+                        **v3_continuable,
+                        "seq": 1,
+                        "data": {**v3_continuable["data"], "childId": "c2"},
+                    },
+                ],
+            ),
+            KNOWN_SESSION_EVENT_TYPES,
+        )
+    for bad_name in (
+        "",
+        "Reviewer",
+        "a/b",
+        "1reviewer",
+        "a" * 33,
+        "lead",
+        "reviewer\n",
+    ):
+        for mode in ("continuable", "external"):
+            with pytest.raises(
+                SessionFormatError, match="supported versioned catalog fact"
+            ):
+                assert_released_v4_relationships(
+                    _artifact(
+                        4,
+                        [
+                            {
+                                "type": "subagent/catalog",
+                                "seq": 0,
+                                "time": 100,
+                                "data": {
+                                    "version": 3,
+                                    "childId": "child",
+                                    "childCreatedAt": 2,
+                                    "mode": mode,
+                                    "label": "Named",
+                                    "name": bad_name,
+                                },
+                            }
+                        ],
+                    ),
+                    KNOWN_SESSION_EVENT_TYPES,
+                )
+    for bad_v3 in (
+        {
+            "version": 3,
+            "childId": "c",
+            "childCreatedAt": 2,
+            "mode": "continuable",
+            "label": "N",
+        },
+        {
+            "version": 3,
+            "childId": "c",
+            "childCreatedAt": 2,
+            "mode": "continuable",
+            "name": "reviewer",
+        },
+        {
+            "version": 3,
+            "childId": "c",
+            "childCreatedAt": 2,
+            "mode": "external",
+            "label": 1,
+            "name": "auditor",
+        },
+        {
+            "version": 3,
+            "childId": "c",
+            "childCreatedAt": 2,
+            "mode": "one-shot",
+            "name": "reviewer",
+        },
+        {
+            "version": 3,
+            "childId": "c",
+            "childCreatedAt": 2,
+            "mode": "unknown",
+            "name": "reviewer",
+        },
+        {
+            "version": 3,
+            "childId": 1,
+            "childCreatedAt": 2,
+            "mode": "continuable",
+            "label": "N",
+            "name": "reviewer",
+        },
+        {
+            "version": 3,
+            "childId": "c",
+            "childCreatedAt": -1,
+            "mode": "external",
+            "name": "auditor",
+        },
+    ):
+        with pytest.raises(SessionFormatError):
+            assert_released_v4_relationships(
+                _artifact(
+                    4,
+                    [
+                        {
+                            "type": "subagent/catalog",
+                            "seq": 0,
+                            "time": 100,
+                            "data": bad_v3,
+                        }
+                    ],
+                ),
+                KNOWN_SESSION_EVENT_TYPES,
+            )
 
 
 def test_restore_v2_coordinates() -> None:
@@ -6567,18 +6740,132 @@ def test_assert_released_event_payload_branches() -> None:
         match="contains unknown historical event type",
     ):
         assert_released_event_payload({"type": "vendor/x", "seq": 0, "data": {}}, 0)
-    descriptor = {
-        "type": "subagent/descriptor",
-        "seq": 0,
-        "data": {"version": 2},
-    }
     with pytest.raises(
         SessionFormatUnsupportedMigrationError,
-        match="uses unsupported descriptor version 2",
+        match="uses unsupported descriptor version 9",
     ):
-        assert_released_event_payload(descriptor, 0)
-    # Version 1 tolerates a pre-v3 descriptor: the early return, no exact keys.
-    assert_released_event_payload(descriptor, 1)
+        assert_released_event_payload(
+            {"type": "subagent/descriptor", "seq": 0, "data": {"version": 9}}, 0
+        )
+    with pytest.raises(SessionFormatError, match="non-negative safe integer"):
+        assert_released_event_payload(
+            {
+                "type": "subagent/descriptor",
+                "seq": 0,
+                "data": {"version": True, "provider": "p", "label": ""},
+            },
+            0,
+        )
+    # Version 1 tolerates unsupported descriptor versions only above v0.
+    assert_released_event_payload(
+        {"type": "subagent/descriptor", "seq": 0, "data": {"version": 9}}, 1
+    )
+    # Supported subagent/descriptor versions 1, 2, 3 follow v0/v1 rules.
+    assert_released_event_payload(
+        {
+            "type": "subagent/descriptor",
+            "seq": 0,
+            "data": {"version": 1, "provider": "p", "label": "", "agentProvider": ""},
+        },
+        0,
+    )
+    assert_released_event_payload(
+        {
+            "type": "subagent/descriptor",
+            "seq": 0,
+            "data": {"version": 2, "mode": "one-shot", "provider": "p", "label": ""},
+        },
+        0,
+    )
+    assert_released_event_payload(
+        {
+            "type": "subagent/descriptor",
+            "seq": 0,
+            "data": {"version": 2, "mode": "one-shot", "provider": "p"},
+        },
+        0,
+    )
+    assert_released_event_payload(
+        {
+            "type": "subagent/descriptor",
+            "seq": 0,
+            "data": {
+                "version": 2,
+                "mode": "continuable",
+                "provider": "p",
+                "label": "",
+                "toolFilter": {"allow": [""], "deny": ["x"]},
+            },
+        },
+        0,
+    )
+    assert_released_event_payload(
+        {
+            "type": "subagent/descriptor",
+            "seq": 0,
+            "data": {
+                "version": 3,
+                "mode": "continuable",
+                "provider": "p",
+                "label": "child",
+                "agentProvider": "p",
+                "agentModel": "m",
+                "agentReasoningEffort": "high",
+                "persona": "helper",
+                "toolFilter": {"allow": ["bash"]},
+            },
+        },
+        0,
+    )
+    for bad_descriptor, match in [
+        ({"version": 3, "mode": "one-shot", "provider": ""}, "provider"),
+        ({"version": 3, "mode": "external", "provider": "p"}, "mode"),
+        ({"version": 2, "mode": "one-shot", "provider": "p", "label": 1}, "label"),
+        (
+            {
+                "version": 3,
+                "mode": "continuable",
+                "provider": "p",
+                "label": "x",
+                "agentProvider": "p",
+            },
+            "agentProvider and agentModel must be paired",
+        ),
+        (
+            {
+                "version": 3,
+                "mode": "continuable",
+                "provider": "p",
+                "label": "x",
+                "toolFilter": {},
+            },
+            "toolFilter requires allow or deny",
+        ),
+        (
+            {
+                "version": 3,
+                "mode": "continuable",
+                "provider": "p",
+                "label": "x",
+                "toolFilter": {"allow": [""]},
+            },
+            "allow",
+        ),
+        (
+            {
+                "version": 3,
+                "mode": "continuable",
+                "provider": "p",
+                "label": "x",
+                "toolFilter": {"deny": "not-list"},
+            },
+            "deny",
+        ),
+    ]:
+        with pytest.raises(SessionFormatError, match=match):
+            assert_released_event_payload(
+                {"type": "subagent/descriptor", "seq": 0, "data": bad_descriptor}, 0
+            )
     # Version 1 accepts the optional sessionFormatVersion on a delivery marker.
     assert_released_event_payload(
         {
