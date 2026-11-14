@@ -16,6 +16,7 @@ import os
 import re
 from typing import Annotated, Any, Self
 
+from anima import Context, Disposer
 from pydantic import (
     AfterValidator,
     BaseModel,
@@ -29,6 +30,7 @@ from pydantic import (
 from magitech_harness.session.events import SessionEvent
 from magitech_harness.session.projection_registry import (
     ProjectionDefinition,
+    ProjectionHandle,
     WireView,
 )
 from magitech_harness.session.title import eligible_title_message
@@ -721,3 +723,77 @@ WORKING_DIRECTORY_PROJECTION: ProjectionDefinition[str | None] = ProjectionDefin
     ),
     state_version=1,
 )
+
+
+# ---------------------------------------------------------------------------
+# Row entry points: each unit registers its definition into the registry
+# at activation. The returned disposer releases the registration when
+# the row unloads; the registry refcounts same-key registrations, so a
+# unit shared with another holder stays registered until the last one
+# releases it.
+# ---------------------------------------------------------------------------
+
+
+def apply_title_projection(
+    ctx: Context, config: dict[str, Any] | None = None
+) -> Disposer:
+    """Register the title unit into the projection registry."""
+    handle: ProjectionHandle[dict[str, Any]] = ctx.sessionProjections.register(
+        TITLE_PROJECTION
+    )
+    return handle.dispose
+
+
+apply_title_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+
+
+def apply_title_input_projection(
+    ctx: Context, config: dict[str, Any] | None = None
+) -> Disposer:
+    """Register the title-input unit into the projection registry."""
+    handle: ProjectionHandle[dict[str, Any]] = ctx.sessionProjections.register(
+        TITLE_INPUT_PROJECTION
+    )
+    return handle.dispose
+
+
+apply_title_input_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+
+
+def apply_session_stats_projection(
+    ctx: Context, config: dict[str, Any] | None = None
+) -> Disposer:
+    """Register the session-stats unit into the projection registry."""
+    handle: ProjectionHandle[dict[str, Any]] = ctx.sessionProjections.register(
+        SESSION_STATS_PROJECTION
+    )
+    return handle.dispose
+
+
+apply_session_stats_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+
+
+def apply_turn_outline_projection(
+    ctx: Context, config: dict[str, Any] | None = None
+) -> Disposer:
+    """Register the turn-outline unit into the projection registry."""
+    handle: ProjectionHandle[dict[str, Any]] = ctx.sessionProjections.register(
+        TURN_OUTLINE_PROJECTION
+    )
+    return handle.dispose
+
+
+apply_turn_outline_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]
+
+
+def apply_working_directory_projection(
+    ctx: Context, config: dict[str, Any] | None = None
+) -> Disposer:
+    """Register the working-directory unit into the projection registry."""
+    handle: ProjectionHandle[dict[str, Any]] = ctx.sessionProjections.register(
+        WORKING_DIRECTORY_PROJECTION
+    )
+    return handle.dispose
+
+
+apply_working_directory_projection.inject = ["sessionProjections"]  # type: ignore[attr-defined]

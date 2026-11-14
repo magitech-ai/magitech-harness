@@ -7,13 +7,16 @@ from magitech_harness.agent.loop import AgentLoopService, _RequestState
 from magitech_harness.llm.service import LLMService, MockLLMProvider, NoProviderError
 from magitech_harness.llm.types import ModelChunk, ModelResponse, UsageData
 from magitech_harness.session.events import EventType, SessionEvent, ToolCallData
+from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
+from magitech_harness.session.title import SessionTitleService
 
 
 @pytest.mark.asyncio
 async def test_agent_loop_single_step_no_tools() -> None:
     """Verifies a 1-step turn when the LLM returns plain text with no tool calls."""
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -110,6 +113,7 @@ async def test_agent_loop_single_step_no_tools() -> None:
 async def test_agent_loop_pre_step_reject_short_circuit() -> None:
     """Verifies that pre-step waterfall veto immediately stops the turn."""
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -145,6 +149,7 @@ async def test_agent_loop_max_steps_termination() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -176,6 +181,7 @@ async def test_agent_loop_max_steps_termination() -> None:
 async def test_agent_loop_stream_turn_single_step() -> None:
     """Verifies stream_turn yielding token chunks for a single step turn."""
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -206,6 +212,7 @@ async def test_agent_loop_stream_turn_single_step() -> None:
 async def test_agent_loop_stream_turn_with_usage() -> None:
     """Verifies stream_turn yields usage event and persists usage telemetry."""
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -239,6 +246,7 @@ async def test_agent_loop_stream_turn_with_tool_calls() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -295,6 +303,7 @@ async def test_agent_loop_abort_signal_cancellation() -> None:
     from magitech_harness.agent.cancellation import AbortError, AbortSignal
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -320,6 +329,7 @@ async def test_agent_loop_abort_signal_cancellation() -> None:
 async def test_agent_loop_stream_turn_pre_step_reject() -> None:
     """Verifies that pre-step waterfall veto in stream_turn stops execution."""
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -346,6 +356,7 @@ async def test_agent_loop_stream_turn_max_steps_termination() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -381,6 +392,7 @@ async def test_agent_loop_signal_active_during_tool_execution() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -502,7 +514,16 @@ class _FakeTitleProvider:
 
 async def _ctx_with_mock() -> tuple[Context, MockLLMProvider]:
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
+    ctx.use(
+        SessionTitleService,
+        {
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 40,
+            "max_title_bytes": 80,
+        },
+    )
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
     await ctx.flush()
@@ -556,6 +577,7 @@ async def test_agent_loop_tool_call_canonical_log() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -784,6 +806,7 @@ async def test_agent_loop_developer_tool_addition_and_removal() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -849,6 +872,7 @@ async def test_agent_loop_tools_only_change_keeps_tool_baseline() -> None:
     from magitech_harness.tools.service import ToolService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(ToolService)
@@ -892,6 +916,7 @@ async def test_agent_loop_system_prompt_normalization_across_turns() -> None:
     from magitech_harness.system_prompt.service import SystemPromptService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(SystemPromptService)
@@ -939,6 +964,7 @@ async def test_agent_loop_resumed_turn_system_change_marks_series() -> None:
     from magitech_harness.system_prompt.service import SystemPromptService
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(SystemPromptService)
@@ -976,14 +1002,14 @@ async def test_agent_loop_title_fires_through_run_turn() -> None:
     ctx, mock_llm = await _ctx_with_mock()
     mock_llm.queue_response(text="Direct answer")
     provider = _FakeTitleProvider()
-    ctx.sessions.title_service.register(provider)
+    ctx.sessionTitle.register(provider)
 
     session = ctx.sessions.create("sess_title_turn")
     await ctx.agent_loop.run_turn(session, "Explain quantum computing simply")
-    await ctx.sessions.title_service.drain()
+    await ctx.sessionTitle.drain()
 
     assert len(provider.requests) == 1
-    title = ctx.sessions.title_service.get(session)
+    title = ctx.sessionTitle.get(session)
     assert title is not None
     assert title["title"] == "Provider Title"
     assert title["source"]["kind"] == "provider"
@@ -1080,6 +1106,7 @@ async def test_loop_next_turn_reads_max_from_log() -> None:
     from magitech_harness.session.store import Session
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -1185,6 +1212,7 @@ async def test_agent_loop_model_resolution() -> None:
     # No slug: the header and the dispatch use the provider's declared
     # default, never the registration name.
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -1202,6 +1230,7 @@ async def test_agent_loop_model_resolution() -> None:
 
     # Explicit slug for a registered provider resolves exactly.
     ctx2 = Context()
+    ctx2.use(SessionProjectionRegistry)
     ctx2.use(SessionService)
     ctx2.use(LLMService)
     ctx2.use(AgentLoopService)
@@ -1220,6 +1249,7 @@ async def test_agent_loop_model_resolution() -> None:
     # Unregistered vendor segment: the whole slug is the model, and the
     # dispatch passes it verbatim to the active provider.
     ctx3 = Context()
+    ctx3.use(SessionProjectionRegistry)
     ctx3.use(SessionService)
     ctx3.use(LLMService)
     ctx3.use(AgentLoopService)
@@ -1237,6 +1267,7 @@ async def test_agent_loop_model_resolution() -> None:
 
     # A legacy ``model`` attribute is accepted where no default exists.
     ctx4 = Context()
+    ctx4.use(SessionProjectionRegistry)
     ctx4.use(SessionService)
     ctx4.use(LLMService)
     ctx4.use(AgentLoopService)
@@ -1254,6 +1285,7 @@ async def test_agent_loop_model_resolution() -> None:
 
     # No slug and no determinable model: fail loud before any header.
     ctx5 = Context()
+    ctx5.use(SessionProjectionRegistry)
     ctx5.use(SessionService)
     ctx5.use(LLMService)
     ctx5.use(AgentLoopService)
@@ -1269,6 +1301,7 @@ async def test_agent_loop_model_resolution() -> None:
 async def test_agent_loop_no_provider_logs_no_header() -> None:
     """Verifies a turn with no provider fails before any request exists."""
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)
@@ -1306,6 +1339,7 @@ async def test_agent_loop_abort_during_call_ends_aborted() -> None:
             yield  # makes this an async generator; unreachable by design
 
     ctx = Context()
+    ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
     ctx.use(AgentLoopService)

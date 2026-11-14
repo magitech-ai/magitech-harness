@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from weakref import WeakKeyDictionary
 
+from anima import Context, Service
+
 from magitech_harness.session.events import SessionEvent
 
 if TYPE_CHECKING:
@@ -139,16 +141,18 @@ class ProjectionHandle[S]:
         self._registry._release(self._registration)
 
 
-class SessionProjectionRegistry:
+class SessionProjectionRegistry(Service):
     """The projection unit table and its drive.
 
-    Subscribes once to ``session/event``; every committed event passes
-    every registered unit's ``apply``. Cells build lazily: a unit
-    registered after events flowed, or a session older than the
-    registry, folds ``init`` over the in-memory log on first touch.
+    A row service providing ``sessionProjections``. Subscribes once to
+    ``session/event``; every committed event passes every registered
+    unit's ``apply``. Cells build lazily: a unit registered after events
+    flowed, or a session older than the registry, folds ``init`` over
+    the in-memory log on first touch.
     """
 
-    def __init__(self, ctx: Any) -> None:
+    def __init__(self, ctx: Context) -> None:
+        super().__init__(ctx, "sessionProjections")
         self._ctx = ctx
         self._registrations: dict[str, _Registration] = {}
         self._listeners: set[Callable[..., None]] = set()

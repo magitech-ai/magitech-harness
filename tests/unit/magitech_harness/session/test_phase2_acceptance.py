@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context
 
 from magitech_harness import create_harness
 from magitech_harness.agent.cancellation import AbortSignal
@@ -693,37 +692,42 @@ async def test_acceptance_rename_pins_against_auto_title(tmp_path: Path) -> None
     provider call, and a fresh service loading the same log still reads
     the pinned title — the title lives in the log, not in memory.
     """
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    service = ctx.sessions
+    title = ctx.sessionTitle
     session = service.create("pinned")
     provider = _FakeTitleProvider()
     provider.gate = asyncio.Event()
-    service.title_service.register(provider)
+    title.register(provider)
     _log_user(service, session, "Explain quantum computing simply")
     _log_header(service, session)
     await asyncio.sleep(0)
     assert len(provider.requests) == 1
-    service.title_service.rename(session, "My Pinned Title")
+    title.rename(session, "My Pinned Title")
     provider.gate.set()
-    await service.title_service.drain()
-    assert service.title_service.get(session)["title"] == "My Pinned Title"
-    assert service.title_service.get(session)["source"] == {"kind": "user"}
+    await title.drain()
+    assert title.get(session)["title"] == "My Pinned Title"
+    assert title.get(session)["source"] == {"kind": "user"}
     _log_user(service, session, "And now explain relativity")
     _log_header(service, session)
-    await service.title_service.drain()
+    await title.drain()
     _log_user(service, session, "And now explain black holes")
     _log_header(service, session)
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
-    assert service.title_service.get(session)["title"] == "My Pinned Title"
+    assert title.get(session)["title"] == "My Pinned Title"
     title_events = [event for event in session.events if event.type == "session/title"]
     assert len(title_events) == 2  # fallback + rename
 
     await service.flush()
     assert service.close("pinned") is True
-    reloaded_service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    ctx2 = create_harness(storage_dir=tmp_path)
+    await ctx2.flush()
+    reloaded_service = ctx2.sessions
     loaded = reloaded_service.load("pinned")
     assert loaded is not None
-    assert reloaded_service.title_service.get(loaded)["title"] == "My Pinned Title"
+    assert ctx2.sessionTitle.get(loaded)["title"] == "My Pinned Title"
     assert [
         event.payload["title"]
         for event in loaded.events

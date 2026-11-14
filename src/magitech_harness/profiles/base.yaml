@@ -17,16 +17,42 @@
 - id: layers
   name: magitech_harness.components.layers:LayerResolutionService
   config: {}
+- id: session-projections
+  # Listed before the sessions row: the sessions service resolves the
+  # registry at construction, so this row must already be active then.
+  name: magitech_harness.session.projection_registry:SessionProjectionRegistry
+  config: {}
 - id: sessions
   name: magitech_harness.session.service:SessionService
   config:
     base_storage_dir: ${MAGITECH_SESSIONS_DIR}
-    title_fallback_max_words: 5
-    title_fallback_max_bytes: 40
-    title_max_title_bytes: 80
     live_batch_delay: 0.2
     projection_cache_write_every_events: 200
     projection_cache_write_interval_ms: 5000
+- id: projection-title
+  name: magitech_harness.session.projections:apply_title_projection
+  config: {}
+- id: projection-title-input
+  name: magitech_harness.session.projections:apply_title_input_projection
+  config: {}
+- id: projection-session-stats
+  name: magitech_harness.session.projections:apply_session_stats_projection
+  config: {}
+- id: projection-turn-outline
+  name: magitech_harness.session.projections:apply_turn_outline_projection
+  config: {}
+- id: projection-working-directory
+  name: magitech_harness.session.projections:apply_working_directory_projection
+  config: {}
+- id: session-title
+  name: magitech_harness.session.title:SessionTitleService
+  config:
+    fallback_max_words: 5
+    fallback_max_bytes: 40
+    max_title_bytes: 80
+- id: session-checkpoint-policy
+  name: magitech_harness.session.checkpoint_policy:apply
+  config: {}
 - id: agent-loop
   name: magitech_harness.agent.loop:AgentLoopService
   config: {}

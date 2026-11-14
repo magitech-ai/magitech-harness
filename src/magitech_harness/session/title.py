@@ -12,9 +12,11 @@ title provider, optionally with the model route that produced it), or
 automatic revision is scheduled, and only an explicit ``refresh`` unpins
 it by re-deriving over it.
 
-The service takes the ``title`` and ``titleInput`` projection handles
-from the session service. It never registers those units itself: a second
-registration of the same key at a different state version throws.
+The service registers the ``title`` and ``titleInput`` units into the
+projection registry itself, sharing them with the units' own rows: the
+registry refcounts same-key registrations, so a second registration of
+the same definition at the same state version shares the unit instead
+of throwing.
 """
 
 from __future__ import annotations
@@ -26,9 +28,9 @@ import re
 import threading
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
-from typing import Any, Literal, NotRequired, Protocol, TypedDict
+from typing import Any, ClassVar, Literal, NotRequired, Protocol, TypedDict
 
-from anima import Context, Disposer, EventMode
+from anima import Context, Disposer, EventMode, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.slug import parse_model_slug
@@ -402,14 +404,15 @@ class _SessionWork:
     active: _ActiveWork | None = None
 
 
-class SessionTitleService:
+class SessionTitleService(Service):
     """Log-backed session title service.
 
-    Owns the ``title`` and ``titleInput`` projection handles handed over
-    by the session service, the sole optional title provider, and the
-    automatic scheduling that derives titles from eligible human
-    messages. A session append cannot reenter while another append is
-    being published, so fallback work scheduled from a ``session/event``
+    A row service providing ``sessionTitle``. Owns the ``title`` and
+    ``titleInput`` projection handles it registers into the projection
+    registry, the sole optional title provider, and the automatic
+    scheduling that derives titles from eligible human messages. A
+    session append cannot reenter while another append is being
+    published, so fallback work scheduled from a ``session/event``
     listener runs deferred: on the running event loop when one exists,
     otherwise on a short-delay timer thread.
     """
@@ -419,24 +422,46 @@ class SessionTitleService:
     # deferred append no longer reenters the publish.
     _DEFER_DELAY_S = 0.05
 
+    inject: ClassVar[list[str]] = ["sessions", "sessionProjections"]
+
     def __init__(
         self,
         ctx: Context,
-        store: SessionStore,
-        title_handle: ProjectionHandle[str | None],
-        title_input_handle: ProjectionHandle[dict[str, Any]],
-        config: dict[str, Any] | None,
+        config: dict[str, Any] | None = None,
     ) -> None:
         """Build the service; ``config`` is required and has no defaults here.
 
-        The composition layer supplies the shipped values. Raises
-        ``ValueError`` when the config is missing or invalid.
+        The composition layer supplies the shipped values. The store
+        comes from the sessions service and the handles from the
+        projection registry on the same context. Raises ``ValueError``
+        when the config is missing or invalid, and ``RuntimeError``
+        when the context carries no sessions service or registry.
         """
+        super().__init__(ctx, "sessionTitle")
         self._ctx = ctx
-        self._store = store
-        self._title_handle = title_handle
-        self._title_input_handle = title_input_handle
         self._config = resolve_title_config(config)
+        sessions = ctx.get("sessions", None, strict=False)
+        if sessions is None:
+            raise RuntimeError("session-title requires the sessions service")
+        self._store: SessionStore = sessions.store
+        registry = ctx.get("sessionProjections", None, strict=False)
+        if registry is None:
+            raise RuntimeError("session-title requires the sessionProjections service")
+        # The definitions live in the projections module, which imports
+        # the eligibility helper defined here; a top-level import would
+        # be circular, so they are imported once the service is being
+        # built (both modules are loaded by then).
+        from magitech_harness.session.projections import (
+            TITLE_INPUT_PROJECTION,
+            TITLE_PROJECTION,
+        )
+
+        self._title_handle: ProjectionHandle[str | None] = registry.register(
+            TITLE_PROJECTION
+        )
+        self._title_input_handle: ProjectionHandle[dict[str, Any]] = registry.register(
+            TITLE_INPUT_PROJECTION
+        )
         self._registration: _ProviderRegistration | None = None
         self._work: dict[Session, _SessionWork] = {}
         self._disposed = False
@@ -447,6 +472,9 @@ class SessionTitleService:
             ctx.on("session/disposed", self._on_session_disposed),
             ctx.on("llm/stream", self._on_llm_stream, mode=EventMode.WATERFALL),
         ]
+        # Row unload runs this: in-flight work must stop committing once
+        # the row is gone, which listener removal alone would not ensure.
+        ctx.effect(lambda: self.dispose)
 
     def dispose(self) -> None:
         """Remove all listeners and abort pending work. Idempotent.
@@ -460,6 +488,8 @@ class SessionTitleService:
         for disposer in self._disposers:
             disposer()
         self._disposers.clear()
+        self._title_handle.dispose()
+        self._title_input_handle.dispose()
         if self._registration is not None:
             self._registration.closing = True
         self._registration = None

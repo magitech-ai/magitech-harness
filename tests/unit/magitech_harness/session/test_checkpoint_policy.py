@@ -532,8 +532,10 @@ async def test_policy_dispose_removes_all_wrappers(tmp_path: Path) -> None:
     assert provider.calls == 1
     assert [chunk.text for chunk in chunks] == ["hello"]
 
-    ctx.sessions.checkpoint_policy.dispose()
-    ctx.sessions.checkpoint_policy.dispose()
+    # Disabling the row unloads the wiring (and is idempotent).
+    await ctx.loader.disable("session-checkpoint-policy")
+    await ctx.loader.disable("session-checkpoint-policy")
+    await ctx.flush()
 
     chunks = await _drain(ctx.llm.stream(messages=[], session_id=session.session_id))
     assert flushes == [session.session_id]

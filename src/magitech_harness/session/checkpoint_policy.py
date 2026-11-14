@@ -58,32 +58,22 @@ async def _checkpointed_stream(
         yield chunk
 
 
-class SessionCheckpointPolicy:
-    """Flush-before-dispatch policy for model, tool, and step boundaries.
+def apply(ctx: Context, config: dict[str, Any] | None = None) -> Disposer:
+    """Install the flush-before-dispatch policy as a pure wiring row.
 
-    Installed once per context by the session service, which owns the
-    store the policy flushes through. The policy never dispatches the
-    raw ``session/flush`` event itself; it calls ``store.flush`` only.
+    Joins the three dispatch boundaries as waterfall listeners on the
+    context event bus, flushing through the sessions service's store —
+    the single durability entry point. The policy owns no service and
+    no state; it never dispatches the raw ``session/flush`` event
+    itself, it calls ``store.flush`` only. Returns a disposer removing
+    all three listeners; the loader runs it when the row unloads.
     """
-
-    def __init__(self, ctx: Context, store: SessionStore) -> None:
-        """Register the three checkpoint listeners on the context bus."""
-        self._ctx = ctx
-        self._store = store
-        self._disposers: list[Disposer] = [
-            ctx.on("llm/stream", self._on_llm_stream, mode=EventMode.WATERFALL),
-            ctx.on("tools/execute", self._on_tools_execute, mode=EventMode.WATERFALL),
-            ctx.on("agent/pre-step", self._on_pre_step, mode=EventMode.WATERFALL),
-        ]
-
-    def dispose(self) -> None:
-        """Remove all three checkpoint listeners. Idempotent."""
-        for dispose in self._disposers:
-            dispose()
-        self._disposers.clear()
+    sessions = ctx.get("sessions", None, strict=False)
+    if sessions is None:
+        raise RuntimeError("session-checkpoint-policy requires the sessions service")
+    store: SessionStore = sessions.store
 
     async def _on_llm_stream(
-        self,
         options: dict[str, Any],
         next_fn: Callable[..., Awaitable[AsyncIterator[ModelChunk]]],
     ) -> AsyncIterator[ModelChunk]:
@@ -91,31 +81,46 @@ class SessionCheckpointPolicy:
         session_id = options.get("session_id")
         if session_id is None:
             return await next_fn()
-        session = self._store.get(session_id)
+        session = store.get(session_id)
         if session is None:
             return await next_fn()
-        return _checkpointed_stream(self._store, session, next_fn)
+        return _checkpointed_stream(store, session, next_fn)
 
     async def _on_tools_execute(
-        self, execution: dict[str, Any], next_fn: Callable[..., Awaitable[Any]]
+        execution: dict[str, Any], next_fn: Callable[..., Awaitable[Any]]
     ) -> Any:
         """Checkpoint a top-level tool call, then re-check for cancellation."""
         session = execution.get("session")
         if session is None or execution.get("parent") is not None:
             return await next_fn()
-        await self._store.flush(session)
+        await store.flush(session)
         signal = execution.get("signal")
         if signal is not None and signal.is_aborted:
             return aborted_before_dispatch_result(execution["call"])
         return await next_fn()
 
     async def _on_pre_step(
-        self,
         decision: dict[str, Any],
         next_fn: Callable[..., Awaitable[dict[str, Any]]],
     ) -> dict[str, Any]:
         """Flush the step's session before the step begins."""
         session = decision.get("session")
         if session is not None:
-            await self._store.flush(session)
+            await store.flush(session)
         return await next_fn()
+
+    disposers: list[Disposer] = [
+        ctx.on("llm/stream", _on_llm_stream, mode=EventMode.WATERFALL),
+        ctx.on("tools/execute", _on_tools_execute, mode=EventMode.WATERFALL),
+        ctx.on("agent/pre-step", _on_pre_step, mode=EventMode.WATERFALL),
+    ]
+
+    def dispose_all() -> None:
+        """Remove all three checkpoint listeners."""
+        for dispose in disposers:
+            dispose()
+
+    return dispose_all
+
+
+apply.inject = ["llm", "sessions", "tools"]  # type: ignore[attr-defined]

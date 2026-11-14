@@ -485,6 +485,25 @@ def _stats_view(events: list[SessionEvent]) -> dict[str, Any]:
     return SESSION_STATS_PROJECTION.wire.view(state)
 
 
+def test_session_stats_malformed_step_boundary_is_ignored() -> None:
+    """Step boundaries without an integer (turn, step) pair fold to nothing."""
+    events = [
+        _event("step/start", {"turn": 1, "step": "x"}, 0, 1200),
+        _event("step/start", {"turn": "x", "step": 1}, 1, 1300),
+        _event("assistant/attempt", {"turn": 1, "step": 1, "stream": []}, 2, 1400),
+    ]
+    assert _stats_view(events) == {
+        "turns": 0,
+        "steps": 0,
+        "llm_ms": 0.0,
+        "tool_ms": 0.0,
+        "ttft_ms": 0.0,
+        "ttft_steps": 0,
+        "decode_ms": 0.0,
+        "decode_tokens": 0,
+    }
+
+
 def test_session_stats_first_token_without_usage_accrues_no_decode() -> None:
     """A first token with no usage counts ttft but no decode time/tokens."""
     events = [
@@ -1406,14 +1425,14 @@ def test_init_returns_fresh_objects() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_service_wires_the_five_units() -> None:
-    """SessionService exposes the registry with all five units driving."""
-    from magitech_harness.session.service import SessionService
+def test_rows_wire_the_five_units() -> None:
+    """The bundle rows expose the registry with all five units driving."""
+    from magitech_harness import create_harness
 
-    service = SessionService(Context())
-    assert service.projections.summary_keys() == frozenset(
-        {"title", "workingDirectory"}
-    )
+    ctx = create_harness()
+    service = ctx.sessions
+    registry = ctx.sessionProjections
+    assert registry.summary_keys() == frozenset({"title", "workingDirectory"})
     session = service.create("svc-1")
     service.log_event(session, "turn/start", {"turn": 1})
     service.log_event(
@@ -1425,8 +1444,8 @@ def test_service_wires_the_five_units() -> None:
         },
         surface_op="append",
     )
-    snapshot = service.projections.snapshot(session)
+    snapshot = registry.snapshot(session)
     assert snapshot["values"]["turnOutline"] == [
         {"turn": 1, "seq": 0, "prompt": "Hello", "response": ""}
     ]
-    assert service._title_input_handle.state_of(session)["count"] == 1
+    assert registry.checkpoint(session)["titleInput"]["val"]["count"] == 1

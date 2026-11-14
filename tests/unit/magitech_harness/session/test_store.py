@@ -27,6 +27,7 @@ from magitech_harness.session.messages import (
     create_user_message,
 )
 from magitech_harness.session.persistence import SessionPersistenceNotFoundError
+from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import (
     Session,
@@ -39,6 +40,7 @@ from magitech_harness.session.store import (
     plugin_record_of,
 )
 from magitech_harness.session.surface import SurfaceError, fold_surface
+from magitech_harness.session.title import SessionTitleService
 
 
 def _ev(
@@ -1342,7 +1344,16 @@ async def test_session_appends_all_62_types_and_replays_in_order(
 ) -> None:
     """Verifies a session appends every known type and replays them in order."""
     ctx = Context()
+    SessionProjectionRegistry(ctx)
     service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    title = SessionTitleService(
+        ctx,
+        {
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 40,
+            "max_title_bytes": 80,
+        },
+    )
     # Reloading a log holding image/offload needs its projection supplied.
     service.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
     session = service.create("all62")
@@ -1363,7 +1374,7 @@ async def test_session_appends_all_62_types_and_replays_in_order(
     # The canonical user/message is title-eligible, so the title service
     # commits a deterministic fallback title for it; drain the deferred
     # work, persist it, and expect it as the log's final event.
-    await service.title_service.drain()
+    await title.drain()
     await service.flush(session)
     assert service.close("all62") is True
     ctx2 = Context()

@@ -17,11 +17,10 @@ import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from anima import Context, Service
 
-from magitech_harness.session.checkpoint_policy import SessionCheckpointPolicy
 from magitech_harness.session.events import (
     SURFACE_EVENT_TYPES,
     EventType,
@@ -48,20 +47,13 @@ from magitech_harness.session.projection_cache import (
     ProjectionCacheConfig,
     SessionProjectionCache,
 )
-from magitech_harness.session.projection_registry import (
-    ProjectionHandle,
-    ProjectionSnapshot,
-    SessionProjectionRegistry,
-)
-from magitech_harness.session.projections import (
-    SESSION_STATS_PROJECTION,
-    TITLE_INPUT_PROJECTION,
-    TITLE_PROJECTION,
-    TURN_OUTLINE_PROJECTION,
-    WORKING_DIRECTORY_PROJECTION,
-)
+from magitech_harness.session.projection_registry import ProjectionSnapshot
 from magitech_harness.session.store import Session, SessionStore
-from magitech_harness.session.title import SessionTitleService
+
+if TYPE_CHECKING:
+    from magitech_harness.session.projection_registry import (
+        SessionProjectionRegistry,
+    )
 
 logger = logging.getLogger("harness.session")
 
@@ -76,9 +68,15 @@ class SessionService(Service):
     no root configured the service runs in memory only — sessions work
     exactly the same, nothing is persisted, and no tracker is installed.
 
-    Title config keys (all optional here; the title service itself
-    requires them): ``title_fallback_max_words`` (5),
-    ``title_fallback_max_bytes`` (40), ``title_max_title_bytes`` (80).
+    The projection registry is not owned here: it arrives from the
+    ``sessionProjections`` row, which the bundle lists before this
+    row so the registry is active when this service constructs. The
+    service deliberately declares no inject for it: a host that mounts
+    this service alone (direct construction, or ``ctx.use`` without
+    the registry row) still gets a working service. The projection
+    cache is installed only when a registry is present; without one,
+    projection reads fail loud at use while the store and persistence
+    keep working.
     """
 
     def __init__(self, ctx: Context, config: dict | None = None) -> None:
@@ -91,38 +89,21 @@ class SessionService(Service):
         root = cfg.get("base_storage_dir") or None
         self.base_storage_dir = Path(root) if root is not None else None
         self._store = SessionStore(ctx)
-        self._checkpoint_policy = SessionCheckpointPolicy(ctx, self._store)
-        self._projections = SessionProjectionRegistry(ctx)
-        self._title_handle: ProjectionHandle[str | None] = self._projections.register(
-            TITLE_PROJECTION
-        )
-        self._title_input_handle: ProjectionHandle[dict[str, Any]] = (
-            self._projections.register(TITLE_INPUT_PROJECTION)
-        )
-        self._session_stats_handle: ProjectionHandle[dict[str, Any]] = (
-            self._projections.register(SESSION_STATS_PROJECTION)
-        )
-        self._turn_outline_handle: ProjectionHandle[dict[str, Any]] = (
-            self._projections.register(TURN_OUTLINE_PROJECTION)
-        )
-        self._working_directory_handle: ProjectionHandle[str | None] = (
-            self._projections.register(WORKING_DIRECTORY_PROJECTION)
-        )
-        # The title service takes the title and titleInput handles from
-        # here; it never registers those units itself. Title limits are
-        # required config with no library defaults: the service supplies
-        # the shipped 5/40/80 when its config omits them.
-        self._title_service = SessionTitleService(
-            ctx,
-            self._store,
-            self._title_handle,
-            self._title_input_handle,
-            {
-                "fallback_max_words": cfg.get("title_fallback_max_words", 5),
-                "fallback_max_bytes": cfg.get("title_fallback_max_bytes", 40),
-                "max_title_bytes": cfg.get("title_max_title_bytes", 80),
-            },
-        )
+        # The bundle lists the registry row before this one, so the row
+        # path always resolves it here. A context that carries the slot
+        # but does not resolve it is a framework inconsistency, not a
+        # missing row: fail loud instead of silently running without
+        # projections.
+        if ctx.has("sessionProjections"):
+            registry = ctx.get("sessionProjections", None, strict=False)
+            if registry is None:
+                raise RuntimeError(
+                    "sessions service: sessionProjections is present but "
+                    "unresolvable on this context"
+                )
+            self._projections: SessionProjectionRegistry | None = registry
+        else:
+            self._projections = None
         self._active_sessions: dict[str, Session] = {}
         self._handles: dict[str, JsonlSessionHandle] = {}
         self._persistence: JsonlSessionPersistence | None = None
@@ -136,40 +117,35 @@ class SessionService(Service):
             )
             self._tracker = JsonlLiveTracker(self._persistence)
             self._tracker_dispose = self._tracker.install(ctx)
-            self._projection_cache = SessionProjectionCache(
-                self._projections,
-                self.base_storage_dir,
-                ProjectionCacheConfig(
-                    write_every_events=cfg.get(
-                        "projection_cache_write_every_events", 200
+            if self._projections is not None:
+                self._projection_cache = SessionProjectionCache(
+                    self._projections,
+                    self.base_storage_dir,
+                    ProjectionCacheConfig(
+                        write_every_events=cfg.get(
+                            "projection_cache_write_every_events", 200
+                        ),
+                        write_interval_ms=cfg.get(
+                            "projection_cache_write_interval_ms", 5000
+                        ),
                     ),
-                    write_interval_ms=cfg.get(
-                        "projection_cache_write_interval_ms", 5000
-                    ),
-                ),
-                flush_log=self._flush_log_for_cache,
-            )
-            self._projection_cache.install(ctx)
+                    flush_log=self._flush_log_for_cache,
+                )
+                self._projection_cache.install(ctx)
 
     @property
     def store(self) -> SessionStore:
         """The live-session store this service shells over."""
         return self._store
 
-    @property
-    def checkpoint_policy(self) -> SessionCheckpointPolicy:
-        """The durability checkpoint policy installed on this context."""
-        return self._checkpoint_policy
-
-    @property
-    def projections(self) -> SessionProjectionRegistry:
-        """The registry driving the five units over committed events."""
+    def _require_projections(self) -> SessionProjectionRegistry:
+        """The registry, or a loud failure when the context carries none."""
+        if self._projections is None:
+            raise RuntimeError(
+                "session projections are unavailable: no "
+                "sessionProjections service on this context"
+            )
         return self._projections
-
-    @property
-    def title_service(self) -> SessionTitleService:
-        """The log-backed title service for sessions this service owns."""
-        return self._title_service
 
     @property
     def projection_cache(self) -> SessionProjectionCache | None:
@@ -313,10 +289,10 @@ class SessionService(Service):
             event_state, events = handle.read()
             session = self._enter_restored(session_id, handle, event_state, events)
             cache = self._projection_cache
-            # A persistence root always installs a cache; a memory-only
-            # service returns before this point.
-            assert cache is not None
-            cache.hydrate_prepared(session, list(session.events))
+            # A persistence root installs a cache only when the context
+            # carries a registry; without one there are no cells to seed.
+            if cache is not None:
+                cache.hydrate_prepared(session, list(session.events))
         except Exception:
             handle.close()
             raise
@@ -394,21 +370,26 @@ class SessionService(Service):
         anywhere, or when no persistence backend is configured.
         """
         if session_id in self._active_sessions:
-            return self._projections.snapshot(self._active_sessions[session_id])
+            return self._require_projections().snapshot(
+                self._active_sessions[session_id]
+            )
         live = self._store.get(session_id)
         if live is not None:
-            return self._projections.snapshot(live)
+            return self._require_projections().snapshot(live)
         if self._persistence is None:
             return None
+        cache = self._projection_cache
+        if cache is None:
+            raise RuntimeError(
+                "session projections are unavailable: no "
+                "sessionProjections service on this context"
+            )
         try:
             handle = self._persistence.open(session_id, "read")
         except SessionPersistenceNotFoundError:
             return None
         try:
             _event_state, events = handle.read()
-            cache = self._projection_cache
-            # A persistence root always installs a cache.
-            assert cache is not None
             return cache.cold_snapshot(
                 handle.header, handle.inherited_event_count, events
             )

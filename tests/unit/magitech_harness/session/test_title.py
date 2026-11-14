@@ -13,12 +13,8 @@ from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.llm.service import LLMService
 from magitech_harness.session.events import EventType, SessionEvent
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
-from magitech_harness.session.projections import (
-    TITLE_INPUT_PROJECTION,
-    TITLE_PROJECTION,
-)
 from magitech_harness.session.service import SessionService
-from magitech_harness.session.store import Session, SessionStore
+from magitech_harness.session.store import Session
 from magitech_harness.session.title import (
     SessionTitleInvalidError,
     SessionTitleService,
@@ -38,9 +34,27 @@ from magitech_harness.session.title import (
 
 def _service(
     config: dict[str, Any] | None = None,
-) -> tuple[Context, SessionService]:
+) -> tuple[Context, SessionService, SessionTitleService]:
+    """A directly mounted sessions service plus its title service.
+
+    The registry mounts first so the sessions service resolves it from
+    the context; the title service then resolves the store and the
+    registry the same way. Title limits default to the shipped 5/40/80;
+    ``config`` overrides them.
+    """
     ctx = Context()
-    return ctx, SessionService(ctx, config or {})
+    SessionProjectionRegistry(ctx)
+    service = SessionService(ctx)
+    title = SessionTitleService(
+        ctx,
+        {
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 40,
+            "max_title_bytes": 80,
+            **(config or {}),
+        },
+    )
+    return ctx, service, title
 
 
 def _user(
@@ -201,15 +215,15 @@ def test_resolve_title_config_fallback_exceeds_max() -> None:
 
 
 def test_service_config_defaults_rename_cap() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     # The shipped 80-byte default caps a rename.
-    snapshot = service.title_service.rename(session, "x" * 100)
+    snapshot = title.rename(session, "x" * 100)
     assert snapshot["title"] == "x" * 80
 
 
 async def test_service_config_defaults_fallback_words() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(
         session,
@@ -217,45 +231,40 @@ async def test_service_config_defaults_fallback_words() -> None:
         "one two three four five six seven eight nine ten",
     )
     await _pump()
-    assert service.title_service.get(session)["title"] == "one two three four five"
+    assert title.get(session)["title"] == "one two three four five"
 
 
 async def test_service_config_overrides_limits() -> None:
-    _, service = _service(
+    _, service, title = _service(
         {
-            "title_fallback_max_words": 2,
-            "title_fallback_max_bytes": 10,
-            "title_max_title_bytes": 20,
+            "fallback_max_words": 2,
+            "fallback_max_bytes": 10,
+            "max_title_bytes": 20,
         }
     )
     session = service.create("s1")
     _user(session, service, "one two three four five six")
     await _pump()
-    assert service.title_service.get(session)["title"] == "one two"
-    snapshot = service.title_service.rename(session, "a" * 30)
+    assert title.get(session)["title"] == "one two"
+    snapshot = title.rename(session, "a" * 30)
     assert snapshot["title"] == "a" * 20
 
 
 def test_service_config_invalid_raises_at_construction() -> None:
-    ctx = Context()
     with pytest.raises(
         ValueError, match="fallback_max_bytes must not exceed max_title_bytes"
     ):
-        SessionService(
-            ctx,
-            {"title_fallback_max_bytes": 999, "title_max_title_bytes": 10},
+        _service(
+            {"fallback_max_bytes": 999, "max_title_bytes": 10},
         )
 
 
-def test_title_service_direct_construction_requires_config() -> None:
+def test_title_service_requires_config() -> None:
     ctx = Context()
-    registry = SessionProjectionRegistry(ctx)
-    title_handle = registry.register(TITLE_PROJECTION)
-    title_input_handle = registry.register(TITLE_INPUT_PROJECTION)
+    SessionProjectionRegistry(ctx)
+    SessionService(ctx)
     with pytest.raises(ValueError, match="configuration is required"):
-        SessionTitleService(
-            ctx, SessionStore(ctx), title_handle, title_input_handle, None
-        )
+        SessionTitleService(ctx, None)
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +492,7 @@ def test_collect_title_messages_bounds_at_through_seq() -> None:
 
 
 def test_current_route() -> None:
-    _, service = _service()
+    _, service, _title = _service()
     session = service.create("s1")
     assert current_route(session) is None
     # A header record without a config mapping carries no route. A husk
@@ -510,15 +519,15 @@ def test_current_route() -> None:
 
 
 def test_get_before_any_title_is_none() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
-    assert service.title_service.get(session) is None
+    assert title.get(session) is None
 
 
 def test_rename_normalizes_and_pins() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
-    snapshot = service.title_service.rename(session, "  \x1b[1mMy  Title\x1b[0m ")
+    snapshot = title.rename(session, "  \x1b[1mMy  Title\x1b[0m ")
     assert snapshot == {
         "title": "My Title",
         "messageSeqs": [],
@@ -526,48 +535,48 @@ def test_rename_normalizes_and_pins() -> None:
         "eventSeq": 0,
         "updatedAt": snapshot["updatedAt"],
     }
-    assert service.title_service.get(session)["title"] == "My Title"
+    assert title.get(session)["title"] == "My Title"
     event = _title_events(session)[0]
     assert event.payload["source"] == {"kind": "user"}
     assert event.payload["messageSeqs"] == []
 
 
-@pytest.mark.parametrize("title", ["", "   ", "\x1b[31m\x1b[0m", "\x00\x07"])
-def test_rename_empty_after_normalization(title: str) -> None:
-    _, service = _service()
+@pytest.mark.parametrize("text", ["", "   ", "\x1b[31m\x1b[0m", "\x00\x07"])
+def test_rename_empty_after_normalization(text: str) -> None:
+    _, service, title = _service()
     session = service.create("s1")
     with pytest.raises(SessionTitleInvalidError) as excinfo:
-        service.title_service.rename(session, title)
+        title.rename(session, text)
     assert excinfo.value.name == "SessionTitleInvalidError"
     assert "visible characters" in str(excinfo.value)
     assert _title_events(session) == []
 
 
 def test_rename_non_live_session_raises_plain_error() -> None:
-    _, service = _service()
+    _, _sessions, title = _service()
     detached = Session.create("detached")
     with pytest.raises(ValueError, match="is not live in this store"):
-        service.title_service.rename(detached, "Title")
+        title.rename(detached, "Title")
 
 
 def test_rename_disposed_service_raises() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
-    service.title_service.dispose()
+    title.dispose()
     with pytest.raises(RuntimeError, match="session-title service disposed"):
-        service.title_service.rename(session, "Title")
+        title.rename(session, "Title")
 
 
 def test_rename_truncates_to_max_title_bytes() -> None:
-    _, service = _service(
+    _, service, title = _service(
         {
-            "title_fallback_max_words": 5,
-            "title_fallback_max_bytes": 5,
-            "title_max_title_bytes": 5,
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 5,
+            "max_title_bytes": 5,
         }
     )
     session = service.create("s1")
-    snapshot = service.title_service.rename(session, "Hello world")
+    snapshot = title.rename(session, "Hello world")
     assert snapshot["title"] == "Hello"
 
 
@@ -577,31 +586,31 @@ def test_rename_truncates_to_max_title_bytes() -> None:
 
 
 async def test_refresh_without_provider_or_messages_returns_none() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
-    assert await service.title_service.refresh(session) is None
+    assert await title.refresh(session) is None
 
 
 async def test_refresh_without_provider_materializes_fallback() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password for the dashboard?")
     await _pump()
-    assert await service.title_service.refresh(session) is not None
-    snapshot = service.title_service.get(session)
+    assert await title.refresh(session) is not None
+    snapshot = title.get(session)
     assert snapshot["title"] == "How do I reset my"
     assert snapshot["source"] == {"kind": "fallback"}
     assert snapshot["messageSeqs"] == [0]
 
 
 async def test_refresh_unpins_user_title_without_provider() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password for the dashboard?")
     await _pump()
-    service.title_service.rename(session, "My Custom Name")
-    assert service.title_service.get(session)["source"] == {"kind": "user"}
-    snapshot = await service.title_service.refresh(session)
+    title.rename(session, "My Custom Name")
+    assert title.get(session)["source"] == {"kind": "user"}
+    snapshot = await title.refresh(session)
     assert snapshot is not None
     assert snapshot["title"] == "How do I reset my"
     assert snapshot["source"] == {"kind": "fallback"}
@@ -609,45 +618,45 @@ async def test_refresh_unpins_user_title_without_provider() -> None:
 
 
 async def test_refresh_non_live_session_raises() -> None:
-    _, service = _service()
+    _, _sessions, title = _service()
     detached = Session.create("detached")
     with pytest.raises(ValueError, match="is not live in this store"):
-        await service.title_service.refresh(detached)
+        await title.refresh(detached)
 
 
 async def test_refresh_disposed_service_raises() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
-    service.title_service.dispose()
+    title.dispose()
     with pytest.raises(RuntimeError, match="session-title service disposed"):
-        await service.title_service.refresh(session)
+        await title.refresh(session)
 
 
 async def test_refresh_aborted_signal_raises() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     signal = AbortSignal()
     signal.abort("cancelled")
     with pytest.raises(AbortError):
-        await service.title_service.refresh(session, signal)
+        await title.refresh(session, signal)
 
 
 async def test_refresh_with_live_signal_completes() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
-    snapshot = await service.title_service.refresh(session, signal=AbortSignal())
+    snapshot = await title.refresh(session, signal=AbortSignal())
     assert snapshot is not None
     assert snapshot["title"] == "Provider Title"
 
 
 async def test_refresh_signal_aborted_during_user_branch() -> None:
-    ctx, service = _service()
+    ctx, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password for the dashboard?")
-    service.title_service.rename(session, "My Renamed Session")
+    title.rename(session, "My Renamed Session")
     signal = AbortSignal()
 
     def abort_on_fallback(session_arg: Session, event: SessionEvent) -> None:
@@ -659,14 +668,14 @@ async def test_refresh_signal_aborted_during_user_branch() -> None:
 
     ctx.on("session/event", abort_on_fallback)
     with pytest.raises(AbortError):
-        await service.title_service.refresh(session, signal)
+        await title.refresh(session, signal)
     # The fallback landed before the abort was observed.
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
-    await service.title_service.drain()
+    assert title.get(session)["source"] == {"kind": "fallback"}
+    await title.drain()
 
 
 async def test_refresh_signal_aborted_during_fallback_branch() -> None:
-    ctx, service = _service()
+    ctx, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password for the dashboard?")
     signal = AbortSignal()
@@ -680,20 +689,20 @@ async def test_refresh_signal_aborted_during_fallback_branch() -> None:
 
     ctx.on("session/event", abort_on_fallback)
     with pytest.raises(AbortError):
-        await service.title_service.refresh(session, signal)
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
-    await service.title_service.drain()
+        await title.refresh(session, signal)
+    assert title.get(session)["source"] == {"kind": "fallback"}
+    await title.drain()
 
 
 async def test_refresh_with_provider_uses_current_route() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
     await _pump()
-    snapshot = await service.title_service.refresh(session)
+    snapshot = await title.refresh(session)
     assert snapshot is not None
     assert snapshot["title"] == "Provider Title"
     assert snapshot["source"] == {"kind": "provider", "provider": "fake-provider"}
@@ -703,36 +712,36 @@ async def test_refresh_with_provider_uses_current_route() -> None:
 
 
 async def test_refresh_provider_failure_propagates_and_fallback_stands() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(fail=RuntimeError("model down"))
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "How do I reset my password for the dashboard?")
     await _pump()
     # No header arrived, so no automatic run started; the fallback stands.
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
+    assert title.get(session)["source"] == {"kind": "fallback"}
     with pytest.raises(RuntimeError, match="model down"):
-        await service.title_service.refresh(session)
-    assert service.title_service.get(session)["title"] == "How do I reset my"
+        await title.refresh(session)
+    assert title.get(session)["title"] == "How do I reset my"
 
 
 async def test_refresh_supersedes_older_generation() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(title="Second Title")
     provider.gate = asyncio.Event()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
-    first = asyncio.create_task(service.title_service.refresh(session))
+    first = asyncio.create_task(title.refresh(session))
     await _pump()
     assert len(provider.requests) == 1
-    second = await service.title_service.refresh(session)
+    second = await title.refresh(session)
     assert second is not None
     assert second["title"] == "Second Title"
     provider.gate.set()
     with pytest.raises(AbortError):
         await first
-    assert service.title_service.get(session)["title"] == "Second Title"
+    assert title.get(session)["title"] == "Second Title"
     assert len(_title_events(session)) == 2  # fallback + second provider title
 
 
@@ -749,76 +758,76 @@ async def test_refresh_supersedes_older_generation() -> None:
     ],
 )
 def test_register_invalid_provider(provider: Any) -> None:
-    _, service = _service()
+    _, _sessions, title = _service()
     with pytest.raises(ValueError):
-        service.title_service.register(provider)
+        title.register(provider)
 
 
 def test_register_provider_with_empty_id() -> None:
-    _, service = _service()
+    _, _sessions, title = _service()
     provider = _RecordingProvider()
     provider.id = ""
     with pytest.raises(ValueError, match="non-empty string"):
-        service.title_service.register(provider)
+        title.register(provider)
 
 
 def test_register_invalid_automatic_mode() -> None:
-    _, service = _service()
+    _, _sessions, title = _service()
     provider = _RecordingProvider()
     provider.automatic = "sometimes"
     with pytest.raises(ValueError, match="automatic mode is invalid"):
-        service.title_service.register(provider)
+        title.register(provider)
 
 
 def test_register_provider_without_generate() -> None:
-    _, service = _service()
+    _, _sessions, title = _service()
 
     class _NoGenerate:
         id = "no-generate"
         automatic = "first-prompt"
 
     with pytest.raises(TypeError, match="requires generate"):
-        service.title_service.register(_NoGenerate())
+        title.register(_NoGenerate())
 
 
 def test_register_second_live_provider_throws() -> None:
-    _, service = _service()
-    service.title_service.register(_FakeProvider())
+    _, _sessions, title = _service()
+    title.register(_FakeProvider())
     other = _FakeProvider()
     other.id = "other-provider"
     with pytest.raises(ValueError, match="is already registered"):
-        service.title_service.register(other)
+        title.register(other)
 
 
 def test_register_after_dispose_allows_replacement() -> None:
-    _, service = _service()
-    dispose = service.title_service.register(_FakeProvider())
+    _, service, title = _service()
+    dispose = title.register(_FakeProvider())
     dispose()
     other = _FakeProvider(title="Replacement Title")
     other.id = "other-provider"
-    service.title_service.register(other)
+    title.register(other)
     # The replacement is live: an explicit refresh reaches it.
     session = service.create("s1")
     _user(session, service, "Explain quantum computing simply")
-    snapshot = asyncio.run(service.title_service.refresh(session))
+    snapshot = asyncio.run(title.refresh(session))
     assert snapshot is not None
     assert snapshot["title"] == "Replacement Title"
 
 
 def test_register_after_service_dispose_raises() -> None:
-    _, service = _service()
-    service.title_service.dispose()
+    _, _sessions, title = _service()
+    title.dispose()
     with pytest.raises(RuntimeError, match="session-title service disposed"):
-        service.title_service.register(_FakeProvider())
+        title.register(_FakeProvider())
 
 
 def test_register_disposer_is_idempotent() -> None:
-    _, service = _service()
-    dispose = service.title_service.register(_FakeProvider())
+    _, _sessions, title = _service()
+    dispose = title.register(_FakeProvider())
     dispose()
     dispose()
     # Disposing twice leaves the service usable for a fresh registration.
-    service.title_service.register(_FakeProvider())
+    title.register(_FakeProvider())
 
 
 # ---------------------------------------------------------------------------
@@ -827,21 +836,21 @@ def test_register_disposer_is_idempotent() -> None:
 
 
 async def test_first_prompt_schedules_on_header_after_first_message() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     await _pump()
     assert len(provider.requests) == 0
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
+    assert title.get(session)["source"] == {"kind": "fallback"}
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
     request = provider.requests[0]
     assert [m["seq"] for m in request.messages] == [0]
     assert request.route == {"provider": "prov", "model": "mod"}
-    snapshot = service.title_service.get(session)
+    snapshot = title.get(session)
     assert snapshot["title"] == "Provider Title"
     assert snapshot["source"] == {"kind": "provider", "provider": "fake-provider"}
     assert snapshot["messageSeqs"] == [0]
@@ -851,33 +860,33 @@ async def test_first_prompt_schedules_on_header_after_first_message() -> None:
 
 
 async def test_first_prompt_second_message_does_not_reschedule() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
     _user(session, service, "And now explain relativity")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
-    assert service.title_service.get(session)["title"] == "Provider Title"
+    assert title.get(session)["title"] == "Provider Title"
 
 
 async def test_all_prompts_schedules_on_every_message() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(automatic="all-prompts")
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
     _user(session, service, "And now explain relativity")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 2
     # The second run collects both eligible messages (seqs 0 and 4;
     # the fallback title event sits at seq 2).
@@ -885,39 +894,39 @@ async def test_all_prompts_schedules_on_every_message() -> None:
 
 
 async def test_run_pending_revision_mismatch_returns() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(automatic="all-prompts")
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
     # A newer message supersedes the started revision before its task runs.
     _user(session, service, "And now explain relativity")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
     assert [m["seq"] for m in provider.requests[0].messages] == [0, 2]
 
 
 async def test_first_prompt_skips_seeded_sessions() -> None:
-    _, service = _service()
+    _, service, title = _service()
     parent = service.create("parent")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     child = service.fork(parent, child_session_id="child")
     assert child.header["isSeeded"] is True
     _user(child, service, "Explain quantum computing simply")
     await _pump()
     _header(child, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert provider.requests == []
-    assert service.title_service.get(child)["source"] == {"kind": "fallback"}
+    assert title.get(child)["source"] == {"kind": "fallback"}
 
 
 async def test_first_prompt_skips_subagent_sessions() -> None:
-    _, service = _service()
+    _, service, title = _service()
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     session = service.store.create(
         "sub1",
         options={"meta": {"origin": "subagent", "createdAt": 1700000000000}},
@@ -926,28 +935,28 @@ async def test_first_prompt_skips_subagent_sessions() -> None:
     _user(session, service, "Explain quantum computing simply")
     await _pump()
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert provider.requests == []
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
+    assert title.get(session)["source"] == {"kind": "fallback"}
 
 
 async def test_ineligible_message_schedules_nothing() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "   ", source_kind="user")
     _user(session, service, "Injected context", source_kind="system")
     await _pump()
-    assert service.title_service.get(session) is None
+    assert title.get(session) is None
     assert provider.requests == []
     assert _title_events(session) == []
 
 
 async def test_non_live_session_gets_no_title() -> None:
-    _, service = _service()
+    _, service, title = _service()
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     detached = Session.create("detached")
     service.log_event(
         detached,
@@ -958,26 +967,26 @@ async def test_non_live_session_gets_no_title() -> None:
         },
     )
     await _pump()
-    assert service.title_service.get(detached) is None
+    assert title.get(detached) is None
     assert provider.requests == []
 
 
 async def test_header_before_watermark_does_not_start_pending() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _header(session, service, provider="prov", model="mod")
     _user(session, service, "Explain quantum computing simply")
     await _pump()
     assert provider.requests == []
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
 
 
 async def test_header_without_route_keeps_pending() -> None:
-    _, service = _service()
+    _, service, title = _service()
     # A husk header is a restore-only form: it arrives by seed, never by
     # append (fresh appends refuse it), and a seeded header never emits.
     husk = SessionEvent(
@@ -990,21 +999,21 @@ async def test_header_without_route_keeps_pending() -> None:
     )
     session = service.store.create("s1", options={"seed": [husk]})
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     await _pump()
     assert provider.requests == []
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
 
 
 async def test_routeless_header_event_keeps_pending() -> None:
     """Verifies a route-less header event leaves pending title work alone."""
-    ctx, service = _service()
+    ctx, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     await _pump()
     # Fresh appends refuse a header with no route, so such an event can
@@ -1021,21 +1030,21 @@ async def test_routeless_header_event_keeps_pending() -> None:
     await _pump()
     assert provider.requests == []
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
 
 
 async def test_provider_failure_leaves_fallback_and_warns(caplog: Any) -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(fail=RuntimeError("model down"))
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "How do I reset my password for the dashboard?")
     _header(session, service, provider="prov", model="mod")
     with caplog.at_level("WARNING", logger="harness.session.title"):
-        await service.title_service.drain()
+        await title.drain()
     assert len(provider.requests) == 1
-    snapshot = service.title_service.get(session)
+    snapshot = title.get(session)
     assert snapshot["title"] == "How do I reset my"
     assert snapshot["source"] == {"kind": "fallback"}
     assert "automatic title generation failed" in caplog.text
@@ -1127,21 +1136,21 @@ def test_validate_title_result_truncates_to_max_bytes() -> None:
     ],
 )
 async def test_invalid_provider_result_never_commits(result: dict[str, Any]) -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(result=result)
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "How do I reset my password for the dashboard?")
     await _pump()
     with pytest.raises(ValueError):
-        await service.title_service.refresh(session)
+        await title.refresh(session)
     events = _title_events(session)
     assert len(events) == 1
     assert events[0].payload["source"] == {"kind": "fallback"}
 
 
 async def test_provider_result_with_model_is_recorded() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider(
         result={
@@ -1150,9 +1159,9 @@ async def test_provider_result_with_model_is_recorded() -> None:
             "model": {"provider": "prov", "model": "mod"},
         }
     )
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
-    snapshot = await service.title_service.refresh(session)
+    snapshot = await title.refresh(session)
     assert snapshot is not None
     assert snapshot["source"] == {
         "kind": "provider",
@@ -1167,30 +1176,30 @@ async def test_provider_result_with_model_is_recorded() -> None:
 
 
 async def test_rename_pins_against_automatic_titling() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     provider.gate = asyncio.Event()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
     await _pump()
     assert len(provider.requests) == 1
     # Rename while the provider call is still in flight.
-    service.title_service.rename(session, "My Pinned Title")
+    title.rename(session, "My Pinned Title")
     provider.gate.set()
-    await service.title_service.drain()
-    assert service.title_service.get(session)["title"] == "My Pinned Title"
-    assert service.title_service.get(session)["source"] == {"kind": "user"}
+    await title.drain()
+    assert title.get(session)["title"] == "My Pinned Title"
+    assert title.get(session)["source"] == {"kind": "user"}
     # Subsequent turns schedule nothing and change nothing.
     _user(session, service, "And now explain relativity")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     _user(session, service, "And now explain black holes")
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert len(provider.requests) == 1
-    assert service.title_service.get(session)["title"] == "My Pinned Title"
+    assert title.get(session)["title"] == "My Pinned Title"
     assert len(_title_events(session)) == 2  # fallback + rename
 
 
@@ -1200,112 +1209,112 @@ async def test_rename_pins_against_automatic_titling() -> None:
 
 
 async def test_provider_disposal_aborts_active_work() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     provider.gate = asyncio.Event()
-    dispose = service.title_service.register(provider)
+    dispose = title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
     await _pump()
     assert len(provider.requests) == 1
     dispose()
     provider.gate.set()
-    await service.title_service.drain()
-    snapshot = service.title_service.get(session)
+    await title.drain()
+    snapshot = title.get(session)
     assert snapshot["source"] == {"kind": "fallback"}
     assert len(_title_events(session)) == 1
 
 
 async def test_provider_disposal_aborts_pending_work() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    dispose = service.title_service.register(provider)
+    dispose = title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     await _pump()
     assert len(provider.requests) == 0
     dispose()
     _header(session, service, provider="prov", model="mod")
-    await service.title_service.drain()
+    await title.drain()
     assert provider.requests == []
 
 
 async def test_dispose_service_aborts_in_flight_work() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     provider.gate = asyncio.Event()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
     await _pump()
     assert len(provider.requests) == 1
-    service.title_service.dispose()
-    service.title_service.dispose()
+    title.dispose()
+    title.dispose()
     provider.gate.set()
-    await service.title_service.drain()
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
+    await title.drain()
+    assert title.get(session)["source"] == {"kind": "fallback"}
 
 
 async def test_session_close_aborts_in_flight_work() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     provider.gate = asyncio.Event()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     _header(session, service, provider="prov", model="mod")
     await _pump()
     assert len(provider.requests) == 1
     assert service.close("s1") is True
     provider.gate.set()
-    await service.title_service.drain()
-    assert service.title_service.get(session)["source"] == {"kind": "fallback"}
+    await title.drain()
+    assert title.get(session)["source"] == {"kind": "fallback"}
 
 
 async def test_close_before_fallback_warns_and_does_not_crash(caplog: Any) -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password?")
     assert service.close("s1") is True
     with caplog.at_level("WARNING", logger="harness.session.title"):
-        await service.title_service.drain()
+        await title.drain()
     assert "deferred title work failed" in caplog.text
 
 
 async def test_dispose_before_fallback_is_silent(caplog: Any) -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password?")
-    service.title_service.dispose()
+    title.dispose()
     with caplog.at_level("WARNING", logger="harness.session.title"):
-        await service.title_service.drain()
+        await title.drain()
     assert "deferred title work failed" not in caplog.text
     assert _title_events(session) == []
 
 
 async def test_dispose_removes_listeners() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
-    service.title_service.dispose()
+    title.dispose()
     _user(session, service, "How do I reset my password?")
     await _pump()
-    assert service.title_service.get(session) is None
+    assert title.get(session) is None
 
 
 async def test_dispose_with_pending_work_aborts_nothing_live() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
-    service.title_service.register(provider)
+    title.register(provider)
     _user(session, service, "Explain quantum computing simply")
     # Pending work exists but no generation started; disposal is quiet.
-    service.title_service.dispose()
-    await service.title_service.drain()
+    title.dispose()
+    await title.drain()
     assert provider.requests == []
     with pytest.raises(RuntimeError, match="disposed"):
-        service.title_service.rename(session, "Late Rename")
+        title.rename(session, "Late Rename")
 
 
 async def test_session_event_listener_ignores_after_dispose() -> None:
@@ -1316,21 +1325,30 @@ async def test_session_event_listener_ignores_after_dispose() -> None:
     holder: dict[str, Any] = {}
 
     def dispose_first(session_arg: Session, event: SessionEvent) -> None:
-        holder["service"].title_service.dispose()
+        holder["title"].dispose()
 
     ctx.on("session/event", dispose_first)
-    service = SessionService(ctx, {})
-    holder["service"] = service
+    SessionProjectionRegistry(ctx)
+    service = SessionService(ctx)
+    title = SessionTitleService(
+        ctx,
+        {
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 40,
+            "max_title_bytes": 80,
+        },
+    )
+    holder["title"] = title
     session = service.create("s1")
     _user(session, service, "How do I reset my password?")
-    await service.title_service.drain()
-    assert service.title_service.get(session) is None
+    await title.drain()
+    assert title.get(session) is None
     assert _title_events(session) == []
 
 
 async def test_drain_with_no_work_returns() -> None:
-    _, service = _service()
-    await service.title_service.drain()
+    _, _sessions, title = _service()
+    await title.drain()
 
 
 # ---------------------------------------------------------------------------
@@ -1339,13 +1357,13 @@ async def test_drain_with_no_work_returns() -> None:
 
 
 def test_sync_append_lands_fallback_via_timer() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "Hello there world")
     deadline = time.monotonic() + 5
     snapshot = None
     while time.monotonic() < deadline:
-        snapshot = service.title_service.get(session)
+        snapshot = title.get(session)
         if snapshot is not None:
             break
         time.sleep(0.01)
@@ -1355,7 +1373,7 @@ def test_sync_append_lands_fallback_via_timer() -> None:
 
 
 def test_sync_close_before_fallback_warns(caplog: Any) -> None:
-    _, service = _service()
+    _, service, _title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password?")
     assert service.close("s1") is True
@@ -1370,23 +1388,23 @@ def test_sync_close_before_fallback_warns(caplog: Any) -> None:
 
 
 def test_sync_drain_joins_timer_work() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "Hello there world")
-    asyncio.run(service.title_service.drain())
-    snapshot = service.title_service.get(session)
+    asyncio.run(title.drain())
+    snapshot = title.get(session)
     assert snapshot is not None
     assert snapshot["title"] == "Hello there world"
 
 
 def test_sync_dispose_silences_timer_work() -> None:
-    _, service = _service()
+    _, service, title = _service()
     session = service.create("s1")
     _user(session, service, "How do I reset my password?")
-    service.title_service.dispose()
+    title.dispose()
     # The timer fires after disposal; its work must never run.
     time.sleep(0.2)
-    assert service.title_service.get(session) is None
+    assert title.get(session) is None
     assert _title_events(session) == []
 
 
@@ -1396,57 +1414,58 @@ def test_sync_dispose_silences_timer_work() -> None:
 
 
 async def test_title_survives_restart(tmp_path: Path) -> None:
-    ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    service = ctx.sessions
+    title = ctx.sessionTitle
     session = service.create("s1")
     _user(session, service, "How do I reset my password for the dashboard?")
-    await service.title_service.drain()
-    assert service.title_service.get(session)["title"] == "How do I reset my"
+    await title.drain()
+    assert title.get(session)["title"] == "How do I reset my"
     assert service.close("s1") is True
 
-    ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    ctx2 = create_harness(storage_dir=tmp_path)
+    await ctx2.flush()
+    service2 = ctx2.sessions
+    title2 = ctx2.sessionTitle
     loaded = service2.load("s1")
     assert loaded is not None
-    snapshot = service2.title_service.get(loaded)
+    snapshot = title2.get(loaded)
     assert snapshot is not None
     assert snapshot["title"] == "How do I reset my"
     assert snapshot["source"] == {"kind": "fallback"}
     assert snapshot["messageSeqs"] == [0]
     # The restored session still pins and refreshes from the log.
-    service2.title_service.rename(loaded, "Restored Name")
-    assert service2.title_service.get(loaded)["title"] == "Restored Name"
+    title2.rename(loaded, "Restored Name")
+    assert title2.get(loaded)["title"] == "Restored Name"
 
 
 async def test_fallback_is_deterministic_over_first_message() -> None:
-    _, service = _service()
+    _, service, title = _service()
     first = service.create("first")
     second = service.create("second")
     _user(first, service, "How do I reset my password for the dashboard?")
     _user(second, service, "How do I reset my password for the dashboard?")
-    await service.title_service.drain()
+    await title.drain()
     # Only the derived fields are deterministic; eventSeq/updatedAt differ.
     for field in ("title", "messageSeqs", "source"):
-        assert (
-            service.title_service.get(first)[field]
-            == (service.title_service.get(second)[field])
-        )
+        assert title.get(first)[field] == (title.get(second)[field])
 
 
 async def test_append_fallback_underivable_returns_none() -> None:
     # A one-byte fallback budget cannot hold the two-byte first word,
     # so no title event lands at all.
-    _, service = _service(
+    _, service, title = _service(
         {
-            "title_fallback_max_words": 5,
-            "title_fallback_max_bytes": 1,
-            "title_max_title_bytes": 1,
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 1,
+            "max_title_bytes": 1,
         }
     )
     session = service.create("s1")
     _user(session, service, "é")
-    await service.title_service.drain()
-    assert service.title_service.get(session) is None
+    await title.drain()
+    assert title.get(session) is None
     assert _title_events(session) == []
 
 
@@ -1465,7 +1484,7 @@ async def _stream_harness(tmp_path: Path) -> Any:
 async def test_llm_stream_starts_pending(tmp_path: Path) -> None:
     ctx = await _stream_harness(tmp_path)
     session = ctx.sessions.create("s1")
-    title_service = ctx.sessions.title_service
+    title_service = ctx.sessionTitle
     provider = _FakeProvider()
     title_service.register(provider)
     _header(session, ctx.sessions, provider="mock", model="model-x")
@@ -1487,7 +1506,7 @@ async def test_llm_stream_starts_pending(tmp_path: Path) -> None:
 async def test_llm_stream_route_mismatch_does_not_start(tmp_path: Path) -> None:
     ctx = await _stream_harness(tmp_path)
     session = ctx.sessions.create("s1")
-    title_service = ctx.sessions.title_service
+    title_service = ctx.sessionTitle
     provider = _FakeProvider()
     title_service.register(provider)
     _header(session, ctx.sessions, provider="mock", model="model-x")
@@ -1504,7 +1523,7 @@ async def test_llm_stream_route_mismatch_does_not_start(tmp_path: Path) -> None:
 async def test_llm_stream_without_model_does_not_start(tmp_path: Path) -> None:
     ctx = await _stream_harness(tmp_path)
     session = ctx.sessions.create("s1")
-    title_service = ctx.sessions.title_service
+    title_service = ctx.sessionTitle
     provider = _FakeProvider()
     title_service.register(provider)
     _header(session, ctx.sessions, provider="mock", model="model-x")
@@ -1519,7 +1538,7 @@ async def test_llm_stream_without_model_does_not_start(tmp_path: Path) -> None:
 async def test_llm_stream_unknown_session_passes_through(tmp_path: Path) -> None:
     ctx = await _stream_harness(tmp_path)
     session = ctx.sessions.create("s1")
-    title_service = ctx.sessions.title_service
+    title_service = ctx.sessionTitle
     provider = _FakeProvider()
     title_service.register(provider)
     _header(session, ctx.sessions, provider="mock", model="model-x")
@@ -1543,12 +1562,21 @@ async def test_llm_stream_listener_ignores_after_dispose() -> None:
     holder: dict[str, Any] = {}
 
     async def dispose_first(options: dict[str, Any], next_fn: Any) -> Any:
-        holder["service"].title_service.dispose()
+        holder["title"].dispose()
         return await next_fn(options)
 
     ctx.on("llm/stream", dispose_first, mode=EventMode.WATERFALL)
-    service = SessionService(ctx, {})
-    holder["service"] = service
+    SessionProjectionRegistry(ctx)
+    service = SessionService(ctx)
+    title = SessionTitleService(
+        ctx,
+        {
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 40,
+            "max_title_bytes": 80,
+        },
+    )
+    holder["title"] = title
     llm = LLMService(ctx)
     llm.register_provider("mock", MockLLMProvider())
     session = service.create("s1")
@@ -1558,7 +1586,7 @@ async def test_llm_stream_listener_ignores_after_dispose() -> None:
     ):
         chunks.append(chunk)
     assert chunks
-    assert service.title_service.get(session) is None
+    assert title.get(session) is None
 
 
 def test_route_from_header_variants() -> None:

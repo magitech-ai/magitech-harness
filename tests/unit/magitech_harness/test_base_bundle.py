@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from anima import Context, Service
-from anima.jsexpr import load_yaml
+from anima.jsexpr import dump_yaml, load_yaml
 
 import magitech_harness
 from magitech_harness import EventType, check_bundle_entries, create_harness
@@ -14,7 +14,9 @@ from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.components.layers import LayerResolutionService
 from magitech_harness.llm.service import LLMService
+from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
+from magitech_harness.session.title import SessionTitleService
 from magitech_harness.shell.service import LocalShellService
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.service import ToolService
@@ -51,17 +53,58 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "session-projections",
+        "name": "magitech_harness.session.projection_registry:SessionProjectionRegistry",
+        "config": {},
+    },
+    {
         "id": "sessions",
         "name": "magitech_harness.session.service:SessionService",
         "config": {
             "base_storage_dir": "${MAGITECH_SESSIONS_DIR}",
-            "title_fallback_max_words": 5,
-            "title_fallback_max_bytes": 40,
-            "title_max_title_bytes": 80,
             "live_batch_delay": 0.2,
             "projection_cache_write_every_events": 200,
             "projection_cache_write_interval_ms": 5000,
         },
+    },
+    {
+        "id": "projection-title",
+        "name": "magitech_harness.session.projections:apply_title_projection",
+        "config": {},
+    },
+    {
+        "id": "projection-title-input",
+        "name": "magitech_harness.session.projections:apply_title_input_projection",
+        "config": {},
+    },
+    {
+        "id": "projection-session-stats",
+        "name": "magitech_harness.session.projections:apply_session_stats_projection",
+        "config": {},
+    },
+    {
+        "id": "projection-turn-outline",
+        "name": "magitech_harness.session.projections:apply_turn_outline_projection",
+        "config": {},
+    },
+    {
+        "id": "projection-working-directory",
+        "name": "magitech_harness.session.projections:apply_working_directory_projection",
+        "config": {},
+    },
+    {
+        "id": "session-title",
+        "name": "magitech_harness.session.title:SessionTitleService",
+        "config": {
+            "fallback_max_words": 5,
+            "fallback_max_bytes": 40,
+            "max_title_bytes": 80,
+        },
+    },
+    {
+        "id": "session-checkpoint-policy",
+        "name": "magitech_harness.session.checkpoint_policy:apply",
+        "config": {},
     },
     {
         "id": "agent-loop",
@@ -72,7 +115,7 @@ EXPECTED_ROWS = [
 
 
 def test_base_bundle_rows() -> None:
-    """Verifies the default bundle file carries exactly the eight rows."""
+    """Verifies the default bundle file carries exactly the sixteen rows."""
     bundle_path = (
         Path(magitech_harness.__file__).resolve().parent / "profiles" / "base.yaml"
     )
@@ -82,7 +125,7 @@ def test_base_bundle_rows() -> None:
 
 
 def test_bundle_slots_are_row_services() -> None:
-    """Verifies the eight bundle slots resolve to the row services."""
+    """Verifies the sixteen bundle slots resolve to the row services."""
     ctx = create_harness()
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
@@ -90,11 +133,16 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.shell, LocalShellService)
     assert isinstance(ctx.approvals, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
+    assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
     assert isinstance(ctx.sessions, SessionService)
+    assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agent_loop, AgentLoopService)
     assert ctx.approvals.default_verdict is False
     assert ctx.sessions.base_storage_dir is None
     assert not ctx.llm.providers
+    assert ctx.sessionProjections.summary_keys() == frozenset(
+        {"title", "workingDirectory"}
+    )
 
 
 @pytest.mark.asyncio
@@ -104,15 +152,21 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert not ctx.has("tools")
     assert not ctx.has("llm")
     assert not ctx.has("sessions")
+    assert not ctx.has("sessionProjections")
+    assert not ctx.has("sessionTitle")
     assert not ctx.has("agent_loop")
     await ctx.flush()
     assert ctx.has("tools")
     assert ctx.has("llm")
     assert ctx.has("sessions")
+    assert ctx.has("sessionProjections")
+    assert ctx.has("sessionTitle")
     assert ctx.has("agent_loop")
     assert isinstance(ctx.tools, ToolService)
     assert isinstance(ctx.llm, LLMService)
     assert isinstance(ctx.sessions, SessionService)
+    assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
+    assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agent_loop, AgentLoopService)
 
 
@@ -164,16 +218,18 @@ def test_create_harness_ignores_disabled_row(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Verifies a disabled bundle row is skipped, not treated as a failure."""
-    rows_text = "".join(
-        f"- id: {row['id']}\n  name: {row['name']}\n  config: {{}}\n"
-        for row in EXPECTED_ROWS
+    rows = [dict(row) for row in EXPECTED_ROWS]
+    rows.append(
+        {
+            "id": "off-row",
+            "name": "nonexistent.module:Nope",
+            "config": {},
+            "disabled": True,
+        }
     )
-    bundle_path = _write_bundle(
-        tmp_path,
-        rows_text + "- id: off-row\n"
-        "  name: nonexistent.module:Nope\n"
-        "  disabled: true\n",
-    )
+    bundle_path = tmp_path / "bundle.yaml"
+    with open(bundle_path, "w", encoding="utf-8") as f:
+        dump_yaml(rows, f)
     monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", bundle_path)
     ctx = create_harness()
     assert ctx.has("tools")
