@@ -5,18 +5,22 @@ all mount as bundle rows now; SessionService keeps only the store and
 the persistence wiring. These tests pin the chunk's shape at the
 bundle level: the units fold from rows, a bad title-row config fails
 loud at boot, nothing inside SessionService constructs the moved
-pieces, and a directly constructed service still degrades cleanly.
+pieces, a directly constructed service still degrades cleanly, and the
+sessions row no longer depends on bundle order — it declares the
+registry as a required injection, so a swapped bundle still wires it.
 """
 
 from pathlib import Path
 
 import pytest
 from anima import Context
+from anima.jsexpr import dump_yaml, load_yaml
 
 import magitech_harness
-from magitech_harness import create_harness
+from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.session import service as service_module
 from magitech_harness.session.checkpoint_policy import apply as apply_checkpoint_policy
+from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
 
@@ -154,3 +158,56 @@ def test_title_service_requires_sessions_and_registry() -> None:
         RuntimeError, match="session-title requires the sessionProjections service"
     ):
         SessionTitleService(ctx, config)
+
+
+def _write_swapped_bundle(tmp_path: Path) -> Path:
+    """A copy of the default bundle with the sessions row before the registry row."""
+    bundle_path = (
+        Path(magitech_harness.__file__).resolve().parent / "profiles" / "base.yaml"
+    )
+    rows = load_yaml(bundle_path.read_text(encoding="utf-8"))
+    proj = next(i for i, row in enumerate(rows) if row["id"] == "session-projections")
+    sess = next(i for i, row in enumerate(rows) if row["id"] == "sessions")
+    rows[proj], rows[sess] = rows[sess], rows[proj]
+    swapped_path = tmp_path / "swapped.yaml"
+    with swapped_path.open("w", encoding="utf-8") as handle:
+        dump_yaml(rows, handle)
+    return swapped_path
+
+
+async def test_swapped_rows_still_wire_the_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sessions row does not depend on bundle order for its registry.
+
+    With the sessions row listed before the registry row, the service
+    still waits for the registry, still installs its projection cache,
+    and still answers projection reads live and cold.
+    """
+    monkeypatch.setattr(
+        magitech_harness, "_BASE_BUNDLE_PATH", _write_swapped_bundle(tmp_path)
+    )
+    ctx = create_harness(tmp_path / "sessions")
+    await ctx.flush()
+    check_bundle_entries(ctx)
+    service = ctx.sessions
+    assert service.projection_cache is not None
+    session = service.create("k3fix-swapped")
+    service.log_event(session, "turn/start", {"turn": 1})
+    assert service.read_projections("k3fix-swapped") is not None
+    assert service.close("k3fix-swapped") is True
+    assert service.read_projections("k3fix-swapped") is not None
+
+
+async def test_sessions_fiber_waits_for_registry() -> None:
+    """A sessions fiber stays pending until the registry lands, then activates."""
+    ctx = Context()
+    ctx.use(SessionService)
+    await ctx.flush()
+    assert not ctx.has("sessions")
+    ctx.use(SessionProjectionRegistry)
+    await ctx.flush()
+    assert ctx.has("sessions")
+    service = ctx.sessions
+    service.create("k3fix-pending")
+    assert service.read_projections("k3fix-pending") is not None
