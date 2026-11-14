@@ -84,7 +84,11 @@ class SessionService(Service):
     def __init__(self, ctx: Context, config: dict | None = None) -> None:
         super().__init__(ctx, "sessions")
         cfg = config or {}
-        root = cfg.get("base_storage_dir")
+        # An unset ${MAGITECH_SESSIONS_DIR} interpolates to an empty
+        # string, and Path("") is Path("."): normalise a falsy value to
+        # None so the service stays memory-only instead of persisting
+        # into the working directory.
+        root = cfg.get("base_storage_dir") or None
         self.base_storage_dir = Path(root) if root is not None else None
         self._store = SessionStore(ctx)
         self._checkpoint_policy = SessionCheckpointPolicy(ctx, self._store)

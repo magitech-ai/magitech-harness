@@ -127,6 +127,16 @@ def test_session_service_create_without_base_dir() -> None:
     assert service.list_sessions() == []
 
 
+def test_session_service_empty_storage_dir_stays_memory_only() -> None:
+    """Verifies an empty base_storage_dir normalises to memory-only."""
+    ctx = Context()
+    service = SessionService(ctx, {"base_storage_dir": ""})
+    assert service.base_storage_dir is None
+    session = service.create()
+    assert service.get(session.session_id) is session
+    assert service.location(session.session_id) is None
+
+
 def test_session_service_create_duplicate_raises(tmp_path: Path) -> None:
     """Verifies creating over a live id is refused before touching the backend."""
     ctx = Context()

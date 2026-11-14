@@ -17,3 +17,16 @@
 - id: layers
   name: magitech_harness.components.layers:LayerResolutionService
   config: {}
+- id: sessions
+  name: magitech_harness.session.service:SessionService
+  config:
+    base_storage_dir: ${MAGITECH_SESSIONS_DIR}
+    title_fallback_max_words: 5
+    title_fallback_max_bytes: 40
+    title_max_title_bytes: 80
+    live_batch_delay: 0.2
+    projection_cache_write_every_events: 200
+    projection_cache_write_interval_ms: 5000
+- id: agent-loop
+  name: magitech_harness.agent.loop:AgentLoopService
+  config: {}
