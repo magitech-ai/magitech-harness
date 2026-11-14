@@ -4,19 +4,31 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
-from anima import FiberState
+from anima import Context, FiberState
 
 from magitech_harness import create_harness
+from magitech_harness.llm.service import MockLLMProvider
 from magitech_harness.session.events import ToolCallData
+
+
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
 
 
 @pytest.mark.asyncio
 async def test_component_seam_full_lifecycle(tmp_path: Path) -> None:
     """Verifies end-to-end discovery, mounting, tool execution, and waterfall middleware."""
     # 1. Create harness with offline mock provider
-    ctx = create_harness(mock_provider=True)
+    ctx = create_harness()
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     assert ctx.has("components")

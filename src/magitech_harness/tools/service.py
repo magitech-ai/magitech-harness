@@ -48,6 +48,11 @@ class ToolService(Service):
         self.ctx.effect(lambda: _unregister)
         return _unregister
 
+    @property
+    def tools(self) -> dict[str, Tool]:
+        """Returns a copy of the registered tool mapping."""
+        return dict(self._registry)
+
     def get(self, name: str) -> Tool | None:
         return self._registry.get(name)
 
