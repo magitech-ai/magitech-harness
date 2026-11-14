@@ -14,6 +14,12 @@ from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.components.layers import LayerResolutionService
 from magitech_harness.llm.service import LLMService
+from magitech_harness.session.persistence_jsonl import (
+    JsonlSessionPersistenceService,
+)
+from magitech_harness.session.projection_cache import (
+    SessionProjectionCacheService,
+)
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
@@ -62,9 +68,14 @@ EXPECTED_ROWS = [
         "name": "magitech_harness.session.service:SessionService",
         "config": {
             "base_storage_dir": "${MAGITECH_SESSIONS_DIR}",
+        },
+    },
+    {
+        "id": "session-persistence-jsonl",
+        "name": "magitech_harness.session.persistence_jsonl:JsonlSessionPersistenceService",
+        "config": {
+            "root": "${MAGITECH_SESSIONS_DIR}",
             "live_batch_delay": 0.2,
-            "projection_cache_write_every_events": 200,
-            "projection_cache_write_interval_ms": 5000,
         },
     },
     {
@@ -107,6 +118,15 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "session-projection-cache",
+        "name": "magitech_harness.session.projection_cache:SessionProjectionCacheService",
+        "config": {
+            "root": "${MAGITECH_SESSIONS_DIR}",
+            "write_every_events": 200,
+            "write_interval_ms": 5000,
+        },
+    },
+    {
         "id": "agent-loop",
         "name": "magitech_harness.agent.loop:AgentLoopService",
         "config": {},
@@ -115,7 +135,7 @@ EXPECTED_ROWS = [
 
 
 def test_base_bundle_rows() -> None:
-    """Verifies the default bundle file carries exactly the sixteen rows."""
+    """Verifies the default bundle file carries exactly the eighteen rows."""
     bundle_path = (
         Path(magitech_harness.__file__).resolve().parent / "profiles" / "base.yaml"
     )
@@ -125,7 +145,7 @@ def test_base_bundle_rows() -> None:
 
 
 def test_bundle_slots_are_row_services() -> None:
-    """Verifies the sixteen bundle slots resolve to the row services."""
+    """Verifies the eighteen bundle slots resolve to the row services."""
     ctx = create_harness()
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
@@ -137,8 +157,18 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.sessions, SessionService)
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agent_loop, AgentLoopService)
+    assert isinstance(ctx.sessionPersistence, JsonlSessionPersistenceService)
+    assert isinstance(ctx.sessionProjectionCache, SessionProjectionCacheService)
     assert ctx.approvals.default_verdict is False
     assert ctx.sessions.base_storage_dir is None
+    # Memory-only boot activates both rows hollow: no backend, no cache.
+    persistence = ctx.get("sessionPersistence", None, strict=False)
+    assert persistence.backend is None
+    assert persistence.active is False
+    cache = ctx.get("sessionProjectionCache", None, strict=False)
+    assert cache.cache is None
+    assert cache.active is False
+    assert ctx.sessions.projection_cache is None
     assert not ctx.llm.providers
     assert ctx.sessionProjections.summary_keys() == frozenset(
         {"title", "workingDirectory"}
@@ -154,6 +184,8 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert not ctx.has("sessions")
     assert not ctx.has("sessionProjections")
     assert not ctx.has("sessionTitle")
+    assert not ctx.has("sessionPersistence")
+    assert not ctx.has("sessionProjectionCache")
     assert not ctx.has("agent_loop")
     await ctx.flush()
     assert ctx.has("tools")
@@ -161,6 +193,8 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert ctx.has("sessions")
     assert ctx.has("sessionProjections")
     assert ctx.has("sessionTitle")
+    assert ctx.has("sessionPersistence")
+    assert ctx.has("sessionProjectionCache")
     assert ctx.has("agent_loop")
     assert isinstance(ctx.tools, ToolService)
     assert isinstance(ctx.llm, LLMService)
@@ -345,6 +379,12 @@ async def test_sessions_row_receives_storage_dir(tmp_path: Path) -> None:
     ctx = create_harness(storage_dir=tmp_path)
     await ctx.flush()
     assert ctx.sessions.base_storage_dir == tmp_path
+    persistence = ctx.get("sessionPersistence", None, strict=False)
+    assert persistence.backend is not None
+    assert persistence.backend.root == tmp_path
+    cache = ctx.get("sessionProjectionCache", None, strict=False)
+    assert cache.cache is not None
+    assert ctx.sessions.projection_cache is cache.cache
     session = ctx.sessions.create("k2_storage")
     ctx.sessions.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
     await ctx.sessions.flush()

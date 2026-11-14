@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 from anima import Context
@@ -21,11 +22,38 @@ from magitech_harness.session.persistence import (
     SessionPersistenceNotFoundError,
 )
 from magitech_harness.session.persistence_jsonl import (
+    JsonlSessionPersistenceService,
     find_session_dir,
     session_dir,
 )
+from magitech_harness.session.projection_cache import (
+    SessionProjectionCacheService,
+)
+from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session
+
+
+def _persisted_service(
+    ctx: Context, root: Path, *, live_batch_delay: float | None = None
+) -> SessionService:
+    """Direct-construct a sessions service with its persistence + cache rows.
+
+    The rows are constructed directly on the same context, as the
+    bundle would mount them: the registry registers first, the
+    persistence row installs its tracker, the service resolves both
+    lazily, and the cache row installs once the sessions slot exists.
+    Direct construction registers every slot synchronously, so no
+    flush is needed before the first session op.
+    """
+    SessionProjectionRegistry(ctx)
+    persistence_config: dict[str, Any] = {"root": root}
+    if live_batch_delay is not None:
+        persistence_config["live_batch_delay"] = live_batch_delay
+    JsonlSessionPersistenceService(ctx, persistence_config)
+    service = SessionService(ctx, {"base_storage_dir": root})
+    SessionProjectionCacheService(ctx, {"root": root})
+    return service
 
 
 def _v4_header_line(session_id: str, **extra: object) -> str:
@@ -96,7 +124,7 @@ def test_session_service_create_get_and_log(tmp_path: Path) -> None:
         lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
     )
 
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("test_id")
     assert session.session_id == "test_id"
     # Created but unmaterialized: no log file yet, but already listed.
@@ -140,7 +168,7 @@ def test_session_service_empty_storage_dir_stays_memory_only() -> None:
 def test_session_service_create_duplicate_raises(tmp_path: Path) -> None:
     """Verifies creating over a live id is refused before touching the backend."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     service.create("dup")
     with pytest.raises(ValueError, match="already exists"):
         service.create("dup")
@@ -149,7 +177,7 @@ def test_session_service_create_duplicate_raises(tmp_path: Path) -> None:
 def test_session_service_session_path_after_create(tmp_path: Path) -> None:
     """Verifies session_path names the first-write generation before any event."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     service.create("fresh")
     path = service.session_path("fresh")
     assert path == session_dir(tmp_path, None, "fresh") / session_format_log_filename(
@@ -164,7 +192,7 @@ def test_session_service_session_path_after_create(tmp_path: Path) -> None:
 async def test_session_service_session_path_after_appends(tmp_path: Path) -> None:
     """Verifies session_path resolves the current generation once written."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("written")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "first"})
     await service.flush(session)
@@ -172,14 +200,15 @@ async def test_session_service_session_path_after_appends(tmp_path: Path) -> Non
     assert path.exists()
     assert path == service.location("written")
     # A fresh service with no live handle resolves the same file.
-    service2 = SessionService(Context(), {"base_storage_dir": tmp_path})
+    ctx2 = Context()
+    service2 = _persisted_service(ctx2, tmp_path)
     assert service2.session_path("written") == path
 
 
 def test_session_service_session_path_empty_dir(tmp_path: Path) -> None:
     """Verifies session_path names the first-write generation for a bare dir."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     directory = session_dir(tmp_path, None, "bare")
     directory.mkdir(parents=True)
     assert service.session_path("bare") == directory / session_format_log_filename(
@@ -190,7 +219,7 @@ def test_session_service_session_path_empty_dir(tmp_path: Path) -> None:
 def test_session_service_session_path_unknown_raises(tmp_path: Path) -> None:
     """Verifies session_path raises NotFound for unknown ids and memory-only."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(SessionPersistenceNotFoundError):
         service.session_path("unknown")
     memory_only = SessionService(Context())
@@ -237,7 +266,7 @@ async def test_session_service_fork_create_failure_rolls_back(
     assert staged is not None
     before = (staged / "session.v4.jsonl").read_bytes()
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     parent = service.create("parent")
     service.log_event(parent, "turn/start", {"turn": 1})
     await service.flush(parent)
@@ -261,7 +290,7 @@ async def test_session_service_fork_append_failure_rolls_back(
     child_dir = session_dir(tmp_path, None, "child")
     (child_dir / "session.v4.jsonl").mkdir(parents=True)
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     parent = service.create("parent")
     service.log_event(parent, "turn/start", {"turn": 1})
     await service.flush(parent)
@@ -287,7 +316,7 @@ async def test_session_service_fork_blocked_directory_rolls_back(
     blocker = project_dir / "child"
     blocker.write_text("not a directory", encoding="utf-8")
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     parent = service.create("parent")
     service.log_event(parent, "turn/start", {"turn": 1})
     await service.flush(parent)
@@ -301,7 +330,7 @@ async def test_session_service_fork_blocked_directory_rolls_back(
 async def test_session_service_load_store_only_session(tmp_path: Path) -> None:
     """Verifies load returns a session that is live in the store but has no handle."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.store.create("store-only")
     assert service.load("store-only") is session
 
@@ -331,7 +360,7 @@ async def test_session_service_load_veto_rolls_back_handle(tmp_path: Path) -> No
         raise RuntimeError("no entry")
 
     dispose = ctx.on("session/created", veto)
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(RuntimeError, match="no entry"):
         service.load("vetoed-load")
     assert service.get("vetoed-load") is None
@@ -346,7 +375,7 @@ def test_session_service_read_store_only_and_without_backend(
 ) -> None:
     """Verifies read returns a store-live session and None with no backend."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.store.create("read-only")
     assert service.read("read-only") is session
     assert service.read("missing") is None
@@ -375,7 +404,7 @@ async def test_session_service_create_round_trip_through_backend(
 ) -> None:
     """Verifies create/log/flush writes a v4 log a fresh service reloads."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("roundtrip")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "first"})
     service.log_event(session, EventType.USER_MESSAGE, {"text": "second"})
@@ -396,7 +425,7 @@ async def test_session_service_create_round_trip_through_backend(
 
     assert service.close("roundtrip") is True
     ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2 = _persisted_service(ctx2, tmp_path)
     reloaded = service2.load("roundtrip")
     assert reloaded is not None
     assert reloaded.session_id == "roundtrip"
@@ -411,7 +440,7 @@ async def test_session_service_create_round_trip_through_backend(
 async def test_session_service_load_list_and_delete(tmp_path: Path) -> None:
     """Verifies loading persisted sessions, listing session IDs, and deleting sessions."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
 
     # 1. Create and persist session 1
     s1 = service.create("sess_1")
@@ -496,7 +525,7 @@ async def test_session_service_create_over_historical_log_migrates_on_load(
     ctx = Context()
     broadcast = []
     ctx.on("session/event", lambda sess, ev: broadcast.append(ev.type))
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(SessionAlreadyExistsError):
         service.create("probe-bypass1")
     assert staged.read_bytes() == before
@@ -514,7 +543,7 @@ async def test_session_service_create_over_historical_log_migrates_on_load(
     assert (directory / "session.v4.jsonl").exists()
 
     ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2 = _persisted_service(ctx2, tmp_path)
     reloaded = service2.load("probe-bypass1")
     assert reloaded is not None
     assert len(reloaded.events) == 3
@@ -543,7 +572,7 @@ async def test_session_service_load_refuses_mixed_session_id(
         ),
     )
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(SessionPersistenceCorruptionError, match="does not match"):
         service.load("requested")
     assert service.load("other") is None
@@ -557,7 +586,7 @@ async def test_session_service_load_refuses_newer_and_malformed_logs(
     _stage_log(tmp_path, "future", _v4_header_line("future", version=5) + "\n")
     _stage_log(tmp_path, "bad_header", '{"bad json\n')
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(SessionFormatUnsupportedError, match="uses log format v5"):
         service.load("future")
     with pytest.raises(
@@ -573,7 +602,7 @@ async def test_session_service_load_empty_generation_is_corruption(
     """Verifies an empty generation file is corruption, not an empty session."""
     _stage_log(tmp_path, "empty", "")
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(
         SessionPersistenceCorruptionError, match="first line is not a session header"
     ):
@@ -584,7 +613,7 @@ def test_session_service_delete_store_only_session(tmp_path: Path) -> None:
     """Verifies deleting a session that lives in the store but not in
     the service's active cache still detaches it."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.store.create("store-only")
     assert service.get("store-only") is session
     assert service.delete("store-only") is True
@@ -607,7 +636,7 @@ async def test_session_service_delete_live_session_refuses_then_succeeds(
 ) -> None:
     """Verifies deleting a live session is refused until it is closed."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("deletable")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "hello"})
     await service.flush(session)
@@ -641,7 +670,7 @@ async def test_session_service_delete_cold_directory(tmp_path: Path) -> None:
         ),
     )
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     assert service.delete("cold-del") is True
     assert find_session_dir(tmp_path, "cold-del") is None
 
@@ -662,7 +691,7 @@ async def test_session_service_log_event_broadcasts_independent_session(
         "session/event",
         lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
     )
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     created = service.create("cold")
     service.log_event(created, EventType.USER_MESSAGE, {"text": "first"})
     assert len(events_broadcast) == 1
@@ -671,6 +700,8 @@ async def test_session_service_log_event_broadcasts_independent_session(
 
     # A fresh service cold-loads the same log: the loaded session is
     # store-live, so log_event broadcasts it through its hook.
+    # The rows the helper mounted on ctx still serve this service:
+    # the backend and cache resolve lazily from their slots.
     service2 = SessionService(ctx, {"base_storage_dir": tmp_path})
     loaded = service2.load("cold")
     assert loaded is not None
@@ -692,7 +723,7 @@ def test_session_service_log_event_store_owned_broadcasts_once(
         "session/event",
         lambda sess, ev: events_broadcast.append((sess.session_id, ev.type)),
     )
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("owned")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "hello"})
     assert events_broadcast == [("owned", EventType.USER_MESSAGE)]
@@ -705,9 +736,7 @@ async def test_session_service_live_tracker_routes_event_within_window(
     """Verifies the live tracker routes a session/event to the file
     within the batching window, without waiting for an explicit flush."""
     ctx = Context()
-    service = SessionService(
-        ctx, {"base_storage_dir": tmp_path, "live_batch_delay": 0.01}
-    )
+    service = _persisted_service(ctx, tmp_path, live_batch_delay=0.01)
     session = service.create("live")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "batched text"})
     deadline = time.monotonic() + 2.0
@@ -730,7 +759,7 @@ async def test_session_service_flush_is_barrier_naming_failed_sessions(
     """Verifies the service-wide flush aggregates failures naming each
     failed session, while the other sessions still flush."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     good = service.create("good")
     broken = service.create("broken")
     service.log_event(good, EventType.USER_MESSAGE, {"text": "ok"})
@@ -761,13 +790,13 @@ async def test_session_service_second_writer_is_refused(
     """Verifies a second service cannot write-open a session the first
     still holds; closing the first releases it."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("shared")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "held"})
     await service.flush(session)
 
     ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2 = _persisted_service(ctx2, tmp_path)
     with pytest.raises(SessionAlreadyOwnedError):
         service2.load("shared")
     assert service.close("shared") is True
@@ -783,7 +812,7 @@ async def test_session_service_close_releases_and_reload(
 ) -> None:
     """Verifies close detaches and releases, and the session reloads after."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("reopen")
     service.log_event(session, EventType.USER_MESSAGE, {"text": "once"})
     await service.flush(session)
@@ -804,7 +833,7 @@ def test_session_service_create_veto_leaves_no_trace(tmp_path: Path) -> None:
         raise RuntimeError("no creation")
 
     dispose = ctx.on("session/created", veto)
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     with pytest.raises(RuntimeError, match="no creation"):
         service.create("vetoed")
     assert service.list_sessions() == []
@@ -822,7 +851,7 @@ async def test_session_service_read_inspects_without_owning(
     publishing a migration."""
     _stage_log(tmp_path, "peek3", _v3_log("peek3"), version=3)
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     assert service.read("missing") is None
     peeked = service.read("peek3")
     assert peeked is not None
@@ -865,7 +894,7 @@ async def test_session_service_load_append_continues_seq(tmp_path: Path) -> None
         ),
     )
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.load("adopted")
     assert session is not None
     event = service.log_event(session, "user/message", {"text": "c"})
@@ -873,7 +902,7 @@ async def test_session_service_load_append_continues_seq(tmp_path: Path) -> None
     await service.flush(session)
     assert service.close("adopted") is True
     ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2 = _persisted_service(ctx2, tmp_path)
     reloaded = service2.load("adopted")
     assert reloaded is not None
     assert [event.seq for event in reloaded.events] == [0, 1, 2]
@@ -884,7 +913,7 @@ async def test_session_service_load_append_continues_seq(tmp_path: Path) -> None
 async def test_session_service_load_preserves_surface_op(tmp_path: Path) -> None:
     """Verifies surfaceOp and sourceEventSeqs survive a backend round-trip."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     session = service.create("surface")
     service.log_event(session, "user/message", {"text": "a"})
     service.log_event(
@@ -897,7 +926,7 @@ async def test_session_service_load_preserves_surface_op(tmp_path: Path) -> None
     await service.flush(session)
     assert service.close("surface") is True
     ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2 = _persisted_service(ctx2, tmp_path)
     reloaded = service2.load("surface")
     assert reloaded is not None
     assert reloaded.events[0].surface_op == "append"
@@ -917,7 +946,7 @@ async def test_session_service_fork_persists_inherited_prefix(
     """Verifies a forked child's inherited prefix is durable before its
     first live event, so the log stays contiguous across the fork."""
     ctx = Context()
-    service = SessionService(ctx, {"base_storage_dir": tmp_path})
+    service = _persisted_service(ctx, tmp_path)
     parent = service.create("parent")
     service.log_event(parent, "turn/start", {"turn": 1})
     service.log_event(parent, "user/message", {"text": "hi"})
@@ -929,7 +958,7 @@ async def test_session_service_fork_persists_inherited_prefix(
     assert service.close("child") is True
     assert service.close("parent") is True
     ctx2 = Context()
-    service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
+    service2 = _persisted_service(ctx2, tmp_path)
     reloaded = service2.load("child")
     assert reloaded is not None
     assert [event.type for event in reloaded.events] == [

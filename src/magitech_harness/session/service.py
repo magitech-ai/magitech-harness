@@ -1,12 +1,16 @@
 """
 SessionService (ctx.sessions): Service for session management.
 
-Ownership split: this service owns the persistence backend and the
-write handles; the store owns live-session membership (prepare / enter /
-announce). A Session is purely in-memory: its durable writes flow from
-``session/event`` publication through the live tracker this service
-installs on the context, which batches them onto the write handle
-opened for that session. ``flush`` is the durability barrier.
+Ownership split: this service owns the write handles; the store owns
+live-session membership (prepare / enter / announce). A Session is
+purely in-memory: its durable writes flow from ``session/event``
+publication through the live tracker the persistence row installs on
+the context, which batches them onto the write handle opened for that
+session. ``flush`` is the durability barrier. The persistence backend
+and the projection cache arrive from their own rows and are resolved
+lazily on every use, so either row may land after this service
+constructs; a configured storage dir with no persistence row fails
+loud at use instead of silently running memory-only.
 """
 
 from __future__ import annotations
@@ -15,7 +19,6 @@ import logging
 import shutil
 import time
 import uuid
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -35,22 +38,20 @@ from magitech_harness.session.persistence import (
     SessionPersistenceNotFoundError,
 )
 from magitech_harness.session.persistence_jsonl import (
-    JsonlLiveTracker,
     JsonlSessionHandle,
-    JsonlSessionPersistence,
     find_session_dir,
     generation_filename,
     resolve_current_generation,
     session_dir,
 )
-from magitech_harness.session.projection_cache import (
-    ProjectionCacheConfig,
-    SessionProjectionCache,
-)
 from magitech_harness.session.projection_registry import ProjectionSnapshot
 from magitech_harness.session.store import Session, SessionStore
 
 if TYPE_CHECKING:
+    from magitech_harness.session.persistence_jsonl import (
+        JsonlSessionPersistence,
+    )
+    from magitech_harness.session.projection_cache import SessionProjectionCache
     from magitech_harness.session.projection_registry import (
         SessionProjectionRegistry,
     )
@@ -63,13 +64,23 @@ class SessionService(Service):
 
     Live sessions are owned by a :class:`SessionStore` (prepare / enter /
     announce); this service is the shell over it that also owns the
-    persistence backend, the write handles, and the live tracker. The
-    backend root comes from the ``base_storage_dir`` config value; with
-    no root configured the service runs in memory only — sessions work
-    exactly the same, nothing is persisted, and no tracker is installed.
+    write handles. The backend root comes from the ``base_storage_dir``
+    config value; with no root configured the service runs in memory
+    only — sessions work exactly the same, nothing is persisted, and
+    no tracker is installed.
 
-    The projection registry is not owned here: it arrives from the
-    ``sessionProjections`` row, declared as a required injection, so
+    The persistence backend and the projection cache are not owned
+    here: they arrive from their rows and are resolved lazily on every
+    use, so a row landing after this service constructs is still
+    picked up. They are optional in the lazy sense only: when a
+    storage dir is configured but no persistence row is active, the
+    session op fails loud instead of silently running memory-only.
+    A required injection would pend this fiber forever in memory-only
+    mode, so the lazy resolution is the shape for an optional
+    dependency.
+
+    The projection registry is not owned here either: it arrives from
+    the ``sessionProjections`` row, declared as a required injection, so
     the fiber stays pending until the registry is active and the row
     order cannot leave this service constructed without one. A host
     that constructs this service directly, bypassing the loader,
@@ -107,32 +118,6 @@ class SessionService(Service):
             self._projections = None
         self._active_sessions: dict[str, Session] = {}
         self._handles: dict[str, JsonlSessionHandle] = {}
-        self._persistence: JsonlSessionPersistence | None = None
-        self._tracker: JsonlLiveTracker | None = None
-        self._tracker_dispose: Callable[[], None] | None = None
-        self._projection_cache: SessionProjectionCache | None = None
-        if self.base_storage_dir is not None:
-            delay = cfg.get("live_batch_delay", 0.2)
-            self._persistence = JsonlSessionPersistence(
-                self.base_storage_dir, live_batch_delay=delay
-            )
-            self._tracker = JsonlLiveTracker(self._persistence)
-            self._tracker_dispose = self._tracker.install(ctx)
-            if self._projections is not None:
-                self._projection_cache = SessionProjectionCache(
-                    self._projections,
-                    self.base_storage_dir,
-                    ProjectionCacheConfig(
-                        write_every_events=cfg.get(
-                            "projection_cache_write_every_events", 200
-                        ),
-                        write_interval_ms=cfg.get(
-                            "projection_cache_write_interval_ms", 5000
-                        ),
-                    ),
-                    flush_log=self._flush_log_for_cache,
-                )
-                self._projection_cache.install(ctx)
 
     @property
     def store(self) -> SessionStore:
@@ -148,12 +133,45 @@ class SessionService(Service):
             )
         return self._projections
 
+    def _resolve_persistence(self) -> JsonlSessionPersistence | None:
+        """The persistence row's backend, or ``None`` for memory-only.
+
+        Resolved fresh on every use: the row may land after this
+        service constructs. When a storage dir is configured but no
+        persistence row is active, the session op fails loud instead
+        of silently running memory-only.
+        """
+        if self.base_storage_dir is None:
+            return None
+        service = self.ctx.get("sessionPersistence", None, strict=False)
+        backend: JsonlSessionPersistence | None = (
+            getattr(service, "backend", None) if service is not None else None
+        )
+        if backend is None:
+            raise RuntimeError(
+                "sessions service: base_storage_dir is configured but no "
+                "sessionPersistence row is active"
+            )
+        return backend
+
+    def _resolve_cache(self) -> SessionProjectionCache | None:
+        """The projection-cache row's cache, or ``None`` when there is none.
+
+        Resolved fresh on every use: the row may land after this
+        service constructs. A hollow row carries no cache.
+        """
+        service = self.ctx.get("sessionProjectionCache", None, strict=False)
+        cache: SessionProjectionCache | None = (
+            getattr(service, "cache", None) if service is not None else None
+        )
+        return cache
+
     @property
     def projection_cache(self) -> SessionProjectionCache | None:
         """The persisted projection cache, or ``None`` for a memory-only service."""
-        return self._projection_cache
+        return self._resolve_cache()
 
-    def _flush_log_for_cache(self, session: Session) -> None:
+    def flush_log_for_cache(self, session: Session) -> None:
         """Synchronous log drain + flush ahead of a cache write.
 
         The cache calls this between its checkpoint cut and its record
@@ -162,13 +180,18 @@ class SessionService(Service):
         the store entry is already gone) or when no write handle exists
         yet (the create-point write runs before the persistence handle
         exists). The restore backstop covers any residual overreach.
+        A cache exists only alongside a persistence root, so a missing
+        backend here is a loud failure, never a silent skip.
         """
         if self._store.get(session.session_id) is not session:
             return
-        # A cache exists only alongside a persistence root, which always
-        # installs the live tracker.
-        assert self._tracker is not None
-        self._tracker.drain_live(session.session_id)
+        persistence = self._resolve_persistence()
+        if persistence is None:
+            raise RuntimeError(
+                "sessions service: no sessionPersistence row is active "
+                "for the projection cache flush"
+            )
+        persistence.drain_live(session.session_id)
         handle = self._handles.get(session.session_id)
         if handle is not None:
             handle.flush()
@@ -197,7 +220,8 @@ class SessionService(Service):
         sid = session_id or str(uuid.uuid4())
         if self._store.get(sid) is not None or sid in self._active_sessions:
             raise ValueError(f'session "{sid}" already exists')
-        if self._persistence is None:
+        persistence = self._resolve_persistence()
+        if persistence is None:
             session = self._store.create(sid)
             self._active_sessions[sid] = session
             return session
@@ -206,7 +230,7 @@ class SessionService(Service):
             sid, options={"meta": {"createdAt": header["createdAt"]}}
         )
         try:
-            handle = self._persistence.create(header)
+            handle = persistence.create(header)
         except Exception:
             self._store.remove(session)
             raise
@@ -229,12 +253,13 @@ class SessionService(Service):
         rolls the store entry back.
         """
         session = self._store.fork(source, boundary, child_session_id)
-        if self._persistence is None:
+        persistence = self._resolve_persistence()
+        if persistence is None:
             self._active_sessions[session.session_id] = session
             return session
         header = dict(session.header)
         try:
-            handle = self._persistence.create(
+            handle = persistence.create(
                 header,
                 inherited_event_count=session.inherited_event_count,
             )
@@ -280,16 +305,17 @@ class SessionService(Service):
             return self._active_sessions[session_id]
         if self._store.get(session_id) is not None:
             return self._store.get(session_id)
-        if self._persistence is None:
+        persistence = self._resolve_persistence()
+        if persistence is None:
             return None
         try:
-            handle = self._persistence.open(session_id, "write")
+            handle = persistence.open(session_id, "write")
         except SessionPersistenceNotFoundError:
             return None
         try:
             event_state, events = handle.read()
             session = self._enter_restored(session_id, handle, event_state, events)
-            cache = self._projection_cache
+            cache = self._resolve_cache()
             # A persistence root installs a cache only when the context
             # carries a registry; without one there are no cells to seed.
             if cache is not None:
@@ -343,10 +369,11 @@ class SessionService(Service):
             return self._active_sessions[session_id]
         if self._store.get(session_id) is not None:
             return self._store.get(session_id)
-        if self._persistence is None:
+        persistence = self._resolve_persistence()
+        if persistence is None:
             return None
         try:
-            handle = self._persistence.open(session_id, "read")
+            handle = persistence.open(session_id, "read")
         except SessionPersistenceNotFoundError:
             return None
         event_state, events = handle.read()
@@ -377,16 +404,17 @@ class SessionService(Service):
         live = self._store.get(session_id)
         if live is not None:
             return self._require_projections().snapshot(live)
-        if self._persistence is None:
+        persistence = self._resolve_persistence()
+        if persistence is None:
             return None
-        cache = self._projection_cache
+        cache = self._resolve_cache()
         if cache is None:
             raise RuntimeError(
                 "session projections are unavailable: no "
                 "sessionProjections service on this context"
             )
         try:
-            handle = self._persistence.open(session_id, "read")
+            handle = persistence.open(session_id, "read")
         except SessionPersistenceNotFoundError:
             return None
         try:
@@ -439,8 +467,9 @@ class SessionService(Service):
         """Returns a sorted list of all active and persisted session IDs."""
         ids = {session.session_id for session in self._store.list()}
         ids.update(self._active_sessions.keys())
-        if self._persistence is not None:
-            for snapshot in self._persistence.list():
+        persistence = self._resolve_persistence()
+        if persistence is not None:
+            for snapshot in persistence.list():
                 ids.add(snapshot.header["id"])
         return sorted(ids)
 
@@ -502,10 +531,10 @@ class SessionService(Service):
         if session is not None:
             await self._store.flush(session)
             return
-        if self._tracker is not None:
-            self._tracker.drain_live()
-        if self._persistence is not None:
-            self._persistence.flush()
+        persistence = self._resolve_persistence()
+        if persistence is not None:
+            persistence.drain_live()
+            persistence.flush()
 
     def log_event(
         self,

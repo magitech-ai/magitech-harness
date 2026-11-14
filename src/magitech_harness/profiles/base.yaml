@@ -27,9 +27,11 @@
   name: magitech_harness.session.service:SessionService
   config:
     base_storage_dir: ${MAGITECH_SESSIONS_DIR}
+- id: session-persistence-jsonl
+  name: magitech_harness.session.persistence_jsonl:JsonlSessionPersistenceService
+  config:
+    root: ${MAGITECH_SESSIONS_DIR}
     live_batch_delay: 0.2
-    projection_cache_write_every_events: 200
-    projection_cache_write_interval_ms: 5000
 - id: projection-title
   name: magitech_harness.session.projections:apply_title_projection
   config: {}
@@ -54,6 +56,12 @@
 - id: session-checkpoint-policy
   name: magitech_harness.session.checkpoint_policy:apply
   config: {}
+- id: session-projection-cache
+  name: magitech_harness.session.projection_cache:SessionProjectionCacheService
+  config:
+    root: ${MAGITECH_SESSIONS_DIR}
+    write_every_events: 200
+    write_interval_ms: 5000
 - id: agent-loop
   name: magitech_harness.agent.loop:AgentLoopService
   config: {}

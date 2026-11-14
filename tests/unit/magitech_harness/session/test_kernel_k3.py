@@ -20,6 +20,9 @@ import magitech_harness
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.session import service as service_module
 from magitech_harness.session.checkpoint_policy import apply as apply_checkpoint_policy
+from magitech_harness.session.persistence_jsonl import (
+    JsonlSessionPersistenceService,
+)
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
@@ -109,8 +112,14 @@ def test_service_constructs_none_of_the_moved_pieces() -> None:
 async def test_direct_construction_degrades_without_projections(
     tmp_path: Path,
 ) -> None:
-    """A bare-ctx service has no cache and fails loud on projection reads."""
-    service = SessionService(Context(), {"base_storage_dir": tmp_path})
+    """A bare-ctx service has no cache and fails loud on projection reads.
+
+    The persistence row is mounted so session ops work; no registry
+    means no cache row can mount, so projection reads fail loud.
+    """
+    ctx = Context()
+    JsonlSessionPersistenceService(ctx, {"root": tmp_path})
+    service = SessionService(ctx, {"base_storage_dir": tmp_path})
     assert service.projection_cache is None
     with pytest.raises(RuntimeError, match="sessionProjections"):
         service.read_projections("s1")

@@ -24,8 +24,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeGuard
+from typing import TYPE_CHECKING, Any, ClassVar, TypeGuard
 from uuid import uuid4
+
+from anima import Context, Service
 
 from magitech_harness.session.events import (
     SessionEvent,
@@ -691,3 +693,76 @@ class SessionProjectionCache:
         finally:
             self.mark_clean(session)
             self._dirty.pop(session.session_id, None)
+
+
+class SessionProjectionCacheService(Service):
+    """Row service owning the persisted projection cache.
+
+    A row service providing ``sessionProjectionCache``. With a storage
+    root configured it constructs the cache, installs its write-behind
+    listeners, and wires the sessions service's log flush ahead of
+    every cache write; with no root it activates hollow — the slot
+    exists but carries no cache. Row unload uninstalls the listeners
+    and cancels the write-behind timers.
+    """
+
+    inject: ClassVar[list[str]] = ["sessions", "sessionProjections"]
+
+    def __init__(
+        self,
+        ctx: Context,
+        config: dict[str, Any] | None = None,
+    ) -> None:
+        """Build the service; the cache exists only with a root configured.
+
+        ``config`` carries ``root``, ``write_every_events``, and
+        ``write_interval_ms``; a falsy root activates the service
+        hollow. Raises ``RuntimeError`` when the context carries no
+        sessions service or registry.
+        """
+        super().__init__(ctx, "sessionProjectionCache")
+        cfg = config or {}
+        root = cfg.get("root") or None
+        self._cache: SessionProjectionCache | None = None
+        if root is not None:
+            sessions = ctx.get("sessions", None, strict=False)
+            if sessions is None:
+                raise RuntimeError(
+                    "session-projection-cache requires the sessions service"
+                )
+            registry = ctx.get("sessionProjections", None, strict=False)
+            if registry is None:
+                raise RuntimeError(
+                    "session-projection-cache requires the sessionProjections service"
+                )
+            cache = SessionProjectionCache(
+                registry,
+                Path(root),
+                ProjectionCacheConfig(
+                    write_every_events=cfg.get("write_every_events", 200),
+                    write_interval_ms=cfg.get("write_interval_ms", 5000),
+                ),
+                flush_log=sessions.flush_log_for_cache,
+            )
+            cache.install(ctx)
+            self._cache = cache
+        # Row unload runs this: listener removal alone would not stop
+        # the write-behind timers.
+        ctx.effect(lambda: self.dispose)
+
+    @property
+    def cache(self) -> SessionProjectionCache | None:
+        """The owned cache, or ``None`` when the row is hollow."""
+        return self._cache
+
+    @property
+    def active(self) -> bool:
+        """Whether this row owns a live cache."""
+        return self._cache is not None
+
+    def dispose(self) -> None:
+        """Uninstall the cache listeners and cancel its timers. Idempotent."""
+        if self._cache is not None:
+            cache = self._cache
+            self._cache = None
+            cache.dispose()
