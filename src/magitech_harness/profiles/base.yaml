@@ -1,0 +1,19 @@
+- id: system-prompt
+  name: magitech_harness.system_prompt.service:SystemPromptService
+  config: {}
+- id: tools
+  name: magitech_harness.tools.service:ToolService
+  config: {}
+- id: llm
+  name: magitech_harness.llm.service:LLMService
+  config: {}
+- id: shell
+  name: magitech_harness.shell.service:LocalShellService
+  config: {}
+- id: approvals
+  name: magitech_harness.approval.service:ApprovalService
+  config:
+    default_verdict: false
+- id: layers
+  name: magitech_harness.components.layers:LayerResolutionService
+  config: {}
