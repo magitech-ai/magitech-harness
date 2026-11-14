@@ -17,6 +17,9 @@
 - id: layers
   name: magitech_harness.components.layers:LayerResolutionService
   config: {}
+- id: components
+  name: magitech_harness.components.service:ComponentService
+  config: {}
 - id: session-projections
   # The sessions row declares this slot as a required injection, so
   # the row order carries no load semantics here; this listing order
@@ -53,6 +56,14 @@
     fallback_max_words: 5
     fallback_max_bytes: 40
     max_title_bytes: 80
+- id: session-title-first-prompt
+  name: magitech_harness.session.title_first_prompt:apply
+  config:
+    target_words: 5
+    target_cjk_characters: 10
+    max_input_bytes: 4096
+    max_output_tokens: 4096
+    timeout_ms: 60000
 - id: session-checkpoint-policy
   name: magitech_harness.session.checkpoint_policy:apply
   config: {}

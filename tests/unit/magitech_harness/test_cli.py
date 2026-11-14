@@ -8,9 +8,10 @@ from unittest.mock import patch
 
 import pytest
 from anima import Context, EventMode
+from anima.loader import load_profile
 
 import magitech_harness
-from magitech_harness import create_harness
+from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortError
 from magitech_harness.cli import (
     ReplDispatcher,
@@ -22,10 +23,20 @@ from magitech_harness.llm.service import MockLLMProvider
 from magitech_harness.session.events import EventType, ToolCallData
 
 
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
+
+
 @pytest.mark.asyncio
 async def test_repl_dispatcher_all_commands(tmp_path: Path) -> None:
     """Verifies ReplDispatcher handling of all slash commands."""
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     s = ctx.sessions.create("sess_main")
@@ -101,7 +112,8 @@ async def test_repl_dispatcher_all_commands(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_run_repl_interactive_stream_and_tools() -> None:
     """Verifies run_repl prompt loop with streamed chunks and tool events."""
-    ctx = create_harness(mock_provider=True)
+    ctx = create_harness()
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     mock_llm: MockLLMProvider = ctx.llm.active_provider
@@ -156,7 +168,8 @@ async def test_run_repl_interactive_stream_and_tools() -> None:
 @pytest.mark.asyncio
 async def test_run_repl_signal_handler_unsupported_and_usage_event() -> None:
     """Verifies run_repl when loop.add_signal_handler raises NotImplementedError and handles usage events."""
-    ctx = create_harness(mock_provider=True)
+    ctx = create_harness()
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     async def mock_stream_turn(session, prompt, **kwargs):
@@ -190,7 +203,8 @@ async def test_run_repl_signal_handler_unsupported_and_usage_event() -> None:
 @pytest.mark.asyncio
 async def test_run_repl_remove_signal_handler_exception() -> None:
     """Verifies run_repl handles exception when loop.remove_signal_handler fails."""
-    ctx = create_harness(mock_provider=True)
+    ctx = create_harness()
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     async def mock_stream_turn(session, prompt, **kwargs):
@@ -215,7 +229,8 @@ async def test_run_repl_remove_signal_handler_exception() -> None:
 @pytest.mark.asyncio
 async def test_run_repl_sigint_handler_invocation() -> None:
     """Verifies that the registered SIGINT handler invokes sig.abort('SIGINT')."""
-    ctx = create_harness(mock_provider=True)
+    ctx = create_harness()
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     handler_ref: list[Any] = []
@@ -257,7 +272,8 @@ async def test_run_repl_sigint_handler_invocation() -> None:
 @pytest.mark.asyncio
 async def test_run_repl_abort_error_and_turn_exception() -> None:
     """Verifies run_repl handling AbortError and generic Exception."""
-    ctx = create_harness(mock_provider=True)
+    ctx = create_harness()
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     inputs = ["abort me", "crash me", "/exit"]
@@ -458,3 +474,85 @@ def test_main_module_execution(monkeypatch) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         runpy.run_module("magitech_harness.cli", run_name="__main__")
+
+
+@pytest.mark.asyncio
+async def test_main_async_boot_order_bundle_profile_fallback_dispatch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verifies the CLI boots bundle rows, then the user profile, then dispatch.
+
+    The user profile registers a provider, so the mock fallback must be
+    skipped: dispatch sees the profile provider and no mock provider.
+    """
+    import types
+
+    order: list[str] = []
+    seen: dict[str, Any] = {}
+
+    real_create = create_harness
+
+    def spy_create(*args, **kwargs):
+        order.append("create_harness")
+        return real_create(*args, **kwargs)
+
+    monkeypatch.setattr("magitech_harness.cli.create_harness", spy_create)
+
+    def spy_audit(ctx):
+        order.append("check_bundle_entries")
+        return check_bundle_entries(ctx)
+
+    monkeypatch.setattr("magitech_harness.cli.check_bundle_entries", spy_audit)
+
+    def spy_load(ctx, path):
+        order.append("load_profile")
+        return load_profile(ctx, path)
+
+    monkeypatch.setattr("magitech_harness.cli.load_profile", spy_load)
+
+    dummy_pkg = types.ModuleType("k5_order_provider_pkg")
+
+    class DummyProviderComponent:
+        inject: ClassVar[list[str]] = ["llm"]
+
+        def __init__(self, c):
+            c.llm.register_provider("dummy_p", MockLLMProvider())
+
+    dummy_pkg.DummyProviderComponent = DummyProviderComponent
+    monkeypatch.setitem(sys.modules, "k5_order_provider_pkg", dummy_pkg)
+
+    profile_file = tmp_path / "profile.yaml"
+    profile_file.write_text(
+        "['k5_order_provider_pkg:DummyProviderComponent']", encoding="utf-8"
+    )
+
+    async def spy_repl(ctx, model=None):
+        order.append("dispatch")
+        seen["providers"] = set(ctx.llm.providers)
+
+    monkeypatch.setattr("magitech_harness.cli.run_repl", spy_repl)
+
+    await main_async(["--storage", str(tmp_path), "--profile", str(profile_file)])
+    assert order == [
+        "create_harness",
+        "check_bundle_entries",
+        "load_profile",
+        "dispatch",
+    ]
+    assert seen["providers"] == {"dummy_p"}
+
+
+@pytest.mark.asyncio
+async def test_main_async_mock_fallback_runs_before_dispatch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verifies the no-provider mock fallback registers before dispatch."""
+    seen: dict[str, Any] = {}
+
+    async def spy_repl(ctx, model=None):
+        seen["providers"] = set(ctx.llm.providers)
+
+    monkeypatch.setattr("magitech_harness.cli.run_repl", spy_repl)
+
+    await main_async(["--storage", str(tmp_path)])
+    assert seen["providers"] == {"mock"}

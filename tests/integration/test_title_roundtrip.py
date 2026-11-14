@@ -1,11 +1,12 @@
 """Integration tests: titles round-trip through real persistence."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
+from anima import Context
 
-from magitech_harness import create_harness
+from magitech_harness import MockLLMProvider, create_harness
 from magitech_harness.session.store import Session
 
 
@@ -21,9 +22,19 @@ def _user(ctx: Any, session: Session, text: str) -> None:
     )
 
 
+class _MockProviderComponent:
+    """Test-only component registering the offline mock provider."""
+
+    inject: ClassVar[list[str]] = ["llm"]
+
+    def __init__(self, ctx: Context) -> None:
+        ctx.llm.register_provider("mock", MockLLMProvider())
+
+
 @pytest.mark.asyncio
 async def test_title_survives_restart_and_rename_pins(tmp_path: Path):
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     session = ctx.sessions.create("s1")
     _user(ctx, session, "How do I reset my password for the dashboard?")
@@ -46,7 +57,8 @@ async def test_title_survives_restart_and_rename_pins(tmp_path: Path):
     # restart, reload.
     await ctx.sessions.flush()
     assert ctx.sessions.close("s1") is True
-    ctx2 = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx2 = create_harness(storage_dir=tmp_path)
+    ctx2.use(_MockProviderComponent)
     await ctx2.flush()
     loaded = ctx2.sessions.load("s1")
     assert ctx2.sessionTitle.get(loaded)["title"] == "My Renamed Session"
@@ -59,7 +71,8 @@ async def test_title_survives_restart_and_rename_pins(tmp_path: Path):
 
 @pytest.mark.asyncio
 async def test_fallback_is_deterministic_across_sessions(tmp_path: Path):
-    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
     await ctx.flush()
     first = ctx.sessions.create("first")
     second = ctx.sessions.create("second")
@@ -74,7 +87,8 @@ async def test_fallback_is_deterministic_across_sessions(tmp_path: Path):
     await ctx.sessions.flush()
     assert ctx.sessions.close("first") is True
     assert ctx.sessions.close("second") is True
-    ctx2 = create_harness(storage_dir=tmp_path, mock_provider=True)
+    ctx2 = create_harness(storage_dir=tmp_path)
+    ctx2.use(_MockProviderComponent)
     await ctx2.flush()
     for field in ("title", "messageSeqs", "source"):
         assert (

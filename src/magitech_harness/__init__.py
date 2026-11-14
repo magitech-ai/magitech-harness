@@ -8,7 +8,6 @@ import asyncio
 import os
 from collections.abc import Callable
 from pathlib import Path
-from typing import ClassVar
 
 from anima import Context, FiberState
 from anima.loader import LoaderService
@@ -102,14 +101,14 @@ def _settle_default_bundle(ctx: Context, loader: LoaderService) -> None:
 def create_harness(
     storage_dir: Path | str | None = None,
     *,
-    mock_provider: bool = False,
     prepare: Callable[[Context], None] | None = None,
 ) -> Context:
     """Factory creating a standard Context populated with core Harness services.
 
-    The six leaf services (system prompt, tools, LLM, shell, approvals,
-    layers), sessions, and the agent loop mount from the default bundle
-    file; components still mount directly. The sessions row reads its
+    Every service mounts from the default bundle file: the six leaf
+    services (system prompt, tools, LLM, shell, approvals, layers),
+    components, sessions, the session internals, the agent loop, and
+    the first-prompt title provider. The sessions row reads its
     storage dir from ``MAGITECH_SESSIONS_DIR`` in the environment
     passed to the loader: ``storage_dir`` sets it, and
     ``storage_dir=None`` removes it, so an ambient value cannot turn a
@@ -125,7 +124,6 @@ def create_harness(
 
     Args:
         storage_dir: Optional base directory to persist session JSONL files.
-        mock_provider: If True, mounts an offline MockLLMProvider for testing.
         prepare: Optional host setup called with the context after the
             loader installs and before the bundle loads, so before any
             row activates.
@@ -148,28 +146,16 @@ def create_harness(
     else:
         env.pop("MAGITECH_SESSIONS_DIR", None)
 
-    # Mount the default bundle rows: the six leaf services, sessions,
-    # and the agent loop. The loader installs here; the bundle loads
-    # after prepare, so the hook runs before any row activates on
-    # either the sync or the loop path.
+    # Mount the default bundle rows. The loader installs here; the
+    # bundle loads after prepare, so the hook runs before any row
+    # activates on either the sync or the loop path. No service mounts
+    # directly: the kernel is the bare context, the loader, and the
+    # bundle.
     loader = LoaderService(ctx, {"filename": _BASE_BUNDLE_PATH})
     if prepare is not None:
         prepare(ctx)
     loader.load(_BASE_BUNDLE_PATH, env=env)
     _settle_default_bundle(ctx, loader)
-
-    # Mount the remaining services directly for now.
-    ctx.use(ComponentService)
-
-    if mock_provider:
-
-        class _MockProviderComponent:
-            inject: ClassVar[list[str]] = ["llm"]
-
-            def __init__(self, c: Context) -> None:
-                c.llm.register_provider("mock", MockLLMProvider())
-
-        ctx.use(_MockProviderComponent)
 
     return ctx
 
