@@ -5,6 +5,7 @@ from __future__ import annotations
 __version__ = "0.2.0"
 
 import asyncio
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import ClassVar
@@ -107,10 +108,12 @@ def create_harness(
     """Factory creating a standard Context populated with core Harness services.
 
     The six leaf services (system prompt, tools, LLM, shell, approvals,
-    layers) mount from the default bundle file; sessions, the agent
-    loop, and components still mount directly. The bundle loads before
-    the direct mounts so the agent loop's dependencies are present
-    when it mounts.
+    layers), sessions, and the agent loop mount from the default bundle
+    file; components still mount directly. The sessions row reads its
+    storage dir from ``MAGITECH_SESSIONS_DIR`` in the environment
+    passed to the loader: ``storage_dir`` sets it, and
+    ``storage_dir=None`` removes it, so an ambient value cannot turn a
+    memory-only boot into a persisted one.
 
     The optional ``prepare`` hook runs after the loader installs and
     before the bundle loads: no bundle slot is reachable inside it, and
@@ -133,18 +136,28 @@ def create_harness(
 
     base_path = Path(storage_dir) if storage_dir else None
 
-    # Mount the default bundle rows first: the six leaf services. The
-    # loader installs here; the bundle loads after prepare, so the hook
-    # runs before any row activates on either the sync or the loop path.
+    # The sessions row reads its storage dir from the environment: the
+    # loader interpolates ${MAGITECH_SESSIONS_DIR} from the mapping
+    # passed here, which replaces os.environ as the interpolation
+    # source for the bundle. A missing storage dir removes the
+    # variable, so an ambient value cannot persist a memory-only boot.
+    env = dict(os.environ)
+    if base_path is not None:
+        env["MAGITECH_SESSIONS_DIR"] = str(base_path)
+    else:
+        env.pop("MAGITECH_SESSIONS_DIR", None)
+
+    # Mount the default bundle rows: the six leaf services, sessions,
+    # and the agent loop. The loader installs here; the bundle loads
+    # after prepare, so the hook runs before any row activates on
+    # either the sync or the loop path.
     loader = LoaderService(ctx, {"filename": _BASE_BUNDLE_PATH})
     if prepare is not None:
         prepare(ctx)
-    loader.load(_BASE_BUNDLE_PATH)
+    loader.load(_BASE_BUNDLE_PATH, env=env)
     _settle_default_bundle(ctx, loader)
 
     # Mount the remaining services directly for now.
-    ctx.use(SessionService, base_storage_dir=base_path)
-    ctx.use(AgentLoopService)
     ctx.use(ComponentService)
 
     if mock_provider:

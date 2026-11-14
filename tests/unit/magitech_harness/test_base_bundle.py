@@ -9,10 +9,12 @@ from anima import Context, Service
 from anima.jsexpr import load_yaml
 
 import magitech_harness
-from magitech_harness import check_bundle_entries, create_harness
+from magitech_harness import EventType, check_bundle_entries, create_harness
+from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.components.layers import LayerResolutionService
 from magitech_harness.llm.service import LLMService
+from magitech_harness.session.service import SessionService
 from magitech_harness.shell.service import LocalShellService
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.service import ToolService
@@ -48,11 +50,29 @@ EXPECTED_ROWS = [
         "name": "magitech_harness.components.layers:LayerResolutionService",
         "config": {},
     },
+    {
+        "id": "sessions",
+        "name": "magitech_harness.session.service:SessionService",
+        "config": {
+            "base_storage_dir": "${MAGITECH_SESSIONS_DIR}",
+            "title_fallback_max_words": 5,
+            "title_fallback_max_bytes": 40,
+            "title_max_title_bytes": 80,
+            "live_batch_delay": 0.2,
+            "projection_cache_write_every_events": 200,
+            "projection_cache_write_interval_ms": 5000,
+        },
+    },
+    {
+        "id": "agent-loop",
+        "name": "magitech_harness.agent.loop:AgentLoopService",
+        "config": {},
+    },
 ]
 
 
 def test_base_bundle_rows() -> None:
-    """Verifies the default bundle file carries exactly the six leaf rows."""
+    """Verifies the default bundle file carries exactly the eight rows."""
     bundle_path = (
         Path(magitech_harness.__file__).resolve().parent / "profiles" / "base.yaml"
     )
@@ -62,7 +82,7 @@ def test_base_bundle_rows() -> None:
 
 
 def test_bundle_slots_are_row_services() -> None:
-    """Verifies the six bundle slots resolve to the row services."""
+    """Verifies the eight bundle slots resolve to the row services."""
     ctx = create_harness()
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
@@ -70,7 +90,10 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.shell, LocalShellService)
     assert isinstance(ctx.approvals, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
+    assert isinstance(ctx.sessions, SessionService)
+    assert isinstance(ctx.agent_loop, AgentLoopService)
     assert ctx.approvals.default_verdict is False
+    assert ctx.sessions.base_storage_dir is None
     assert not ctx.llm.providers
 
 
@@ -80,11 +103,17 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     ctx = create_harness()
     assert not ctx.has("tools")
     assert not ctx.has("llm")
+    assert not ctx.has("sessions")
+    assert not ctx.has("agent_loop")
     await ctx.flush()
     assert ctx.has("tools")
     assert ctx.has("llm")
+    assert ctx.has("sessions")
+    assert ctx.has("agent_loop")
     assert isinstance(ctx.tools, ToolService)
     assert isinstance(ctx.llm, LLMService)
+    assert isinstance(ctx.sessions, SessionService)
+    assert isinstance(ctx.agent_loop, AgentLoopService)
 
 
 def _write_bundle(tmp_path: Path, text: str) -> Path:
@@ -251,4 +280,64 @@ async def test_check_bundle_entries_fails_loud_on_failing_row_after_flush(
     ctx = create_harness()
     await ctx.flush()
     with pytest.raises(RuntimeError, match="raising-row"):
+        check_bundle_entries(ctx)
+
+
+@pytest.mark.asyncio
+async def test_sessions_row_receives_storage_dir(tmp_path: Path) -> None:
+    """Verifies create_harness(storage_dir=...) reaches the sessions row."""
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    assert ctx.sessions.base_storage_dir == tmp_path
+    session = ctx.sessions.create("k2_storage")
+    ctx.sessions.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    await ctx.sessions.flush()
+    location = ctx.sessions.location(session.session_id)
+    assert location is not None
+    assert location.exists()
+    assert location.is_relative_to(tmp_path)
+
+
+@pytest.mark.asyncio
+async def test_storage_dir_none_ignores_ambient_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies storage_dir=None stays memory-only despite an ambient value."""
+    monkeypatch.setenv("MAGITECH_SESSIONS_DIR", str(tmp_path))
+    ctx = create_harness()
+    await ctx.flush()
+    assert ctx.sessions.base_storage_dir is None
+    session = ctx.sessions.create("k2_memory_only")
+    ctx.sessions.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    await ctx.sessions.flush()
+    assert ctx.sessions.location(session.session_id) is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_create_harness_fails_loud_on_bad_sessions_row(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies a sessions row naming an unresolvable target fails loud."""
+    bundle_path = _write_bundle(
+        tmp_path,
+        "- id: sessions\n  name: nonexistent.module:Nope\n  config: {}\n",
+    )
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", bundle_path)
+    with pytest.raises(RuntimeError, match="sessions"):
+        create_harness()
+
+
+@pytest.mark.asyncio
+async def test_check_bundle_entries_fails_loud_on_bad_sessions_row_after_flush(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies the audit fails loud on a bad sessions row on the loop path."""
+    bundle_path = _write_bundle(
+        tmp_path,
+        "- id: sessions\n  name: nonexistent.module:Nope\n  config: {}\n",
+    )
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", bundle_path)
+    ctx = create_harness()
+    await ctx.flush()
+    with pytest.raises(RuntimeError, match="sessions"):
         check_bundle_entries(ctx)

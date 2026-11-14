@@ -353,3 +353,82 @@ async def test_replay_reproduces_identical_message_sequence(tmp_path: Path):
     reloaded = Session.load(location)
     assert reloaded is not None
     assert reloaded.derive_messages() == live
+
+
+@pytest.mark.asyncio
+async def test_run_turn_and_stream_turn_log_identical_messages(tmp_path: Path):
+    """Verifies a run_turn and a stream_turn log the identical messages."""
+    ctx = create_harness(storage_dir=tmp_path, mock_provider=True)
+    await ctx.flush()
+
+    ctx.tools.register(
+        define_tool(
+            name="multiply",
+            description="Multiplies two numbers",
+            parameters={
+                "a": {"type": "integer", "required": True},
+                "b": {"type": "integer", "required": True},
+            },
+            execute=lambda args: args.get("a", 0) * args.get("b", 0),
+        )
+    )
+
+    mock_llm: MockLLMProvider = ctx.llm.active_provider
+    for _ in range(2):
+        mock_llm.queue_response(
+            text="Let me calculate that for you.",
+            tool_calls=[
+                ToolCallData(
+                    call_id="call_1", name="multiply", arguments={"a": 6, "b": 7}
+                )
+            ],
+        )
+        mock_llm.queue_response(text="The answer is 42.", tool_calls=[])
+
+    run_session = ctx.sessions.create("run_session")
+    run_result = await ctx.agent_loop.run_turn(run_session, "What is 6 * 7?")
+    assert run_result == "The answer is 42."
+
+    stream_session = ctx.sessions.create("stream_session")
+    streamed = [
+        chunk
+        async for chunk in ctx.agent_loop.stream_turn(stream_session, "What is 6 * 7?")
+    ]
+    assert streamed[-1] == {"type": "turn_end", "text": "The answer is 42."}
+
+    # The deferred fallback title may land in either turn, so it is
+    # excluded from the exact sequence and asserted separately below.
+    # Message ids are generated per message and the stream turn records
+    # its streamed chunks (with wall-clock times) in the assistant
+    # message payload, so both are stripped before comparing payloads;
+    # everything else must match exactly.
+    def normalise(value: object) -> object:
+        if isinstance(value, dict):
+            return {
+                key: normalise(item)
+                for key, item in value.items()
+                if key not in ("id", "stream")
+            }
+        if isinstance(value, list):
+            return [normalise(item) for item in value]
+        return value
+
+    def logged(session: Session) -> list[tuple[str, object]]:
+        return [
+            (ev.type, normalise(ev.payload))
+            for ev in session.events
+            if ev.type != EventType.SESSION_TITLE
+        ]
+
+    assert logged(run_session) == logged(stream_session)
+    assert normalise(run_session.derive_messages()) == normalise(
+        stream_session.derive_messages()
+    )
+
+    await ctx.sessions.title_service.drain()
+    await ctx.sessions.flush()
+    for session in (run_session, stream_session):
+        titles = [ev for ev in session.events if ev.type == EventType.SESSION_TITLE]
+        assert len(titles) == 1
+        assert titles[0].payload["title"] == "What is 6 * 7?"
+        assert titles[0].payload["source"] == {"kind": "fallback"}
