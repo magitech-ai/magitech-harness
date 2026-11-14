@@ -824,9 +824,10 @@ def test_acceptance_corrupt_row_refused_not_repaired(tmp_path: Path) -> None:
     torn = before.decode("utf-8").splitlines()
     torn[3] = '{"type": "user/message", "seq": 3, "time": 1003, "data": {"text": "tor'
     file_path.write_text("\n".join(torn) + "\n", encoding="utf-8")
+    expected = file_path.read_bytes()
     with pytest.raises(SessionPersistenceCorruptionError, match="corrupt session row"):
         Session.load(file_path)
-    assert file_path.read_bytes() == ("\n".join(torn) + "\n").encode("utf-8")
+    assert file_path.read_bytes() == expected
 
 
 def test_acceptance_unknown_version_refused_without_decoding_rows(
