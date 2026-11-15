@@ -17,6 +17,8 @@ from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.components.layers import LayerResolutionService
 from magitech_harness.components.service import ComponentService
+from magitech_harness.fs.local import LocalFileSystem
+from magitech_harness.jobs.local import LocalJobRegistry
 from magitech_harness.llm.service import LLMService
 from magitech_harness.session.persistence_jsonl import (
     JsonlSessionPersistenceService,
@@ -27,7 +29,11 @@ from magitech_harness.session.projection_cache import (
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
-from magitech_harness.shell.service import LocalShellService
+from magitech_harness.session.working_directory import WorkingDirectoryService
+from magitech_harness.shell.bash_local import LocalBashExecutor
+from magitech_harness.shell.pwsh_local import LocalPwshExecutor
+from magitech_harness.shell_env.service import ShellEnvRegistry
+from magitech_harness.subprocess.local import LocalSubprocessRuntime
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.native_executor import NativeToolExecutor
 from magitech_harness.tools.service import ToolService
@@ -54,8 +60,45 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
-        "id": "shell",
-        "name": "magitech_harness.shell.service:LocalShellService",
+        "id": "fs",
+        "name": "magitech_harness.fs.local:LocalFileSystem",
+        "config": {},
+    },
+    {
+        "id": "fs-observation-policy",
+        "name": "magitech_harness.fs.observation_policy:apply",
+        "config": {},
+    },
+    {
+        "id": "subprocess",
+        "name": "magitech_harness.subprocess.local:LocalSubprocessRuntime",
+        "config": {},
+    },
+    {
+        "id": "shell-env",
+        "name": "magitech_harness.shell_env.service:ShellEnvRegistry",
+        "config": {},
+    },
+    {
+        "id": "bash-local",
+        "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
+        "disabled": {"__jsExpr": "process.platform === 'win32'"},
+        "config": {},
+    },
+    {
+        "id": "pwsh-local",
+        "name": "magitech_harness.shell.pwsh_local:LocalPwshExecutor",
+        "disabled": {"__jsExpr": "process.platform !== 'win32'"},
+        "config": {},
+    },
+    {
+        "id": "jobs",
+        "name": "magitech_harness.jobs.local:LocalJobRegistry",
+        "config": {},
+    },
+    {
+        "id": "working-directory",
+        "name": "magitech_harness.session.working_directory:WorkingDirectoryService",
         "config": {},
     },
     {
@@ -197,7 +240,15 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.tools, ToolService)
     assert isinstance(ctx.tools.select_executor(), NativeToolExecutor)
     assert isinstance(ctx.llm, LLMService)
-    assert isinstance(ctx.shell, LocalShellService)
+    assert isinstance(ctx.fs, LocalFileSystem)
+    assert isinstance(ctx.subprocess, LocalSubprocessRuntime)
+    assert isinstance(ctx.shellEnv, ShellEnvRegistry)
+    assert isinstance(
+        ctx.shell,
+        LocalPwshExecutor if sys.platform == "win32" else LocalBashExecutor,
+    )
+    assert isinstance(ctx.jobs, LocalJobRegistry)
+    assert isinstance(ctx.workingDirectory, WorkingDirectoryService)
     assert isinstance(ctx.approvals, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
     assert isinstance(ctx.components, ComponentService)
@@ -231,6 +282,12 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     ctx = create_harness()
     assert not ctx.has("tools")
     assert not ctx.has("llm")
+    assert not ctx.has("fs")
+    assert not ctx.has("subprocess")
+    assert not ctx.has("shellEnv")
+    assert not ctx.has("shell")
+    assert not ctx.has("jobs")
+    assert not ctx.has("workingDirectory")
     assert not ctx.has("sessions")
     assert not ctx.has("sessionProjections")
     assert not ctx.has("sessionTitle")
@@ -243,6 +300,12 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     await ctx.flush()
     assert ctx.has("tools")
     assert ctx.has("llm")
+    assert ctx.has("fs")
+    assert ctx.has("subprocess")
+    assert ctx.has("shellEnv")
+    assert ctx.has("shell")
+    assert ctx.has("jobs")
+    assert ctx.has("workingDirectory")
     assert ctx.has("sessions")
     assert ctx.has("sessionProjections")
     assert ctx.has("sessionTitle")
@@ -582,4 +645,76 @@ def test_swapped_agent_loop_dependencies_resolve_via_injection(
         missing_bundle = _write_bundle(tmp_path, buf.getvalue())
         monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", missing_bundle)
         with pytest.raises(RuntimeError, match="agent-loop"):
+            create_harness()
+
+
+def test_swapped_shell_before_subprocess_resolves_via_injection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies shell waits on subprocess even when listed first."""
+    swapped_bundle = _write_bundle(
+        tmp_path,
+        "- id: shell\n"
+        "  name: magitech_harness.shell.bash_local:LocalBashExecutor\n"
+        "  config: {}\n"
+        "- id: subprocess\n"
+        "  name: magitech_harness.subprocess.local:LocalSubprocessRuntime\n"
+        "  config: {}\n",
+    )
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", swapped_bundle)
+    ctx = create_harness()
+    assert isinstance(ctx.shell, LocalBashExecutor)
+    assert isinstance(ctx.subprocess, LocalSubprocessRuntime)
+
+    missing_dep_bundle = _write_bundle(
+        tmp_path,
+        "- id: shell\n"
+        "  name: magitech_harness.shell.bash_local:LocalBashExecutor\n"
+        "  config: {}\n",
+    )
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", missing_dep_bundle)
+    with pytest.raises(RuntimeError, match="shell"):
+        create_harness()
+
+
+def test_swapped_working_directory_dependencies_resolve_via_injection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies working-directory waits on fs, sessionProjections, and systemPrompt."""
+    dep_rows = [
+        {
+            "id": "fs",
+            "name": "magitech_harness.fs.local:LocalFileSystem",
+            "config": {},
+        },
+        {
+            "id": "session-projections",
+            "name": "magitech_harness.session.projection_registry:SessionProjectionRegistry",
+            "config": {},
+        },
+        {
+            "id": "system-prompt",
+            "name": "magitech_harness.system_prompt.service:SystemPromptService",
+            "config": {},
+        },
+    ]
+    wd_row = {
+        "id": "working-directory",
+        "name": "magitech_harness.session.working_directory:WorkingDirectoryService",
+        "config": {},
+    }
+    buf = io.StringIO()
+    dump_yaml([wd_row, *reversed(dep_rows)], buf)
+    swapped_bundle = _write_bundle(tmp_path, buf.getvalue())
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", swapped_bundle)
+    ctx = create_harness()
+    assert isinstance(ctx.workingDirectory, WorkingDirectoryService)
+
+    for omitted in dep_rows:
+        partial_rows = [wd_row, *(r for r in dep_rows if r is not omitted)]
+        buf = io.StringIO()
+        dump_yaml(partial_rows, buf)
+        missing_bundle = _write_bundle(tmp_path, buf.getvalue())
+        monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", missing_bundle)
+        with pytest.raises(RuntimeError, match="working-directory"):
             create_harness()

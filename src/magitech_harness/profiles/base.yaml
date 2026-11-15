@@ -10,8 +10,31 @@
 - id: llm
   name: magitech_harness.llm.service:LLMService
   config: {}
-- id: shell
-  name: magitech_harness.shell.service:LocalShellService
+- id: fs
+  name: magitech_harness.fs.local:LocalFileSystem
+  config: {}
+- id: fs-observation-policy
+  name: magitech_harness.fs.observation_policy:apply
+  config: {}
+- id: subprocess
+  name: magitech_harness.subprocess.local:LocalSubprocessRuntime
+  config: {}
+- id: shell-env
+  name: magitech_harness.shell_env.service:ShellEnvRegistry
+  config: {}
+- id: bash-local
+  name: magitech_harness.shell.bash_local:LocalBashExecutor
+  disabled: !!js process.platform === 'win32'
+  config: {}
+- id: pwsh-local
+  name: magitech_harness.shell.pwsh_local:LocalPwshExecutor
+  disabled: !!js process.platform !== 'win32'
+  config: {}
+- id: jobs
+  name: magitech_harness.jobs.local:LocalJobRegistry
+  config: {}
+- id: working-directory
+  name: magitech_harness.session.working_directory:WorkingDirectoryService
   config: {}
 - id: approvals
   name: magitech_harness.approval.service:ApprovalService

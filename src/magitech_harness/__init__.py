@@ -28,6 +28,10 @@ from magitech_harness.approval.service import (
 from magitech_harness.components.layers import ConfigLayer, LayerResolutionService
 from magitech_harness.components.manifest import ComponentManifest
 from magitech_harness.components.service import ComponentService
+from magitech_harness.fs.local import LocalFileSystem
+from magitech_harness.fs.service import FileSystem
+from magitech_harness.jobs.local import LocalJobRegistry
+from magitech_harness.jobs.service import JobRegistry
 from magitech_harness.llm.service import (
     LLMProvider,
     LLMService,
@@ -45,7 +49,14 @@ from magitech_harness.session.events import (
 from magitech_harness.session.pairing import is_tool_pairing_balanced
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session, derive_messages
+from magitech_harness.session.working_directory import WorkingDirectoryService
+from magitech_harness.shell.bash_local import LocalBashExecutor
+from magitech_harness.shell.executor import ShellExecutor
+from magitech_harness.shell.pwsh_local import LocalPwshExecutor
 from magitech_harness.shell.service import LocalShellService, ShellResult
+from magitech_harness.shell_env.service import ShellEnvRegistry
+from magitech_harness.subprocess.local import LocalSubprocessRuntime
+from magitech_harness.subprocess.service import SubprocessRuntime
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.definition import Tool
 from magitech_harness.tools.native_executor import NativeToolExecutor
@@ -190,10 +201,17 @@ __all__ = [
     "ConfigLayer",
     "EventType",
     "FactoryOwnership",
+    "FileSystem",
+    "JobRegistry",
     "LLMProvider",
     "LLMService",
     "LayerResolutionService",
+    "LocalBashExecutor",
+    "LocalFileSystem",
+    "LocalJobRegistry",
+    "LocalPwshExecutor",
     "LocalShellService",
+    "LocalSubprocessRuntime",
     "MockLLMProvider",
     "ModelChunk",
     "ModelResponse",
@@ -204,7 +222,10 @@ __all__ = [
     "Session",
     "SessionEvent",
     "SessionService",
+    "ShellEnvRegistry",
+    "ShellExecutor",
     "ShellResult",
+    "SubprocessRuntime",
     "SystemPromptService",
     "Tool",
     "ToolCallData",
@@ -214,6 +235,7 @@ __all__ = [
     "ToolService",
     "ToolsService",
     "UsageData",
+    "WorkingDirectoryService",
     "calculate_argument_digest",
     "check_bundle_entries",
     "create_harness",
