@@ -6,10 +6,9 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, TypedDict
 
+from magitech_harness.agent.cancellation import MAX_TIMER_DELAY_MS
 from magitech_harness.llm.error import EMPTY_RESPONSE_CODE
 from magitech_harness.llm.values import deep_freeze, is_safe_integer
-
-MAX_TIMER_DELAY_MS = 2_147_483_647
 
 DEFAULT_MAX_RETRIES = 5
 DEFAULT_INITIAL_DELAY_MS = 500

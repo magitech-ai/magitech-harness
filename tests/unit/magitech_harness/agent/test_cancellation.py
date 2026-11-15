@@ -1,8 +1,19 @@
 """Unit tests for AbortSignal cooperative cancellation."""
 
+import asyncio
+
 import pytest
 
-from magitech_harness.agent.cancellation import AbortError, AbortSignal
+from magitech_harness.agent.cancellation import (
+    MAX_TIMER_DELAY_MS,
+    AbortController,
+    AbortError,
+    AbortSignal,
+    TimeoutReason,
+    clamp_timeout,
+    deadline,
+    timeout_of,
+)
 
 
 def test_abort_signal_initial_state() -> None:
@@ -72,3 +83,66 @@ def test_abort_signal_dispose_before_abort() -> None:
 
     signal.abort()
     assert not called
+
+
+@pytest.mark.asyncio
+async def test_timeout_reason_clamp_and_deadline() -> None:
+    """Verifies TimeoutReason, clamp_timeout, timeout_of, and deadline fusion."""
+
+    reason = TimeoutReason("TOOL_TIMEOUT", 250)
+    assert reason.code == "TOOL_TIMEOUT"
+    assert reason.timeout_ms == 250
+    assert "TOOL_TIMEOUT after 250ms" in str(reason)
+
+    assert clamp_timeout(None, 5000, 10000) == 5000
+    assert clamp_timeout(20000, 5000, 10000) == 10000
+    assert clamp_timeout(1200, 5000, 10000) == 1200
+    with pytest.raises(ValueError, match="positive finite"):
+        clamp_timeout(0, 5000, 10000, "customTimeoutMs")
+    with pytest.raises(ValueError, match="positive finite"):
+        clamp_timeout(float("nan"), 5000, 10000)
+
+    # No-timer sentinel (timeout_ms <= 0)
+    upstream = AbortController()
+    no_timer = deadline(upstream.signal, 0, "NOOP")
+    assert no_timer.signal is upstream.signal
+    no_timer.dispose()
+    assert deadline(None, -1, "NOOP").signal.aborted is False
+
+    # Invalid delays raise ValueError
+    with pytest.raises(ValueError, match="positive finite"):
+        deadline(None, float("inf"), "BAD")
+    with pytest.raises(ValueError, match="no greater than"):
+        deadline(None, MAX_TIMER_DELAY_MS + 1, "BAD")
+
+    # Context-manager & upstream cancellation wins without TimeoutReason
+    upstream2 = AbortController()
+    with deadline(upstream2.signal, 500, "OP_TIMEOUT") as dl:
+        upstream2.abort("user-stop")
+        assert dl.signal.aborted is True
+        assert timeout_of(dl.signal) is None
+
+    # Already aborted upstream fuses immediately
+    upstream3 = AbortController()
+    upstream3.abort("already")
+    dl_already = deadline(upstream3.signal, 500, "OP_TIMEOUT")
+    assert dl_already.signal.aborted is True
+    assert dl_already.signal.reason == "already"
+    dl_already.dispose()
+
+    # Timer expires and stamps TimeoutReason
+    dl_expire = deadline(None, 10, "MODEL_LISTING_TIMEOUT")
+    await asyncio.sleep(0.05)
+    assert dl_expire.signal.aborted is True
+    matched = timeout_of(dl_expire.signal, "MODEL_LISTING_TIMEOUT")
+    assert matched is not None
+    assert matched.timeout_ms == 10
+    assert timeout_of(dl_expire.signal, "OTHER_CODE") is None
+    assert timeout_of({"reason": TimeoutReason("A", 1)}, "A") is None
+    assert timeout_of(dl_expire.signal) is matched
+    dl_expire.dispose()
+    dl_expire.dispose()  # Idempotent second dispose
+
+    # Already aborted upstream still handles dispose cleanly
+    with pytest.raises(ValueError, match="positive finite"):
+        deadline(None, True, "BAD")  # type: ignore[arg-type]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from types import SimpleNamespace
 from typing import Any
@@ -1740,3 +1741,26 @@ async def test_remaining_service_edge_branches_and_metadata() -> None:
         break
     await s2.aclose()  # type: ignore[attr-defined]
     assert sync_closed is True
+
+
+@pytest.mark.asyncio
+async def test_llm_service_emit_models_updated_contains_failures() -> None:
+    """Verifies llm/models-updated delivers provider arg and contains listener errors."""
+    ctx = Context()
+    llm = LLMService(ctx)
+    seen: list[str] = []
+
+    def _bad(_provider: str) -> None:
+        raise RuntimeError("observer failed")
+
+    async def _async_bad(_provider: str) -> None:
+        raise RuntimeError("async observer failed")
+
+    ctx.on("llm/models-updated", _bad)
+    ctx.on("llm/models-updated", _async_bad)
+    ctx.on("llm/models-updated", lambda p: seen.append(p))
+
+    llm.emit_models_updated("route-alpha")
+    llm.emitModelsUpdated("route-beta")
+    await asyncio.sleep(0)
+    assert seen == ["route-alpha", "route-beta"]

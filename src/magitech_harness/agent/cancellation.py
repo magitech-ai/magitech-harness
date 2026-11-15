@@ -2,8 +2,52 @@
 
 from __future__ import annotations
 
+import asyncio
+import math
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Self
+
+MAX_TIMER_DELAY_MS = 2_147_483_647
+
+
+class TimeoutReason(Exception):
+    """Structured abort reason carrying a capability-owned code and deadline."""
+
+    def __init__(self, code: str, timeout_ms: float) -> None:
+        self.code = code
+        self.timeout_ms = timeout_ms
+        super().__init__(f"{code} after {timeout_ms}ms")
+
+
+def _assert_timer_delay(timeout_ms: float, name: str) -> None:
+    if (
+        isinstance(timeout_ms, bool)
+        or not isinstance(timeout_ms, (int, float))
+        or not math.isfinite(timeout_ms)
+        or timeout_ms <= 0
+        or timeout_ms > MAX_TIMER_DELAY_MS
+    ):
+        raise ValueError(
+            f"{name} must be a positive finite number no greater than "
+            f"{MAX_TIMER_DELAY_MS}"
+        )
+
+
+def clamp_timeout(
+    requested: float | None,
+    default: float,
+    maximum: float,
+    name: str = "timeoutMs",
+) -> float:
+    """Validate optional timeout hint, fall back to *default*, and cap at *maximum*."""
+    if requested is not None and (
+        isinstance(requested, bool)
+        or not isinstance(requested, (int, float))
+        or not math.isfinite(requested)
+        or requested <= 0
+    ):
+        raise ValueError(f"{name} must be a positive finite number")
+    return min(default if requested is None else requested, maximum)
 
 
 class AbortError(Exception):
@@ -85,3 +129,78 @@ class AbortController:
     def abort(self, reason: Any = None) -> None:
         """Trigger cancellation on the owned signal."""
         self.signal.abort(reason)
+
+
+class Deadline:
+    """Deadline signal paired with a dispose-once cleanup hook."""
+
+    def __init__(self, signal: AbortSignal, dispose_fn: Callable[[], None]) -> None:
+        self.signal = signal
+        self._dispose = dispose_fn
+        self._disposed = False
+
+    def dispose(self) -> None:
+        """Clear any armed deadline timer (idempotent)."""
+        if self._disposed:
+            return
+        self._disposed = True
+        self._dispose()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.dispose()
+
+
+def deadline(
+    upstream: AbortSignal | None,
+    timeout_ms: float,
+    code: str,
+) -> Deadline:
+    """Fuse an optional upstream AbortSignal with a timer stamping TimeoutReason."""
+    if timeout_ms <= 0:
+        return Deadline(
+            upstream if upstream is not None else AbortSignal(),
+            lambda: None,
+        )
+
+    _assert_timer_delay(timeout_ms, "deadline timeoutMs")
+
+    fused = AbortController()
+    if upstream is not None and upstream.aborted:
+        fused.abort(upstream.reason)
+        return Deadline(fused.signal, lambda: None)
+
+    reason = TimeoutReason(code, timeout_ms)
+    loop = asyncio.get_running_loop()
+    timer_handle = loop.call_later(timeout_ms / 1000.0, fused.abort, reason)
+    unlisten: Callable[[], None] | None = None
+    if upstream is not None:
+
+        def _on_upstream_abort() -> None:
+            fused.abort(upstream.reason)
+
+        unlisten = upstream.on_abort(_on_upstream_abort)
+
+    def _cleanup() -> None:
+        timer_handle.cancel()
+        if unlisten is not None:
+            unlisten()
+
+    return Deadline(fused.signal, _cleanup)
+
+
+def timeout_of(
+    carrier: Any,
+    code: str | None = None,
+) -> TimeoutReason | None:
+    """Extract a matching TimeoutReason from an AbortSignal, if present."""
+    if not isinstance(carrier, AbortSignal):
+        return None
+    reason = carrier.reason
+    if not isinstance(reason, TimeoutReason):
+        return None
+    if code is not None and reason.code != code:
+        return None
+    return reason
