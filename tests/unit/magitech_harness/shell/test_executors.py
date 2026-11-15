@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -94,8 +95,10 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     monkeypatch.setenv("MAGITECH_LEAKED_SECRET", "top-secret")
     root = Context()
     f1 = root.use(LocalSubprocessRuntime)
+    is_win = sys.platform == "win32"
+    executor_cls = LocalPwshExecutor if is_win else LocalBashExecutor
     f2 = root.use(
-        LocalBashExecutor,
+        executor_cls,
         {
             "cwd": str(tmp_path),
             "timeoutMs": 5000,
@@ -106,13 +109,18 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     )
     await f1
     await f2
-    exe: LocalBashExecutor = root.shell
+    exe: ShellExecutor = root.shell
 
     # 1. Foreground with stdin, env precedence, magitechEnv beating env, and ShellExecutor.run()
+    scrub_cmd = (
+        "[Console]::Out.Write(\"$env:NO_COLOR|$env:CUSTOM_E|$(if ($env:MAGITECH_LEAKED_SECRET) { $env:MAGITECH_LEAKED_SECRET } else { 'scrubbed' })\")"
+        if is_win
+        else 'printf \'%s|%s|%s\' "$NO_COLOR" "$CUSTOM_E" "${MAGITECH_LEAKED_SECRET:-scrubbed}"'
+    )
     run_res = await exe.run(
-        'printf \'%s|%s|%s\' "$NO_COLOR" "$CUSTOM_E" "${MAGITECH_LEAKED_SECRET:-scrubbed}"',
+        scrub_cmd,
         cwd=tmp_path,
-        timeout_seconds=2.0,
+        timeout_seconds=10.0 if is_win else 2.0,
         max_output_bytes=1024,
     )
     assert run_res.exit_code == 0
@@ -121,21 +129,30 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     assert run_res.aborted is False
 
     # 2. Spec with stdin, env, magitechEnv, missing trailing newline + stderr, and on_started + sandbox memoization
+    stdin_cmd = (
+        "$line = [Console]::In.ReadLine(); "
+        '[Console]::Out.Write("out:${line}:${env:CUSTOM}:${env:MAGITECH_OWN}"); '
+        '[Console]::Error.Write("errline")'
+        if is_win
+        else 'read -r line; printf \'out:%s:%s:%s\' "$line" "$CUSTOM" "$MAGITECH_OWN"; printf \'errline\' >&2'
+    )
     spec = exe.resolve(
         {
-            "command": (
-                'read -r line; printf \'out:%s:%s:%s\' "$line" "$CUSTOM" "$MAGITECH_OWN"; '
-                "printf 'errline' >&2"
-            ),
+            "command": stdin_cmd,
             "stdin": "inval",
             "env": {"CUSTOM": "user", "MAGITECH_OWN": "spoof"},
             "magitechEnv": {"MAGITECH_OWN": "trusted"},
         }
     )
     started: list[Any] = []
-    proc = await exe.execute_argv(
-        spec, ["bash", "-c", spec["command"]], on_started=started.append
-    )
+    if is_win:
+        assert isinstance(exe, LocalPwshExecutor)
+        proc = await exe.execute_argv(spec, exe.argv(spec), on_started=started.append)
+    else:
+        assert isinstance(exe, LocalBashExecutor)
+        proc = await exe.execute_argv(
+            spec, ["bash", "-c", spec["command"]], on_started=started.append
+        )
     assert started == [proc]
     proc.sandbox = {"mode": "read-only", "denied": False}
     fg = await proc.result()
@@ -151,12 +168,12 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     assert proc.kill() is False
 
     # 3. Spill paths & lossy read_output + observed streams + kill live process
-    big_spec = exe.resolve(
-        {
-            "command": 'python3 -c \'import sys; sys.stdout.write("a"*500); sys.stderr.write("b"*500)\'',
-            "onExpiry": "none",
-        }
+    py_cmd = (
+        f"& '{sys.executable}' -c 'import sys; sys.stdout.write(''a''*500); sys.stderr.write(''b''*500)'"
+        if is_win
+        else 'python3 -c \'import sys; sys.stdout.write("a"*500); sys.stderr.write("b"*500)\''
     )
+    big_spec = exe.resolve({"command": py_cmd, "onExpiry": "none"})
     big_proc = await exe.execute(big_spec)
     await big_proc.done
     big_out = big_proc.read_output()
@@ -166,7 +183,10 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     assert "spillPath" in (await big_proc.result())["stdout"]
 
     # 4. Timeout kill classification via onExpiry="kill"
-    to_spec = exe.resolve({"command": "sleep 5", "timeoutMs": 60, "onExpiry": "kill"})
+    sleep_cmd = "Start-Sleep -Seconds 10" if is_win else "sleep 5"
+    to_spec = exe.resolve(
+        {"command": sleep_cmd, "timeoutMs": 300 if is_win else 60, "onExpiry": "kill"}
+    )
     to_proc = await exe.execute(to_spec)
     to_res = await to_proc.result()
     assert to_res["timedOut"] is True
@@ -174,7 +194,7 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     assert to_proc.status == "killed"
 
     # 5. Manual kill returns True once then False; ShellExecutor.run exitCode=None -> -1
-    kill_spec = exe.resolve({"command": "sleep 5", "onExpiry": "none"})
+    kill_spec = exe.resolve({"command": sleep_cmd, "onExpiry": "none"})
     kill_proc = await exe.execute(kill_spec)
     assert kill_proc.kill() is True
     assert kill_proc.kill() is False
@@ -183,7 +203,7 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
 
     sig = AbortController()
     asyncio.get_running_loop().call_later(0.05, sig.abort, "stop")
-    aborted_run = await exe.run("sleep 5", signal=sig.signal)
+    aborted_run = await exe.run(sleep_cmd, signal=sig.signal)
     assert aborted_run.aborted is True
     assert aborted_run.exit_code == -1
 
@@ -213,6 +233,9 @@ async def test_execute_argv_prep_and_provider_failures(tmp_path: Path) -> None:
         return ["echo", "ok"]
 
     spec_none = exe.resolve({"command": "echo ok", "onExpiry": "none"})
+    p_bash = await exe.execute(spec_none)
+    await p_bash.done
+    assert p_bash.status == "completed"
     p_ok = await exe.execute_argv(spec_none, _prep_ok)
     await p_ok.done
     assert p_ok.status == "completed"

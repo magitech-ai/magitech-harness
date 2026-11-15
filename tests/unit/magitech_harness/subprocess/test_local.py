@@ -101,7 +101,15 @@ async def test_resolve_executable_and_abstract_alias(
     non_exec.chmod(0o644)
     (fake_bin / "subdir").mkdir()
 
+    import magitech_harness.subprocess.local as local_mod
+
     env_path = f"{fake_bin}{os.pathsep}{os.pathsep}"
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
+    monkeypatch.setattr(
+        local_mod.os,
+        "access",
+        lambda path_arg, _mode: Path(path_arg).name != "noexec",
+    )
     assert await rt.resolve_executable("mytool", {"PATH": env_path}) == str(script)
 
     with pytest.raises(ValueError, match="must be non-empty"):
@@ -120,8 +128,6 @@ async def test_resolve_executable_and_abstract_alias(
         )
 
     # Case-insensitive env lookup & Win32 PATHEXT resolution
-    import magitech_harness.subprocess.local as local_mod
-
     monkeypatch.delenv("PATH", raising=False)
     win_exe = fake_bin / "winapp.EXE"
     win_exe.write_text("x", encoding="utf-8")
@@ -317,8 +323,16 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
 
     abort_sig.abort("kill-now")
     sleep_outcome = await h_sleep.done
-    assert sleep_outcome["exitCode"] is None
-    assert sleep_outcome["signal"] == "SIGKILL"
+    if sys.platform == "win32":
+        assert sleep_outcome["exitCode"] == 1
+        assert sleep_outcome["signal"] is None
+    else:
+        assert sleep_outcome["exitCode"] is None
+        assert sleep_outcome["signal"] == "SIGKILL"
+    import magitech_harness.subprocess.local as local_mod
+
+    assert local_mod._decode_returncode(-15)["signal"] is not None
+    assert local_mod._decode_returncode(-999) == {"exitCode": None, "signal": "SIG999"}
     await h_sleep.wait_for_exit()
     h_sleep.terminate()  # idempotent after exit
     h_sleep.terminate_for_host_exit()
@@ -489,10 +503,12 @@ def test_signal_helpers_and_platform_guards(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.undo()
 
     # POSIX fallback from os.killpg failure -> os.kill -> final OSError swallow
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
     monkeypatch.setattr(
         local_mod.os,
         "killpg",
         lambda *_a: (_ for _ in ()).throw(OSError("no group")),
+        raising=False,
     )
     kill_calls: list[tuple[int, int]] = []
     monkeypatch.setattr(
@@ -503,6 +519,15 @@ def test_signal_helpers_and_platform_guards(monkeypatch: pytest.MonkeyPatch) -> 
     signal_tree(42, signal.SIGTERM)
     assert kill_calls == [(42, signal.SIGTERM)]
 
+    monkeypatch.setattr(local_mod.os, "killpg", lambda *_a: None, raising=False)
+    signal_tree(42, signal.SIGTERM)
+
+    monkeypatch.setattr(
+        local_mod.os,
+        "killpg",
+        lambda *_a: (_ for _ in ()).throw(OSError("no group")),
+        raising=False,
+    )
     monkeypatch.setattr(
         local_mod.os,
         "kill",
@@ -552,6 +577,12 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
         base_env={"Path": "C:\\old", "KEEP": "1"},
     )
     assert win_env == {"KEEP": "1", "path": "C:\\bin"}
+    monkeypatch.setattr(service_mod.sys, "platform", "linux")
+    posix_env = child_env(
+        overrides={"path": "/bin"},
+        base_env={"Path": "/old", "KEEP": "1"},
+    )
+    assert posix_env == {"Path": "/old", "KEEP": "1", "path": "/bin"}
     monkeypatch.undo()
 
     # _PipeStreamWriter full contract + OSError paths
@@ -596,11 +627,8 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
     # _close_pipe error swallow
     local_mod._close_pipe(_MemPipe(fail_close=True))  # type: ignore[arg-type]
 
-    # _StreamPump edge cases: BlockingIOError, OSError in _on_readable, win32 threaded error
+    # _StreamPump edge cases: BlockingIOError, data, OSError in _on_readable, win32 threaded error
     loop = asyncio.get_running_loop()
-    r_fd, w_fd = os.pipe()
-    os.write(w_fd, b"x")
-    r_file = os.fdopen(r_fd, "rb", buffering=0)
     seen: list[bytes] = []
     eof_count = 0
 
@@ -608,13 +636,35 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
         nonlocal eof_count
         eof_count += 1
 
-    pump = local_mod._StreamPump(loop, r_file, seen.append, _on_eof)
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
+    monkeypatch.setattr(
+        local_mod.os, "set_blocking", lambda _fd, _b: None, raising=False
+    )
+    monkeypatch.setattr(loop, "add_reader", lambda _fd, _cb: None)
+    monkeypatch.setattr(loop, "remove_reader", lambda _fd: None)
+
+    class _FakePosixPipe:
+        def fileno(self) -> int:
+            return 99
+
+        def close(self) -> None:
+            pass
+
+    pump = local_mod._StreamPump(
+        loop,
+        _FakePosixPipe(),  # type: ignore[arg-type]
+        seen.append,
+        _on_eof,
+    )
     monkeypatch.setattr(
         local_mod.os,
         "read",
         lambda *_a: (_ for _ in ()).throw(BlockingIOError()),
     )
     pump._on_readable()
+    monkeypatch.setattr(local_mod.os, "read", lambda *_a: b"ok")
+    pump._on_readable()
+    assert seen == [b"ok"]
     monkeypatch.setattr(
         local_mod.os,
         "read",
@@ -623,7 +673,6 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
     pump._on_readable()
     pump.stop()  # idempotent when already closed
     monkeypatch.undo()
-    os.close(w_fd)
     assert eof_count == 1
 
     class _ErrReadPipe:
@@ -671,31 +720,37 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
     assert local_mod._abort_error(ctrl_exc.signal) is err
 
     # _process_group_has_live_members & _linux_process_group_has_live_members branches
-    assert local_mod._linux_process_group_has_live_members(os.getpgrp()) is True
-    assert local_mod._process_group_has_live_members(os.getpgrp()) is True
+    if sys.platform == "linux":
+        assert local_mod._linux_process_group_has_live_members(os.getpgrp()) is True
+    if sys.platform != "win32":
+        assert local_mod._process_group_has_live_members(os.getpgrp()) is True
 
     monkeypatch.setattr(local_mod.sys, "platform", "win32")
     assert local_mod._process_group_has_live_members(123) is False
     monkeypatch.undo()
 
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
     monkeypatch.setattr(
         local_mod.os,
         "killpg",
         lambda *_a: (_ for _ in ()).throw(PermissionError("perm")),
+        raising=False,
     )
     assert local_mod._process_group_has_live_members(123) is True
     monkeypatch.setattr(
         local_mod.os,
         "killpg",
         lambda *_a: (_ for _ in ()).throw(OSError("other")),
+        raising=False,
     )
     assert local_mod._process_group_has_live_members(123) is False
-    monkeypatch.setattr(local_mod.os, "killpg", lambda *_a: None)
-    monkeypatch.setattr(local_mod.sys, "platform", "linux")
+    monkeypatch.setattr(local_mod.os, "killpg", lambda *_a: None, raising=False)
     monkeypatch.setattr(
         local_mod, "_linux_process_group_has_live_members", lambda _p: False
     )
     assert local_mod._process_group_has_live_members(123) is False
+    monkeypatch.setattr(local_mod.sys, "platform", "darwin")
+    assert local_mod._process_group_has_live_members(123) is True
     monkeypatch.undo()
 
     # Mock /proc entries for _linux_process_group_has_live_members edge branches
@@ -713,6 +768,8 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
     (fake_proc / "14" / "stat").write_text("14 (sh) Z 1 999 999", encoding="ascii")
     (fake_proc / "15").mkdir()
     (fake_proc / "15" / "stat").write_text("15 (sh) Z 1 777 777", encoding="ascii")
+    (fake_proc / "16").mkdir()
+    (fake_proc / "16" / "stat").write_text("16 (sh) S 1 555 555", encoding="ascii")
 
     orig_path = local_mod.Path
 
@@ -724,9 +781,9 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
         return orig_path(arg)
 
     monkeypatch.setattr(local_mod, "Path", _patched_path)
+    assert local_mod._linux_process_group_has_live_members(555) is True
     assert local_mod._linux_process_group_has_live_members(777) is False
     assert local_mod._linux_process_group_has_live_members(888) is None
-    fake_proc.rmdir() if False else None
     monkeypatch.setattr(
         local_mod,
         "Path",

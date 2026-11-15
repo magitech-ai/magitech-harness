@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any
 
@@ -117,8 +118,9 @@ async def test_working_directory_get_ensure_set_and_recovery(tmp_path: Path) -> 
 
     # Prompt assembly ensures and includes Current working directory
     assembly = await ctx.systemPrompt.assemble({"agent": agent, "scope": agent})
-    assert "Current working directory: " in render_context_snapshot(assembly)
-    assert str(initial_dir.resolve()) in render_context_snapshot(assembly)
+    snapshot_text = render_context_snapshot(assembly)
+    assert "Current working directory: " in snapshot_text
+    assert json.dumps(str(initial_dir.resolve())) in snapshot_text
 
     # Empty or nonexistent path raises
     with pytest.raises(ValueError, match="must not be empty"):

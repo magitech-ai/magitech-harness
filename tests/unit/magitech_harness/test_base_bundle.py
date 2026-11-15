@@ -31,6 +31,7 @@ from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
 from magitech_harness.session.working_directory import WorkingDirectoryService
 from magitech_harness.shell.bash_local import LocalBashExecutor
+from magitech_harness.shell.pwsh_local import LocalPwshExecutor
 from magitech_harness.shell_env.service import ShellEnvRegistry
 from magitech_harness.subprocess.local import LocalSubprocessRuntime
 from magitech_harness.system_prompt.service import SystemPromptService
@@ -79,8 +80,15 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
-        "id": "shell",
+        "id": "bash-local",
         "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
+        "disabled": {"__jsExpr": "process.platform === 'win32'"},
+        "config": {},
+    },
+    {
+        "id": "pwsh-local",
+        "name": "magitech_harness.shell.pwsh_local:LocalPwshExecutor",
+        "disabled": {"__jsExpr": "process.platform !== 'win32'"},
         "config": {},
     },
     {
@@ -235,7 +243,10 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.fs, LocalFileSystem)
     assert isinstance(ctx.subprocess, LocalSubprocessRuntime)
     assert isinstance(ctx.shellEnv, ShellEnvRegistry)
-    assert isinstance(ctx.shell, LocalBashExecutor)
+    assert isinstance(
+        ctx.shell,
+        LocalPwshExecutor if sys.platform == "win32" else LocalBashExecutor,
+    )
     assert isinstance(ctx.jobs, LocalJobRegistry)
     assert isinstance(ctx.workingDirectory, WorkingDirectoryService)
     assert isinstance(ctx.approvals, ApprovalService)

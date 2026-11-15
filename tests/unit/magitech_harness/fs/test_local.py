@@ -95,7 +95,7 @@ async def test_local_filesystem_read_stream_range_and_listdir(tmp_path: Path) ->
     fs = ctx.fs
 
     txt = tmp_path / "sample.txt"
-    txt.write_text("line1\nline2\n", encoding="utf-8")
+    txt.write_text("line1\nline2\n", encoding="utf-8", newline="\n")
     bin_file = tmp_path / "bin.dat"
     bin_file.write_bytes(b"\x89PNG\r\n\x1a\n\x00\x01\x02")
     sub = tmp_path / "b_dir"
@@ -427,6 +427,7 @@ async def test_local_filesystem_error_branches_and_edge_cases(
 ) -> None:
     """Covers multi-chunk streaming, encoding failures, special files, and OS errors."""
     import errno
+    import stat as stat_mod
 
     import magitech_harness.fs.local as local_mod
 
@@ -436,30 +437,38 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     fs: LocalFileSystem = ctx.fs
 
     # Home prefix expansion (POSIX + win32) & containment equal target
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
     assert local_mod.expand_home_prefix("~/sub") == f"{Path.home()}/sub"
+    with pytest.raises(FsError) as missing_dotdot:
+        await fs.resolve("missing_dir/../x.txt")
+    assert missing_dotdot.value.code == "FS_NOT_FOUND"
+
     monkeypatch.setattr(local_mod.sys, "platform", "win32")
     assert local_mod.expand_home_prefix("~\\sub") == f"{Path.home()}\\sub"
     win_target = await fs.resolve("sub\\leaf.txt")
     assert win_target["displayPath"] == str(tmp_path / "sub\\leaf.txt")
     await fs.write_text(win_target, "win content")
+    norm_dotdot = await fs.resolve("missing_dir/../x.txt")
+    assert norm_dotdot["displayPath"].endswith("x.txt")
+    # Exercise win32 move_file branch too (mode_override skipped)
+    moved_win = await fs.resolve("sub\\moved_leaf.txt")
+    await fs.move_file(win_target, moved_win, {})
     monkeypatch.undo()
 
     root_t = await fs.resolve(".")
     assert fs.contains(root_t, root_t) is True
 
-    # Parent traversal over missing dir, non-dir file segment, broken symlink, FIFO "other"
-    with pytest.raises(FsError) as missing_dotdot:
-        await fs.resolve("missing_dir/../x.txt")
-    assert missing_dotdot.value.code == "FS_NOT_FOUND"
-
-    # FIFO special file ("other") and broken symlink in list_dir
-    fifo = tmp_path / "pipe_node"
-    os.mkfifo(fifo)
+    # FIFO / special file ("other") and broken symlink in list_dir
+    assert local_mod._path_type(stat_mod.S_IFIFO) == "other"
+    if hasattr(os, "mkfifo"):
+        fifo = tmp_path / "pipe_node"
+        os.mkfifo(fifo)
     broken_link = tmp_path / "broken_link"
     broken_link.symlink_to(tmp_path / "nonexistent_target")
     listed = await fs.list_dir(root_t)
     by_name = {entry["name"]: entry for entry in listed}
-    assert by_name["pipe_node"]["type"] == "other"
+    if hasattr(os, "mkfifo"):
+        assert by_name["pipe_node"]["type"] == "other"
     assert by_name["broken_link"]["type"] == "other"
 
     # Invalid UTF-8 & multi-chunk stream (>64KB) & trailing incomplete UTF-8 sequence

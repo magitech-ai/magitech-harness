@@ -295,6 +295,7 @@ async def test_wait_settlement_timeout_abort_and_pull_sources() -> None:
 
     hk = _ManualHooks()
     reads = 0
+    second_pull = asyncio.Event()
 
     def _pull(from_byte: int) -> JobOutputSourceRead:
         nonlocal reads
@@ -307,6 +308,7 @@ async def test_wait_settlement_timeout_abort_and_pull_sources() -> None:
                 "spillPath": "/tmp/a.log",
             }
         if reads == 2:
+            second_pull.set()
             return {"text": "def", "nextOffset": 6, "lossy": False}
         raise RuntimeError("stream exploded")
 
@@ -334,6 +336,7 @@ async def test_wait_settlement_timeout_abort_and_pull_sources() -> None:
             await reg.wait(jid, bad_t)  # type: ignore[arg-type]
 
     # Wait timeout returns live projection and records awaited=False when settled later
+    await asyncio.wait_for(second_pull.wait(), timeout=2.0)
     timed = await reg.wait(jid, 15)
     assert timed["status"] == "running"
     assert "spillPaths" not in timed["output"]
