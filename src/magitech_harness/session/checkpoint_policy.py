@@ -79,7 +79,7 @@ def apply(ctx: Context, config: dict[str, Any] | None = None) -> Disposer:
         next_fn: Callable[..., Awaitable[AsyncIterator[ModelChunk]]],
     ) -> AsyncIterator[ModelChunk]:
         """Checkpoint a session-bound model stream before its first chunk."""
-        session_id = options.get("session_id")
+        session_id = options.get("sessionId") or options.get("session_id")
         if session_id is None:
             return await next_fn()
         session = store.get(session_id)
@@ -110,7 +110,10 @@ def apply(ctx: Context, config: dict[str, Any] | None = None) -> Disposer:
         next_fn: Callable[..., Awaitable[dict[str, Any]]],
     ) -> dict[str, Any]:
         """Flush the step's session before the step begins."""
-        session = decision.get("session")
+        agent = decision.get("agent")
+        session = decision.get("session") or (
+            getattr(agent, "session", None) if agent is not None else None
+        )
         if session is not None:
             await store.flush(session)
         return await next_fn()

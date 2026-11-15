@@ -556,3 +556,487 @@ async def test_main_async_mock_fallback_runs_before_dispatch(
 
     await main_async(["--storage", str(tmp_path)])
     assert seen["providers"] == {"mock"}
+
+
+@pytest.mark.asyncio
+async def test_main_async_drains_titles_before_flush(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Verifies CLI drains SessionTitleService before flushing sessions on exit."""
+    order: list[str] = []
+    real_create = create_harness
+
+    def spy_create(*args, **kwargs):
+        ctx = real_create(*args, **kwargs)
+        orig_ctx_flush = ctx.flush
+
+        async def wrapped_ctx_flush() -> None:
+            await orig_ctx_flush()
+            if (
+                "title_hooked" not in order
+                and ctx.get("sessionTitle", None, strict=False) is not None
+            ):
+                order.append("title_hooked")
+                orig_drain = ctx.sessionTitle.drain
+                orig_flush = ctx.sessions.flush
+
+                async def traced_drain() -> None:
+                    order.append("title_drain")
+                    await orig_drain()
+
+                async def traced_flush(*f_args, **f_kwargs) -> None:
+                    order.append("sessions_flush")
+                    await orig_flush(*f_args, **f_kwargs)
+
+                ctx.sessionTitle.drain = traced_drain  # type: ignore[method-assign]
+                ctx.sessions.flush = traced_flush  # type: ignore[method-assign]
+
+        ctx.flush = wrapped_ctx_flush  # type: ignore[method-assign]
+        return ctx
+
+    monkeypatch.setattr("magitech_harness.cli.create_harness", spy_create)
+    await main_async(["--storage", str(tmp_path), "run", "hello world"])
+    assert "title_drain" in order
+    assert "sessions_flush" in order
+    assert order.index("title_drain") < order.index("sessions_flush")
+
+
+def test_summarize_headless_outcome_and_exit_codes() -> None:
+    """Verifies headless interval summary and exit code mapping."""
+    from magitech_harness.cli import headless_exit_code, summarize_headless_outcome
+    from magitech_harness.llm.message import create_user_message
+    from magitech_harness.session.store import SessionStore
+
+    store = SessionStore()
+    # Events before turn/start are ignored.
+    session = store.create("h1")
+    session.append(
+        EventType.USER_MESSAGE,
+        create_user_message(
+            content=[{"type": "text", "text": "pre"}], source={"kind": "user"}
+        ),
+        surface_op="append",
+    )
+    # Empty interval -> no turn -> exit code 1.
+    assert headless_exit_code(summarize_headless_outcome(session, 0)) == 1
+
+    session.append(EventType.TURN_START, {"turn": 1})
+    # Non-assistant event inside a turn (e.g. step/start) is skipped cleanly.
+    session.append(EventType.STEP_START, {"turn": 1, "step": 1})
+    # Empty text block / missing content does not overwrite text.
+    session.append(
+        EventType.ASSISTANT_MESSAGE,
+        {
+            "turn": 1,
+            "step": 1,
+            "stream": [],
+            "message": {
+                "id": "msg-0",
+                "role": "assistant",
+                "content": [],
+                "source": {"kind": "model", "provider": "p", "model": "m"},
+            },
+        },
+        surface_op="append",
+    )
+    session.append(
+        EventType.ASSISTANT_MESSAGE,
+        {
+            "turn": 1,
+            "step": 1,
+            "stream": [],
+            "message": {
+                "id": "msg-1",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "one"}],
+                "source": {"kind": "model", "provider": "p", "model": "m"},
+            },
+        },
+        surface_op="append",
+    )
+    session.append(EventType.TURN_END, {"turn": 1, "reason": {"kind": "completed"}})
+
+    # Non-list / malformed message content is ignored defensively.
+    from types import SimpleNamespace
+
+    synthetic = SimpleNamespace(
+        events=[
+            session.events[1],
+            type(session.events[2])(
+                id="fake-1",
+                session_id="h1",
+                type=EventType.ASSISTANT_MESSAGE,
+                timestamp=0.0,
+                payload={"turn": 1, "step": 1, "message": "not-a-dict"},
+            ),
+            session.events[-1],
+        ]
+    )
+    assert summarize_headless_outcome(synthetic, 0).text == ""  # type: ignore[arg-type]
+    first_done = summarize_headless_outcome(session, 0)
+    assert first_done.text == "one"
+    assert headless_exit_code(first_done) == 0
+
+    # Unclosed second turn in the interval resets reason so completed is NOT inherited!
+    session.append(EventType.TURN_START, {"turn": 2})
+    unclosed = summarize_headless_outcome(session, 0)
+    assert unclosed.reason is None
+    assert headless_exit_code(unclosed) == 1
+
+    # Non-completed end reasons exit 1.
+    for kind in ("aborted", "blocked", "error", "max-tokens", "interrupted", "forked"):
+        s2 = store.create(f"h-{kind}")
+        s2.append(EventType.TURN_START, {"turn": 1})
+        s2.append(EventType.TURN_END, {"turn": 1, "reason": {"kind": kind}})
+        assert headless_exit_code(summarize_headless_outcome(s2, 0)) == 1
+
+
+@pytest.mark.asyncio
+async def test_cli_headless_subcommand_exit_codes_and_output(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Verifies `mth headless` drives AgentLoop and returns 0/1 by turn outcome."""
+    import types
+    from collections.abc import AsyncIterator
+    from typing import cast
+
+    from magitech_harness.llm.service import LlmAdapter
+    from magitech_harness.llm.types import (
+        AbortSignal,
+        GenerateOptions,
+        LlmModelInfo,
+        LlmResolvedModelInfo,
+        StreamChunk,
+    )
+
+    class _OkAdapter(LlmAdapter):
+        seen_models: ClassVar[list[str]] = []
+
+        async def list_models(self, provider: str) -> list[LlmModelInfo]:
+            del provider
+            return [
+                {
+                    "provider": "ok",
+                    "id": "m1",
+                    "name": "m1",
+                    "reasoning": {
+                        "defaultEffort": "medium",
+                        "efforts": [
+                            {"id": "medium", "name": "Medium"},
+                            {"id": "high", "name": "High"},
+                        ],
+                    },
+                },
+                {"provider": "ok", "id": "m2", "name": "m2"},
+            ]
+
+        async def resolve_model(
+            self,
+            provider: str,
+            model: str,
+            signal: AbortSignal | None = None,
+        ) -> LlmResolvedModelInfo:
+            del signal
+            for info in await self.list_models(provider):
+                if info["id"] == model:
+                    return cast(LlmResolvedModelInfo, dict(info))
+            return {"provider": provider, "id": model, "name": model}
+
+        async def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+            _OkAdapter.seen_models.append(str(options.get("model", "")))
+            yield {"type": "block-start", "index": 0, "blockType": "text"}
+            yield {"type": "text-delta", "index": 0, "text": "Headless answer"}
+            yield {
+                "type": "block-end",
+                "index": 0,
+                "block": {"type": "text", "text": "Headless answer"},
+            }
+            yield {"type": "finish", "reason": {"kind": "stop"}}
+
+    class _ErrAdapter(LlmAdapter):
+        async def list_models(self, provider: str) -> list[LlmModelInfo]:
+            del provider
+            return [{"provider": "err", "id": "m1", "name": "m1"}]
+
+        async def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+            del options
+            raise RuntimeError("boom")
+            yield {"type": "finish", "finishReason": "error"}  # pragma: no cover
+
+    mod = types.ModuleType("headless_test_adapters")
+
+    class _OkPlugin:
+        inject: ClassVar[list[str]] = ["llm"]
+
+        def __init__(self, c: Any) -> None:
+            c.llm.register_adapter(["ok"], _OkAdapter())
+
+    class _ErrPlugin:
+        inject: ClassVar[list[str]] = ["llm"]
+
+        def __init__(self, c: Any) -> None:
+            c.llm.register_adapter(["err"], _ErrAdapter())
+
+    mod.OkPlugin = _OkPlugin
+    mod.ErrPlugin = _ErrPlugin
+    monkeypatch.setitem(sys.modules, "headless_test_adapters", mod)
+
+    ok_profile = tmp_path / "ok.yaml"
+    ok_profile.write_text("['headless_test_adapters:OkPlugin']", encoding="utf-8")
+    err_profile = tmp_path / "err.yaml"
+    err_profile.write_text("['headless_test_adapters:ErrPlugin']", encoding="utf-8")
+
+    ok_store = tmp_path / "ok_store"
+    err_store = tmp_path / "err_store"
+
+    code_ok = await main_async(
+        [
+            "--storage",
+            str(ok_store),
+            "--profile",
+            str(ok_profile),
+            "--model",
+            "ok/m1",
+            "headless",
+            "hi",
+        ]
+    )
+    assert code_ok == 0
+    captured = capsys.readouterr()
+    assert "Headless answer" in captured.out
+
+    code_err = await main_async(
+        [
+            "--storage",
+            str(err_store),
+            "--profile",
+            str(err_profile),
+            "headless",
+            "hi",
+        ]
+    )
+    assert code_err == 1
+    assert "mth:" in capsys.readouterr().err
+
+    # Also test --json output + --session-id resume + model override on resume + reasoning preserve.
+    import json as py_json
+
+    resumed_sess = next(ok_store.rglob("session.v4.jsonl")).parent.name
+    # Seed a model/selection with reasoningEffort='high' on ok/m1 so same-model resume preserves it.
+    from magitech_harness.cli import _run_headless
+
+    ctx_seed = create_harness(storage_dir=ok_store)
+    await ctx_seed.flush()
+    h_seed = await ctx_seed.agents.resume({"resumeSessionId": resumed_sess})
+    try:
+        h_seed["agent"].model.select(
+            {"provider": "ok", "model": "m1", "reasoningEffort": "high"}
+        )
+        await ctx_seed.sessions.flush(h_seed["agent"].session)
+    finally:
+        await h_seed["dispose"]()
+
+    _OkAdapter.seen_models.clear()
+    # Resume with same ok/m1 preserves reasoningEffort; resume with ok/m2 overrides model.
+    code_same = await main_async(
+        [
+            "--storage",
+            str(ok_store),
+            "--profile",
+            str(ok_profile),
+            "--model",
+            "ok/m1",
+            "headless",
+            "--session-id",
+            resumed_sess,
+            "same-model",
+        ]
+    )
+    assert code_same == 0
+    capsys.readouterr()
+
+    code_json = await main_async(
+        [
+            "--storage",
+            str(ok_store),
+            "--profile",
+            str(ok_profile),
+            "--model",
+            "ok/m2",
+            "headless",
+            "--session-id",
+            resumed_sess,
+            "--json",
+            "again",
+        ]
+    )
+    assert code_json == 0
+    assert _OkAdapter.seen_models == ["m1", "m2"]
+    json_out = capsys.readouterr().out.strip().splitlines()[-1]
+    payload = py_json.loads(json_out)
+    assert payload["exitCode"] == 0
+    assert payload["text"] == "Headless answer"
+
+    # Resume with --model omitted keeps existing selection without clobbering.
+    code_keep = await main_async(
+        [
+            "--storage",
+            str(ok_store),
+            "--profile",
+            str(ok_profile),
+            "headless",
+            "--session-id",
+            resumed_sess,
+            "keep",
+        ]
+    )
+    assert code_keep == 0
+    capsys.readouterr()
+
+    # Blank session_id and blank task fail closed with stderr + --json error object.
+    ctx_fail = create_harness(storage_dir=tmp_path / "fail_store")
+    await ctx_fail.flush()
+    assert await _run_headless(ctx_fail, "hi", session_id="   ", json_mode=True) == 1
+    err_cap = capsys.readouterr()
+    assert py_json.loads(err_cap.out.strip())["type"] == "error"
+    assert "session_id must not be blank" in err_cap.err
+
+    assert await _run_headless(ctx_fail, "   ", json_mode=False) == 1
+    assert "a task is required" in capsys.readouterr().err
+
+    # Uncleared agent/error without turn/end, plus synchronous dispose() and runtime exception in body.
+    from types import SimpleNamespace
+
+    class _FakeAgent:
+        def __init__(self, s: Any, trigger: Any) -> None:
+            self.session = s
+            self._trigger = trigger
+            self.model = SimpleNamespace(current=lambda: None, select=lambda _sel: None)
+
+        def followup(self, _msg: Any) -> None:
+            self._trigger()
+
+        async def when_idle(self) -> None:
+            return None
+
+    fake_ctx = create_harness(storage_dir=tmp_path / "fake_store")
+    await fake_ctx.flush()
+    fake_sess = fake_ctx.sessions.create("fake-err")
+    other_sess = fake_ctx.sessions.create("other-sess")
+    dispose_calls: list[str] = []
+
+    def _emit_agent_err() -> None:
+        fake_ctx.emit(
+            "agent/error",
+            {"agent": SimpleNamespace(), "error": RuntimeError("ignored")},
+        )
+        fake_ctx.emit(
+            "agent/error", {"agent": fake_agent, "error": RuntimeError("orphan crash")}
+        )
+        # Non-turn/end event and wrong-session turn/end must not clear failure.
+        fake_ctx.emit(
+            "session/event",
+            fake_sess,
+            SimpleNamespace(type=EventType.STEP_START, seq=99),
+        )
+        fake_ctx.emit(
+            "session/event",
+            other_sess,
+            SimpleNamespace(type=EventType.TURN_END, seq=99),
+        )
+
+    fake_agent = _FakeAgent(fake_sess, _emit_agent_err)
+
+    async def _fake_create(_opts: Any) -> Any:
+        return {"agent": fake_agent, "dispose": lambda: dispose_calls.append("sync")}
+
+    fake_ctx.agents.create = _fake_create  # type: ignore[method-assign]
+    assert await _run_headless(fake_ctx, "hi", json_mode=True) == 1
+    assert dispose_calls == ["sync"]
+    orphan_out = capsys.readouterr()
+    assert "orphan crash" in orphan_out.out
+    assert "orphan crash" in orphan_out.err
+
+    # Exception raised after handle creation inside followup/when_idle hits inner except + async/sync dispose.
+    def _boom_trigger() -> None:
+        raise RuntimeError("followup boom")
+
+    fake_agent2 = _FakeAgent(fake_sess, _boom_trigger)
+
+    async def _fake_create2(_opts: Any) -> Any:
+        return {"agent": fake_agent2, "dispose": lambda: dispose_calls.append("sync2")}
+
+    fake_ctx.agents.create = _fake_create2  # type: ignore[method-assign]
+    assert await _run_headless(fake_ctx, "hi") == 1
+    assert dispose_calls == ["sync", "sync2"]
+    assert "followup boom" in capsys.readouterr().err
+
+    # Also test turn/end error whose error payload is non-dict (defensive branch).
+    from magitech_harness.session.events import SessionEvent
+
+    fake_sess_non_dict = fake_ctx.sessions.create("non-dict-err")
+
+    def _emit_non_dict_turn() -> None:
+        fake_sess_non_dict.events.extend(
+            [
+                SessionEvent(
+                    id="t1",
+                    session_id="non-dict-err",
+                    type=EventType.TURN_START,
+                    timestamp=0.0,
+                    payload={"turn": 1},
+                ),
+                SessionEvent(
+                    id="t2",
+                    session_id="non-dict-err",
+                    type=EventType.TURN_END,
+                    timestamp=0.0,
+                    payload={
+                        "turn": 1,
+                        "reason": {"kind": "error", "error": "plain-str"},
+                    },
+                ),
+            ]
+        )
+
+    fake_agent3 = _FakeAgent(fake_sess_non_dict, _emit_non_dict_turn)
+
+    async def _fake_create3(_opts: Any) -> Any:
+        return {"agent": fake_agent3, "dispose": lambda: None}
+
+    fake_ctx.agents.create = _fake_create3  # type: ignore[method-assign]
+    assert await _run_headless(fake_ctx, "hi") == 1
+
+    # Cover default provider "mock" fallback when neither adapter nor --model/--profile exist,
+    # and _drain_and_flush when sessionTitle is absent.
+    from magitech_harness.cli import _drain_and_flush, _resolve_headless_route
+    from magitech_harness.llm.service import LLMService
+
+    bare = Context()
+    LLMService(bare)
+    assert _resolve_headless_route(bare, None) == ("mock", "mock")
+
+    # Test main() exits 1 when main_async returns non-zero.
+    def mock_run_err(coro):
+        coro.close()
+        return 1
+
+    monkeypatch.setattr("asyncio.run", mock_run_err)
+    monkeypatch.setattr(sys, "argv", ["mth", "headless", "hi"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 1
+
+    # Test _drain_and_flush without sessionTitle mounted.
+    class _SessStub:
+        async def flush(self) -> None:
+            return None
+
+    class _MinCtx:
+        sessions = _SessStub()
+
+        def get(self, name: str, default: Any = None, strict: bool = True) -> Any:
+            del name, strict
+            return default
+
+    await _drain_and_flush(_MinCtx())  # type: ignore[arg-type]

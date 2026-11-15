@@ -1585,7 +1585,6 @@ async def test_llm_stream_listener_ignores_after_dispose() -> None:
         holder["title"].dispose()
         return await next_fn(options)
 
-    ctx.on("llm/stream", dispose_first, mode=EventMode.WATERFALL)
     SessionProjectionRegistry(ctx)
     service = SessionService(ctx)
     title = SessionTitleService(
@@ -1597,6 +1596,7 @@ async def test_llm_stream_listener_ignores_after_dispose() -> None:
         },
     )
     holder["title"] = title
+    ctx.on("llm/stream", dispose_first, mode=EventMode.WATERFALL, prepend=True)
     llm = LLMService(ctx)
     llm.register_provider("mock", MockLLMProvider())
     session = service.create("s1")
@@ -1623,3 +1623,141 @@ def test_route_from_header_variants() -> None:
     assert _route_from_header({"config": "not-a-record"}) is None
     assert _route_from_header("not-a-record") is None
     assert _route_from_header({}) is None
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_marked_agent_loop_request_camelcase_and_step_boundary(
+    tmp_path: Path,
+) -> None:
+    """Verifies marked AgentLoop requests start title work on camelCase sessionId."""
+    from magitech_harness.llm.call_config import mark_agent_loop_request
+    from magitech_harness.llm.values import deep_freeze
+
+    ctx = await _stream_harness(tmp_path)
+    session = ctx.sessions.create("s-loop")
+    title_service = ctx.sessionTitle
+    provider = _FakeProvider()
+    title_service.register(provider)
+    _header(session, ctx.sessions, provider="openrouter", model="anthropic/claude-3.5")
+    _user(session, ctx.sessions, "Explain quantum computing simply")
+    await _pump()
+    assert provider.requests == []
+
+    # Open turn/step boundary = 'start' allows matching request to trigger work.
+    ctx.sessions.log_event(session, EventType.TURN_START, {"turn": 1})
+    ctx.sessions.log_event(session, EventType.STEP_START, {"turn": 1, "step": 1})
+    options = mark_agent_loop_request(
+        deep_freeze(
+            {
+                "provider": "openrouter",
+                "model": "anthropic/claude-3.5",
+                "sessionId": session.session_id,
+                "messages": [],
+            }
+        )
+    )
+
+    async def _default_stream(_opts: Any) -> Any:
+        yield {"type": "finish", "finishReason": "stop"}
+
+    stream = await ctx.waterfall("llm/stream", options, default_handler=_default_stream)
+    async for _ in stream:
+        pass
+    await title_service.drain()
+    assert len(provider.requests) == 1
+    assert provider.requests[0].route == {
+        "provider": "openrouter",
+        "model": "anthropic/claude-3.5",
+    }
+
+    # If the step boundary is closed ('end'), a late marked request must not fire.
+    provider.requests.clear()
+    session2 = ctx.sessions.create("s-loop-closed")
+    _header(session2, ctx.sessions, provider="openrouter", model="anthropic/claude-3.5")
+    _user(session2, ctx.sessions, "Second session question")
+    await _pump()
+    ctx.sessions.log_event(session2, EventType.TURN_START, {"turn": 1})
+    ctx.sessions.log_event(session2, EventType.STEP_START, {"turn": 1, "step": 1})
+    ctx.sessions.log_event(session2, EventType.STEP_END, {"turn": 1, "step": 1})
+    closed_opts = mark_agent_loop_request(
+        deep_freeze(
+            {
+                "provider": "openrouter",
+                "model": "anthropic/claude-3.5",
+                "sessionId": session2.session_id,
+                "messages": [],
+            }
+        )
+    )
+    stream2 = await ctx.waterfall(
+        "llm/stream", closed_opts, default_handler=_default_stream
+    )
+    async for _ in stream2:
+        pass
+    await title_service.drain()
+    assert provider.requests == []
+
+    # Without AgentRegistry mounted, marked AgentLoop requests still work when provider/model match.
+    no_agents_ctx = Context()
+    from magitech_harness.llm.service import LLMService
+    from magitech_harness.session.projection_registry import SessionProjectionRegistry
+    from magitech_harness.session.service import SessionService
+    from magitech_harness.session.title import SessionTitleService
+
+    SessionProjectionRegistry(no_agents_ctx)
+    sess_svc = SessionService(no_agents_ctx)
+    title_no_agents = SessionTitleService(
+        no_agents_ctx,
+        {"fallback_max_words": 5, "fallback_max_bytes": 40, "max_title_bytes": 80},
+    )
+    LLMService(no_agents_ctx)
+    p3 = _FakeProvider()
+    title_no_agents.register(p3)
+    s3 = sess_svc.create("s-no-agents")
+    _header(s3, sess_svc, provider="openrouter", model="anthropic/claude-3.5")
+    _user(s3, sess_svc, "Without agents service")
+    await _pump()
+    stream3 = await no_agents_ctx.waterfall(
+        "llm/stream",
+        mark_agent_loop_request(
+            deep_freeze(
+                {
+                    "provider": "openrouter",
+                    "model": "anthropic/claude-3.5",
+                    "sessionId": s3.session_id,
+                    "messages": [],
+                }
+            )
+        ),
+        default_handler=_default_stream,
+    )
+    async for _ in stream3:
+        pass
+    await title_no_agents.drain()
+    assert len(p3.requests) == 1
+
+    # Unmarked camelCase sessionId requests must not trigger title generation.
+    provider.requests.clear()
+    session_unmarked = ctx.sessions.create("s-unmarked")
+    _header(
+        session_unmarked,
+        ctx.sessions,
+        provider="openrouter",
+        model="anthropic/claude-3.5",
+    )
+    _user(session_unmarked, ctx.sessions, "Auxiliary request")
+    await _pump()
+    stream_unmarked = await ctx.waterfall(
+        "llm/stream",
+        {
+            "provider": "openrouter",
+            "model": "anthropic/claude-3.5",
+            "sessionId": session_unmarked.session_id,
+            "messages": [],
+        },
+        default_handler=_default_stream,
+    )
+    async for _ in stream_unmarked:
+        pass
+    await title_service.drain()
+    assert provider.requests == []

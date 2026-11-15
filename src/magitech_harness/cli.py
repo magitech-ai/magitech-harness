@@ -6,7 +6,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
+import json
 import sys
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +19,208 @@ from anima.loader import load_profile
 
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
+from magitech_harness.agent.model_selection import install_model_selection
+from magitech_harness.llm.message import create_user_message
+from magitech_harness.llm.slug import parse_model_slug
+from magitech_harness.session.events import EventType
 from magitech_harness.session.store import Session
+
+
+@dataclass(frozen=True)
+class HeadlessOutcome:
+    """Aggregated final text and turn-end reason across one headless interval."""
+
+    text: str
+    reason: dict[str, Any] | None
+
+
+def summarize_headless_outcome(session: Session, first_seq: int) -> HeadlessOutcome:
+    """Summarize the last headless run interval; unclosed turns clear prior reasons."""
+    started = False
+    text = ""
+    reason: dict[str, Any] | None = None
+    for event in session.events[first_seq:]:
+        if event.type == EventType.TURN_START:
+            started = True
+            reason = None
+            continue
+        if not started:
+            continue
+        if event.type == EventType.ASSISTANT_MESSAGE:
+            msg = event.payload.get("message")
+            content = msg.get("content") if isinstance(msg, dict) else None
+            if isinstance(content, list):
+                joined = "".join(
+                    block["text"]
+                    for block in content
+                    if isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and isinstance(block.get("text"), str)
+                )
+                if joined != "":
+                    text = joined
+        elif event.type == EventType.TURN_END:
+            raw_reason = event.payload.get("reason")
+            reason = dict(raw_reason) if isinstance(raw_reason, dict) else None
+    return HeadlessOutcome(text=text, reason=reason)
+
+
+def headless_exit_code(outcome: HeadlessOutcome) -> int:
+    """Map one headless outcome to POSIX exit status: ``completed`` -> 0, else 1."""
+    if outcome.reason is not None and outcome.reason.get("kind") == "completed":
+        return 0
+    return 1
+
+
+async def _drain_and_flush(ctx: Context) -> None:
+    """Drain background title work before flushing session persistence."""
+    title_svc = ctx.get("sessionTitle", None, strict=False)
+    if title_svc is not None:
+        await title_svc.drain()
+    await ctx.sessions.flush()
+
+
+def _resolve_headless_route(ctx: Context, model_arg: str | None) -> tuple[str, str]:
+    """Resolve ``(provider, model)`` for headless execution."""
+    if model_arg and "/" in model_arg:
+        provider, model = parse_model_slug(model_arg)
+        return provider, model
+    registered = ctx.llm.list_providers()
+    provider = registered[0]["id"] if registered else "mock"
+    model = model_arg or "mock"
+    return provider, model
+
+
+def _report_headless_failure(error: BaseException, *, json_mode: bool) -> int:
+    """Emit structured headless failure output to stdout/stderr and return exit code 1."""
+    message = str(error)
+    if json_mode:
+        print(json.dumps({"type": "error", "message": message}))
+    print(f"mth: {message}", file=sys.stderr)
+    return 1
+
+
+async def _run_headless(
+    ctx: Context,
+    task: str,
+    *,
+    model: str | None = None,
+    session_id: str | None = None,
+    json_mode: bool = False,
+) -> int:
+    """Execute one headless turn via ``AgentRegistry`` and return its exit code."""
+    try:
+        if session_id is not None and session_id.strip() == "":
+            raise ValueError("headless: session_id must not be blank")
+        if task.strip() == "":
+            raise ValueError(
+                'a task is required, for example: mth headless "run the tests"'
+            )
+
+        provider_name, model_name = _resolve_headless_route(ctx, model)
+        agent_options = {"provider": provider_name, "model": model_name}
+
+        def _setup(agent_ctx: Context, created_agent: Any) -> None:
+            if session_id is not None and model is not None:
+                previous = created_agent.model.current()
+                configured: dict[str, Any] = {
+                    "provider": provider_name,
+                    "model": model_name,
+                }
+                if (
+                    previous is not None
+                    and previous.get("provider") == provider_name
+                    and previous.get("model") == model_name
+                    and previous.get("reasoningEffort") is not None
+                ):
+                    configured["reasoningEffort"] = previous["reasoningEffort"]
+                created_agent.model.select(configured)
+            install_model_selection(agent_ctx)
+
+        if session_id is not None:
+            handle = await ctx.agents.resume(
+                {
+                    "resumeSessionId": session_id,
+                    "agentOptions": agent_options,
+                    "setup": _setup,
+                }
+            )
+        else:
+            fresh_id = f"headless-{uuid.uuid4()}"
+            handle = await ctx.agents.create(
+                {
+                    "sessionId": fresh_id,
+                    "agentOptions": agent_options,
+                    "setup": _setup,
+                }
+            )
+    except Exception as exc:  # noqa: BLE001 - fail-closed CLI boundary
+        return _report_headless_failure(exc, json_mode=json_mode)
+
+    agent = handle["agent"]
+    agent_session = agent.session
+    failure: tuple[BaseException, int] | None = None
+
+    def _on_agent_error(payload: dict[str, Any]) -> None:
+        nonlocal failure
+        if payload.get("agent") is agent:
+            failure = (payload["error"], len(agent_session.events))
+
+    def _on_session_event(subject: Session, event: Any) -> None:
+        nonlocal failure
+        if (
+            subject is agent_session
+            and event.type == EventType.TURN_END
+            and failure is not None
+            and event.seq >= failure[1]
+        ):
+            failure = None
+
+    stop_errors = ctx.on("agent/error", _on_agent_error)
+    stop_terminals = ctx.on("session/event", _on_session_event)
+    try:
+        try:
+            first_seq = len(agent.session.events)
+            agent.followup(
+                create_user_message(
+                    content=[{"type": "text", "text": task}],
+                    source={"kind": "user"},
+                )
+            )
+            await agent.when_idle()
+            await _drain_and_flush(ctx)
+            if failure is not None:
+                return _report_headless_failure(failure[0], json_mode=json_mode)
+            outcome = summarize_headless_outcome(agent.session, first_seq)
+            exit_code = headless_exit_code(outcome)
+            if json_mode:
+                print(
+                    json.dumps(
+                        {
+                            "sessionId": agent.session.id,
+                            "text": outcome.text,
+                            "reason": outcome.reason,
+                            "exitCode": exit_code,
+                        }
+                    )
+                )
+            else:
+                print(outcome.text)
+            if outcome.reason is not None and outcome.reason.get("kind") == "error":
+                err = outcome.reason.get("error")
+                if isinstance(err, dict):
+                    code = err.get("code", "UNKNOWN")
+                    msg = err.get("message", "")
+                    print(f"mth: {code}: {msg}", file=sys.stderr)
+            return exit_code
+        except Exception as exc:  # noqa: BLE001 - fail-closed CLI boundary
+            return _report_headless_failure(exc, json_mode=json_mode)
+    finally:
+        stop_errors()
+        stop_terminals()
+        dispose_res = handle["dispose"]()
+        if inspect.isawaitable(dispose_res):
+            await dispose_res
 
 
 class ReplDispatcher:
@@ -214,6 +419,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run a one-shot prompt")
     run_parser.add_argument("prompt", help="Prompt to execute")
 
+    # headless subcommand
+    headless_parser = subparsers.add_parser(
+        "headless", help="Run one-shot prompt through the parity agent loop"
+    )
+    headless_parser.add_argument("task", help="Task prompt to execute")
+    headless_parser.add_argument(
+        "--session-id",
+        dest="session_id",
+        help="Optional stored session ID to resume",
+    )
+    headless_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit final outcome as JSON",
+    )
+
     # session subcommand
     session_parser = subparsers.add_parser(
         "session", help="Inspect and manage sessions"
@@ -233,7 +454,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-async def main_async(argv: list[str] | None = None) -> None:
+async def main_async(argv: list[str] | None = None) -> int:
     """Asynchronous entry point for the mth CLI."""
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -247,7 +468,7 @@ async def main_async(argv: list[str] | None = None) -> None:
         load_profile(ctx, args.profile)
         await ctx.flush()
 
-    if not ctx.llm.providers:
+    if not ctx.llm.providers and not ctx.llm.list_providers():
         from magitech_harness.llm.service import MockLLMProvider
 
         ctx.llm.register_provider("mock", MockLLMProvider())
@@ -258,12 +479,22 @@ async def main_async(argv: list[str] | None = None) -> None:
         session = ctx.sessions.create()
         print(f"\n🚀 Running prompt: '{args.prompt}'")
         res = await ctx.agent_loop.run_turn(session, args.prompt, model=args.model)
-        await ctx.sessions.flush()
+        await _drain_and_flush(ctx)
         print(f"\n🤖 Assistant: {res}")
         print(f"📝 Session Events Recorded: {len(session.events)}")
         location = ctx.sessions.location(session.session_id)
         if location is not None:
             print(f"💾 Persisted to: {location}")
+        return 0
+
+    if cmd == "headless":
+        return await _run_headless(
+            ctx,
+            args.task,
+            model=args.model,
+            session_id=args.session_id,
+            json_mode=bool(args.json),
+        )
 
     elif cmd == "session":
         if args.session_command == "show":
@@ -279,25 +510,30 @@ async def main_async(argv: list[str] | None = None) -> None:
             print(f"Stored sessions ({len(sessions)}):")
             for s in sessions:
                 print(f"  - {s}")
+        return 0
 
     elif cmd == "component":
         components = ctx.components.mounted_components
         print(f"Loaded components ({len(components)}):")
         for manifest, _fiber in components.values():
             print(f"  - {manifest.name} ({manifest.version})")
+        return 0
 
     else:
         # Default or 'repl': run interactive REPL
         await run_repl(ctx, model=args.model)
-        await ctx.sessions.flush()
+        await _drain_and_flush(ctx)
+        return 0
 
 
 def main() -> None:
     """Synchronous launcher entry point."""
     try:
-        asyncio.run(main_async(sys.argv[1:]))
+        code = asyncio.run(main_async(sys.argv[1:]))
     except KeyboardInterrupt:
         sys.exit(0)
+    if isinstance(code, int) and code != 0:
+        sys.exit(code)
 
 
 if __name__ == "__main__":

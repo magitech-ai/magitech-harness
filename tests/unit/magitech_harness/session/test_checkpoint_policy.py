@@ -621,3 +621,41 @@ async def test_tools_execute_agent_session_and_parity_aborted_result(
         "message": "tool call aborted before dispatch",
         "info": {"name": "AbortError", "code": "ABORTED_BEFORE_DISPATCH"},
     }
+
+
+@pytest.mark.asyncio
+async def test_llm_stream_camel_case_session_id_and_pre_step_agent_session_flush(
+    tmp_path: Path,
+) -> None:
+    """Verifies parity camelCase sessionId on llm/stream and agent.session on pre-step."""
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    session = ctx.sessions.create("parity-loop-checkpoint")
+    agent = SimpleNamespace(session=session)
+    order: list[str] = []
+
+    ctx.on("session/flush", lambda s: order.append(f"flush:{s.session_id}"))
+
+    async def _default_stream(opts: dict[str, Any]) -> AsyncIterator[Any]:
+        order.append(f"stream:{opts['sessionId']}")
+        yield {"type": "finish", "finishReason": "stop"}
+
+    stream = await ctx.waterfall(
+        "llm/stream",
+        {"sessionId": session.session_id, "messages": []},
+        default_handler=_default_stream,
+    )
+    chunks = await _drain(stream)
+    assert chunks == [{"type": "finish", "finishReason": "stop"}]
+    assert order == [f"flush:{session.session_id}", f"stream:{session.session_id}"]
+
+    order.clear()
+    decision = await ctx.waterfall(
+        "agent/pre-step",
+        {"agent": agent, "turn": 1, "step": 1, "messages": ()},
+        default_handler=lambda payload: (
+            order.append("pre-step:default") or {"kind": "enter", "messages": ()}
+        ),
+    )
+    assert decision["kind"] == "enter"
+    assert order == [f"flush:{session.session_id}", "pre-step:default"]
