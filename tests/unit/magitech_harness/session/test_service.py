@@ -865,6 +865,7 @@ async def test_session_service_read_inspects_without_owning(
     loaded = service.load("peek3")
     assert loaded is not None
     assert len(loaded.events) == 2
+    assert service.read("peek3") is loaded
 
 
 @pytest.mark.asyncio

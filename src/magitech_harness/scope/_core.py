@@ -14,9 +14,7 @@ from anima.core import Service, _BoundService, _current_fiber
 
 ScopeKey = object
 
-_carrier_keys: weakref.WeakKeyDictionary[Scoped[Any], ScopeKey | None] = (
-    weakref.WeakKeyDictionary()
-)
+_carriers: weakref.WeakSet[Scoped[Any]] = weakref.WeakSet()
 _scope_parents: dict[int, tuple[weakref.ref[Any] | ScopeKey, ScopeKey]] = {}
 
 
@@ -423,20 +421,20 @@ class Scoped[T: object]:
 def scope_target[T: object](base: T, key: ScopeKey | None) -> Scoped[T]:
     """Build an opaque scope-routed event carrier."""
     carrier = Scoped(base, key)
-    _carrier_keys[carrier] = key
+    _carriers.add(carrier)
     return carrier
 
 
 def is_scope_carrier(value: object) -> bool:
     """Test whether `value` was created by :func:`scope_target`."""
-    return isinstance(value, Scoped) and value in _carrier_keys
+    return isinstance(value, Scoped) and value in _carriers
 
 
 def carrier_key_of(value: object) -> ScopeKey | None:
     """Read a carrier's scope key, or None for non-carriers or unkeyed carriers."""
-    if not isinstance(value, Scoped):
+    if not isinstance(value, Scoped) or value not in _carriers:
         return None
-    return _carrier_keys.get(value)
+    return value._key
 
 
 def emit_scoped(

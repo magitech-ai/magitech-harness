@@ -1,5 +1,6 @@
 """Unit tests for the default bundle file and its loading in create_harness."""
 
+import io
 import sys
 import types
 from pathlib import Path
@@ -10,6 +11,7 @@ from anima.jsexpr import dump_yaml, load_yaml
 
 import magitech_harness
 from magitech_harness import EventType, check_bundle_entries, create_harness
+from magitech_harness.agent.agent_loop import AgentLoop
 from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.approval.service import ApprovalService
@@ -166,9 +168,14 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
-        "id": "agent-loop",
+        "id": "agent-loop-legacy",
         "name": "magitech_harness.agent.loop:AgentLoopService",
         "config": {},
+    },
+    {
+        "id": "agent-loop",
+        "name": "magitech_harness.agent.agent_loop:AgentLoop",
+        "config": {"agents": []},
     },
 ]
 
@@ -199,6 +206,7 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agents, AgentRegistry)
     assert isinstance(ctx.agent_loop, AgentLoopService)
+    assert isinstance(ctx.agentLoop, AgentLoop)
     assert isinstance(ctx.sessionPersistence, JsonlSessionPersistenceService)
     assert isinstance(ctx.sessionProjectionCache, SessionProjectionCacheService)
     assert ctx.approvals.default_verdict is False
@@ -213,7 +221,7 @@ def test_bundle_slots_are_row_services() -> None:
     assert ctx.sessions.projection_cache is None
     assert not ctx.llm.providers
     assert ctx.sessionProjections.summary_keys() == frozenset(
-        {"title", "workingDirectory", "tokenUsage"}
+        {"title", "workingDirectory", "tokenUsage", "inbox", "modelSelection"}
     )
 
 
@@ -230,6 +238,7 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert not ctx.has("sessionProjectionCache")
     assert not ctx.has("agents")
     assert not ctx.has("agent_loop")
+    assert not ctx.has("agentLoop")
     assert not ctx.has("components")
     await ctx.flush()
     assert ctx.has("tools")
@@ -241,6 +250,7 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert ctx.has("sessionProjectionCache")
     assert ctx.has("agents")
     assert ctx.has("agent_loop")
+    assert ctx.has("agentLoop")
     assert ctx.has("components")
     assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.tools, ToolService)
@@ -250,6 +260,7 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agents, AgentRegistry)
     assert isinstance(ctx.agent_loop, AgentLoopService)
+    assert isinstance(ctx.agentLoop, AgentLoop)
 
 
 def _write_bundle(tmp_path: Path, text: str) -> Path:
@@ -514,3 +525,61 @@ def test_swapped_agent_before_session_projections_row_resolves_via_injection(
     monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", missing_dep_bundle)
     with pytest.raises(RuntimeError, match="agent"):
         create_harness()
+
+
+def test_swapped_agent_loop_dependencies_resolve_via_injection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Verifies AgentLoop waits on all 6 injected slots even when listed first."""
+    dep_rows = [
+        {
+            "id": "session-projections",
+            "name": "magitech_harness.session.projection_registry:SessionProjectionRegistry",
+            "config": {},
+        },
+        {
+            "id": "system-prompt",
+            "name": "magitech_harness.system_prompt.service:SystemPromptService",
+            "config": {},
+        },
+        {
+            "id": "tools",
+            "name": "magitech_harness.tools.service:ToolService",
+            "config": {},
+        },
+        {
+            "id": "llm",
+            "name": "magitech_harness.llm.service:LLMService",
+            "config": {},
+        },
+        {
+            "id": "sessions",
+            "name": "magitech_harness.session.service:SessionService",
+            "config": {},
+        },
+        {
+            "id": "agent",
+            "name": "magitech_harness.agent.registry:AgentRegistry",
+            "config": {},
+        },
+    ]
+    agent_loop_row = {
+        "id": "agent-loop",
+        "name": "magitech_harness.agent.agent_loop:AgentLoop",
+        "config": {"agents": []},
+    }
+    buf = io.StringIO()
+    dump_yaml([agent_loop_row, *reversed(dep_rows)], buf)
+    swapped_bundle = _write_bundle(tmp_path, buf.getvalue())
+    monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", swapped_bundle)
+    ctx = create_harness()
+    assert isinstance(ctx.agentLoop, AgentLoop)
+
+    for omitted in dep_rows:
+        partial_rows = [agent_loop_row, *(r for r in dep_rows if r is not omitted)]
+        buf = io.StringIO()
+        dump_yaml(partial_rows, buf)
+        missing_bundle = _write_bundle(tmp_path, buf.getvalue())
+        monkeypatch.setattr(magitech_harness, "_BASE_BUNDLE_PATH", missing_bundle)
+        with pytest.raises(RuntimeError, match="agent-loop"):
+            create_harness()

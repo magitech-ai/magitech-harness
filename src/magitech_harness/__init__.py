@@ -12,9 +12,14 @@ from pathlib import Path
 from anima import Context, FiberState
 from anima.loader import LoaderService
 
-from magitech_harness.agent.cancellation import AbortError, AbortSignal
+from magitech_harness.agent.agent_loop import AgentLoop, FactoryOwnership
+from magitech_harness.agent.assistant_stream import AssistantStreamAttempt
+from magitech_harness.agent.cancellation import AbortController, AbortError, AbortSignal
+from magitech_harness.agent.constants import DEFAULT_MAX_PARALLEL_TOOL_CALLS
 from magitech_harness.agent.loop import AgentLoopService
+from magitech_harness.agent.react_loop import ReactLoopAgent
 from magitech_harness.agent.registry import AgentRegistry
+from magitech_harness.agent.runtime_context import RuntimeContextProjection
 from magitech_harness.approval.service import (
     ApprovalRequest,
     ApprovalService,
@@ -170,16 +175,21 @@ def create_harness(
 
 
 __all__ = [
+    "DEFAULT_MAX_PARALLEL_TOOL_CALLS",
+    "AbortController",
     "AbortError",
     "AbortSignal",
+    "AgentLoop",
     "AgentLoopService",
     "AgentRegistry",
     "ApprovalRequest",
     "ApprovalService",
+    "AssistantStreamAttempt",
     "ComponentManifest",
     "ComponentService",
     "ConfigLayer",
     "EventType",
+    "FactoryOwnership",
     "LLMProvider",
     "LLMService",
     "LayerResolutionService",
@@ -189,6 +199,8 @@ __all__ = [
     "ModelResponse",
     "NativeToolExecutor",
     "NoProviderError",
+    "ReactLoopAgent",
+    "RuntimeContextProjection",
     "Session",
     "SessionEvent",
     "SessionService",
