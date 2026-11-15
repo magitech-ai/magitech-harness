@@ -192,7 +192,16 @@ async def test_memory_only_flush_all_is_a_noop() -> None:
     """A memory-only service-wide flush drains nothing and raises nothing."""
     service = SessionService(Context())
     session = service.create("k4-noop")
-    service.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    service.log_event(
+        session,
+        EventType.USER_MESSAGE,
+        {
+            "role": "user",
+            "id": "u1",
+            "content": [{"type": "text", "text": "hi"}],
+            "source": {"kind": "user"},
+        },
+    )
     await service.flush()
     assert service.get("k4-noop") is session
 
@@ -281,7 +290,16 @@ async def test_memory_only_boot_rows_are_hollow() -> None:
     assert ctx.sessions.projection_cache is None
     service = ctx.sessions
     session = service.create("k4-memory-boot")
-    service.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    service.log_event(
+        session,
+        EventType.USER_MESSAGE,
+        {
+            "role": "user",
+            "id": "u1",
+            "content": [{"type": "text", "text": "hi"}],
+            "source": {"kind": "user"},
+        },
+    )
     await service.flush()
     assert service.close("k4-memory-boot") is True
     assert service.location("k4-memory-boot") is None
@@ -303,7 +321,16 @@ async def test_bundle_slots_with_storage(tmp_path: Path) -> None:
     service = ctx.sessions
     assert service.projection_cache is cache.cache
     session = service.create("k4-slots")
-    service.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    service.log_event(
+        session,
+        EventType.USER_MESSAGE,
+        {
+            "role": "user",
+            "id": "u1",
+            "content": [{"type": "text", "text": "hi"}],
+            "source": {"kind": "user"},
+        },
+    )
     await service.flush()
     location = service.location("k4-slots")
     assert location is not None

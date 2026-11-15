@@ -34,7 +34,9 @@ async def test_rows_fold_the_five_units() -> None:
     await ctx.flush()
     service = ctx.sessions
     registry = ctx.sessionProjections
-    assert registry.summary_keys() == frozenset({"title", "workingDirectory"})
+    assert registry.summary_keys() == frozenset(
+        {"title", "workingDirectory", "tokenUsage"}
+    )
     session = service.create("k3-1")
     service.log_event(session, "turn/start", {"turn": 1})
     service.log_event(

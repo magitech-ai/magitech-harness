@@ -1895,8 +1895,8 @@ def test_session_append_rules() -> None:
         session.append("turn/start", {"turn": 1, "bad": {1, 2}})
     with pytest.raises(ValueError, match="unknown session event type"):
         session.append("session/compaction", {})
-    assert not hasattr(Session, "eventAt")
-    assert not hasattr(Session, "snapshotEvents")
+    assert Session.eventAt is Session.event_at
+    assert Session.snapshotEvents is Session.snapshot_events
     assert not hasattr(Session, "ownEvents")
 
 
@@ -3128,3 +3128,41 @@ def test_derive_messages_returns_isolated_copies() -> None:
     third[1]["content"][0]["text"] = "mutated-reply"
     fourth = session.derive_messages()
     assert [msg["content"][0]["text"] for msg in fourth] == ["hello", "reply"]
+
+
+def test_session_event_at_and_snapshot_events() -> None:
+    """Session exposes 0-based event lookup and half-open event range snapshots."""
+    session = Session.create("event-at-and-snapshot")
+    e0 = session.append(
+        "user/message",
+        {
+            "role": "user",
+            "id": "u1",
+            "content": [{"type": "text", "text": "one"}],
+            "source": {"kind": "user"},
+        },
+        surface_op="append",
+    )
+    e1 = session.append(
+        "user/message",
+        {
+            "role": "user",
+            "id": "u2",
+            "content": [{"type": "text", "text": "two"}],
+            "source": {"kind": "user"},
+        },
+        surface_op="append",
+    )
+    assert session.event_at(0) is e0
+    assert session.event_at(1) is e1
+    assert session.eventAt(0) is e0
+    assert session.event_at(-1) is None
+    assert session.event_at(2) is None
+    assert session.event_at(True) is None
+
+    snap = session.snapshot_events()
+    assert snap == [e0, e1]
+    assert session.snapshotEvents(1) == [e1]
+    assert session.snapshot_events(0, 1) == [e0]
+    snap.pop()
+    assert len(session.events) == 2

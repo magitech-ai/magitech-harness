@@ -674,6 +674,30 @@ class Session:
         """Current surface event sequences in model-visible order."""
         return self._surface_manager.nodes
 
+    def event_at(self, seq: int) -> SessionEvent | None:
+        """Return the event stored at the given 0-based sequence number, or ``None``."""
+        if (
+            not isinstance(seq, int)
+            or isinstance(seq, bool)
+            or seq < 0
+            or seq >= len(self.events)
+        ):
+            return None
+        return self.events[seq]
+
+    eventAt = event_at
+
+    def snapshot_events(
+        self,
+        from_seq: int = 0,
+        to_seq_exclusive: int | None = None,
+    ) -> list[SessionEvent]:
+        """Return a shallow snapshot of a half-open event sequence range."""
+        end = len(self.events) if to_seq_exclusive is None else to_seq_exclusive
+        return list(self.events[max(0, from_seq) : max(0, end)])
+
+    snapshotEvents = snapshot_events
+
     @classmethod
     def load(
         cls,

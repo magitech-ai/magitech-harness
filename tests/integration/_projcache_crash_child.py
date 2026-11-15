@@ -64,7 +64,7 @@ def _append_golden_live(service: SessionService, session) -> None:
                     "chunk": {"type": "text-delta", "index": 0, "text": "Hi"},
                 }
             ],
-            "usage": {"outputTokens": 5},
+            "usage": {"inputTokens": 3, "outputTokens": 5},
         },
     )
     service.log_event(

@@ -73,6 +73,12 @@
     root: ${MAGITECH_SESSIONS_DIR}
     write_every_events: 200
     write_interval_ms: 5000
+- id: llm-retry
+  name: magitech_harness.llm.retry:apply
+  config: {}
+- id: token-meter
+  name: magitech_harness.llm.token_meter:TokenMeter
+  config: {}
 - id: agent-loop
   name: magitech_harness.agent.loop:AgentLoopService
   config: {}

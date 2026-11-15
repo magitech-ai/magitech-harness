@@ -144,6 +144,16 @@ EXPECTED_ROWS = [
         },
     },
     {
+        "id": "llm-retry",
+        "name": "magitech_harness.llm.retry:apply",
+        "config": {},
+    },
+    {
+        "id": "token-meter",
+        "name": "magitech_harness.llm.token_meter:TokenMeter",
+        "config": {},
+    },
+    {
         "id": "agent-loop",
         "name": "magitech_harness.agent.loop:AgentLoopService",
         "config": {},
@@ -152,7 +162,7 @@ EXPECTED_ROWS = [
 
 
 def test_base_bundle_rows() -> None:
-    """Verifies the default bundle file carries exactly the twenty rows."""
+    """Verifies the default bundle file carries all base rows."""
     bundle_path = (
         Path(magitech_harness.__file__).resolve().parent / "profiles" / "base.yaml"
     )
@@ -162,7 +172,7 @@ def test_base_bundle_rows() -> None:
 
 
 def test_bundle_slots_are_row_services() -> None:
-    """Verifies the twenty bundle slots resolve to the row services."""
+    """Verifies the base bundle slots resolve to the row services."""
     ctx = create_harness()
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
@@ -189,7 +199,7 @@ def test_bundle_slots_are_row_services() -> None:
     assert ctx.sessions.projection_cache is None
     assert not ctx.llm.providers
     assert ctx.sessionProjections.summary_keys() == frozenset(
-        {"title", "workingDirectory"}
+        {"title", "workingDirectory", "tokenUsage"}
     )
 
 
