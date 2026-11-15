@@ -88,6 +88,8 @@ from magitech_harness.session.surface import (
     SurfaceFoldResult,
     SurfaceManager,
     fold_surface,
+    is_replacement_surface_event,
+    isReplacementSurfaceEvent,
 )
 from magitech_harness.session.title import (
     SessionTitleInvalidError,
@@ -194,7 +196,9 @@ __all__ = [
     "identity_matches",
     "identity_of",
     "interrupted_turn_closers",
+    "isReplacementSurfaceEvent",
     "is_plugin_record_type",
+    "is_replacement_surface_event",
     "is_tool_pairing_balanced",
     "lifecycle_identity_of",
     "normalize_session_title",

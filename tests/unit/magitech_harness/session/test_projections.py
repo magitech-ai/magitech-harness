@@ -1438,7 +1438,7 @@ def test_rows_wire_the_five_units() -> None:
     service = ctx.sessions
     registry = ctx.sessionProjections
     assert registry.summary_keys() == frozenset(
-        {"title", "tokenUsage", "workingDirectory"}
+        {"title", "tokenUsage", "workingDirectory", "inbox", "modelSelection"}
     )
     session = service.create("svc-1")
     service.log_event(session, "turn/start", {"turn": 1})

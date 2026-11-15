@@ -35,7 +35,7 @@ async def test_rows_fold_the_five_units() -> None:
     service = ctx.sessions
     registry = ctx.sessionProjections
     assert registry.summary_keys() == frozenset(
-        {"title", "workingDirectory", "tokenUsage"}
+        {"title", "workingDirectory", "tokenUsage", "inbox", "modelSelection"}
     )
     session = service.create("k3-1")
     service.log_event(session, "turn/start", {"turn": 1})

@@ -15,17 +15,25 @@ from magitech_harness.session.request_header import _canonical_json
 
 
 def tool_name(schema: dict[str, Any]) -> str:
-    """The name of one tool schema, read through its function envelope.
+    """The name of one tool schema (envelope or flat ToolSchema).
 
-    Header tools are the envelope schemas returned by the tool service
-    (``{"type": "function", "function": {"name", ...}}``); the name
-    lives on the nested function object, not at the top level.
+    Supports both legacy function-envelope schemas
+    (``{"type": "function", "function": {"name", ...}}``) and flat
+    ToolSchema objects (``{"name", "description", "parameters"}``).
     """
     function = schema.get("function")
     if isinstance(function, dict):
         name = function.get("name")
         if isinstance(name, str) and name:
             return name
+    name = schema.get("name")
+    if (
+        isinstance(name, str)
+        and name
+        and isinstance(schema.get("description"), str)
+        and isinstance(schema.get("parameters"), dict)
+    ):
+        return name
     raise ValueError("tool history: header tool without a name")
 
 

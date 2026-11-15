@@ -89,6 +89,14 @@ def _is_replace_op(value: Any) -> bool:
     )
 
 
+def is_replacement_surface_event(event: SessionEvent) -> bool:
+    """Return True when *event* carries a valid surface replacement marker."""
+    return event.type in SURFACE_EVENT_TYPES and _is_replace_op(event.surface_op)
+
+
+isReplacementSurfaceEvent = is_replacement_surface_event
+
+
 def _content_blocks(message: Any) -> list[Any]:
     if _is_record(message) and isinstance(message.get("content"), list):
         return list(message["content"])
@@ -428,16 +436,19 @@ def _assert_source_event_references(
 
 
 def _complete_tool_definition(schema: Any) -> bool:
-    """Whether one envelope tool schema carries a complete definition.
-
-    Header tools are envelope schemas; the definition lives on the
-    nested function object, not at the top level.
-    """
-    function = schema.get("function") if isinstance(schema, dict) else None
-    if not isinstance(function, dict):
+    """Whether one header tool schema carries a complete definition."""
+    if not isinstance(schema, dict):
         return False
-    return isinstance(function.get("description"), str) and isinstance(
-        function.get("parameters"), dict
+    function = schema.get("function")
+    if isinstance(function, dict):
+        return isinstance(function.get("description"), str) and isinstance(
+            function.get("parameters"), dict
+        )
+    return (
+        isinstance(schema.get("name"), str)
+        and bool(schema.get("name"))
+        and isinstance(schema.get("description"), str)
+        and isinstance(schema.get("parameters"), dict)
     )
 
 

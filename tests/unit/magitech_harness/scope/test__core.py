@@ -609,9 +609,22 @@ async def test_scope_weakref_release_and_non_weakrefable_keys() -> None:
     with pytest.raises(ValueError, match="already bound"):
         bind_scope_parent(dict_child, {"id": "other"})
 
+    class _SelfReferential:
+        carrier: Any = None
+
+    self_ref = _SelfReferential()
+    self_carrier = scope_target(self_ref, self_ref)
+    self_ref.carrier = self_carrier
+    self_ref_wr = weakref.ref(self_ref)
+    self_carrier_wr = weakref.ref(self_carrier)
+    del self_ref
+    del self_carrier
+
     del binding
     wk_child = None
     del carrier
     gc.collect()
     assert key_ref() is None
     assert carrier_ref() is None
+    assert self_ref_wr() is None
+    assert self_carrier_wr() is None

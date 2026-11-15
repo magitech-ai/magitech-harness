@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 
 class AbortError(Exception):
@@ -14,7 +15,7 @@ class AbortSignal:
 
     def __init__(self) -> None:
         self._aborted = False
-        self._reason: str | None = None
+        self._reason: Any = None
         self._listeners: list[Callable[[], None]] = []
 
     @property
@@ -28,11 +29,11 @@ class AbortSignal:
         return self._aborted
 
     @property
-    def reason(self) -> str | None:
-        """Returns the optional abort reason string."""
+    def reason(self) -> Any:
+        """Returns the optional abort reason."""
         return self._reason
 
-    def abort(self, reason: str | None = None) -> None:
+    def abort(self, reason: Any = None) -> None:
         """Trigger cancellation, notifying all registered listeners."""
         if self._aborted:
             return
@@ -73,3 +74,14 @@ class AbortSignal:
                 else "Operation was aborted."
             )
             raise AbortError(msg)
+
+
+class AbortController:
+    """Controller paired with an owned AbortSignal."""
+
+    def __init__(self) -> None:
+        self.signal = AbortSignal()
+
+    def abort(self, reason: Any = None) -> None:
+        """Trigger cancellation on the owned signal."""
+        self.signal.abort(reason)

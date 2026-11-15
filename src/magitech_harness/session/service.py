@@ -19,6 +19,7 @@ import logging
 import shutil
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
@@ -45,7 +46,7 @@ from magitech_harness.session.persistence_jsonl import (
     session_dir,
 )
 from magitech_harness.session.projection_registry import ProjectionSnapshot
-from magitech_harness.session.store import Session, SessionStore
+from magitech_harness.session.store import Session, SessionPreparation, SessionStore
 
 if TYPE_CHECKING:
     from magitech_harness.session.persistence_jsonl import (
@@ -123,6 +124,22 @@ class SessionService(Service):
     def store(self) -> SessionStore:
         """The live-session store this service shells over."""
         return self._store
+
+    def prepare(
+        self, session_id: str | None = None, options: dict[str, Any] | None = None
+    ) -> SessionPreparation:
+        """Build a prepared session without entering it into the store."""
+        return self._store.prepare(session_id, options)
+
+    def enter(
+        self, preparation_or_session: SessionPreparation | Session
+    ) -> Callable[[], None]:
+        """Enter a session into the store and install publication hooks."""
+        return self._store.enter(preparation_or_session)
+
+    def announce(self, session: Session) -> None:
+        """Emit ``session/created`` for an entered session."""
+        self._store.announce(session)
 
     def _require_projections(self) -> SessionProjectionRegistry:
         """The registry, or a loud failure when the context carries none."""
