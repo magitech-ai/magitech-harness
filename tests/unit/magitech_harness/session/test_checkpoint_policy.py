@@ -9,6 +9,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import pytest
@@ -578,3 +579,45 @@ async def test_policy_dispose_removes_all_wrappers(tmp_path: Path) -> None:
     )
     assert decision["action"] == "continue"
     assert flushes == [session.session_id]
+
+
+@pytest.mark.asyncio
+async def test_tools_execute_agent_session_and_parity_aborted_result(
+    tmp_path: Path,
+) -> None:
+    """Verifies parity agent.session lookup and non-call pre-aborted result."""
+    ctx = create_harness(storage_dir=tmp_path)
+    ctx.use(_MockProviderComponent)
+    await ctx.flush()
+    session = ctx.sessions.create("parity-agent-session")
+    agent = SimpleNamespace(session=session)
+    flushes: list[str] = []
+    ctx.on("session/flush", lambda s: flushes.append(s.session_id))
+
+    result = await ctx.waterfall(
+        "tools/execute",
+        {"agent": agent, "signal": AbortSignal(), "toolName": "read"},
+        default_handler=lambda execution: {
+            "isError": False,
+            "content": [{"type": "text", "text": "ok"}],
+        },
+    )
+    assert flushes == [session.session_id]
+    assert result == {"isError": False, "content": [{"type": "text", "text": "ok"}]}
+
+    aborted = AbortSignal()
+    aborted.abort("cancelled")
+    aborted_result = await ctx.waterfall(
+        "tools/execute",
+        {"agent": agent, "signal": aborted, "toolName": "read"},
+        default_handler=lambda execution: {
+            "isError": False,
+            "content": [{"type": "text", "text": "unreachable"}],
+        },
+    )
+    assert flushes == [session.session_id, session.session_id]
+    assert aborted_result["isError"] is True
+    assert aborted_result["error"] == {
+        "message": "tool call aborted before dispatch",
+        "info": {"name": "AbortError", "code": "ABORTED_BEFORE_DISPATCH"},
+    }

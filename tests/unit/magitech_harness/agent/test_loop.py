@@ -11,6 +11,8 @@ from magitech_harness.session.projection_registry import SessionProjectionRegist
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
 from magitech_harness.system_prompt import DEFAULT_HARNESS_IDENTITY
+from magitech_harness.system_prompt.service import SystemPromptService
+from magitech_harness.tools.native_executor import apply as apply_native_executor
 
 
 @pytest.mark.asyncio
@@ -153,7 +155,9 @@ async def test_agent_loop_max_steps_termination() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 
@@ -250,7 +254,9 @@ async def test_agent_loop_stream_turn_with_tool_calls() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 
@@ -360,7 +366,9 @@ async def test_agent_loop_stream_turn_max_steps_termination() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 
@@ -396,7 +404,9 @@ async def test_agent_loop_signal_active_during_tool_execution() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 
@@ -581,7 +591,9 @@ async def test_agent_loop_tool_call_canonical_log() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 
@@ -637,12 +649,13 @@ async def test_agent_loop_tool_call_canonical_log() -> None:
     ]
     derived = session.derive_messages()
     assert [message["role"] for message in derived] == [
+        "system",
         "user",
         "assistant",
         "tool",
         "assistant",
     ]
-    assert derived[2]["toolCallId"] == "call_greet_1"
+    assert derived[3]["toolCallId"] == "call_greet_1"
 
 
 @pytest.mark.asyncio
@@ -810,7 +823,9 @@ async def test_agent_loop_developer_tool_addition_and_removal() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 
@@ -876,7 +891,9 @@ async def test_agent_loop_tools_only_change_keeps_tool_baseline() -> None:
     ctx.use(SessionProjectionRegistry)
     ctx.use(SessionService)
     ctx.use(LLMService)
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
+    ctx.use(apply_native_executor)
     ctx.use(AgentLoopService)
     await ctx.flush()
 

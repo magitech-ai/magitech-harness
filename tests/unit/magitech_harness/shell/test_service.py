@@ -17,6 +17,7 @@ from magitech_harness.shell.service import (
     _kill_process_tree,
     _read_bounded_stream,
 )
+from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.service import ToolService
 
 
@@ -54,6 +55,7 @@ async def test_shell_service_run(tmp_path: Path) -> None:
 async def test_shell_service_does_not_register_tools() -> None:
     """Verifies LocalShellService strictly acts as an execution backend with zero domain tools."""
     ctx = Context()
+    ctx.use(SystemPromptService)
     ctx.use(ToolService)
     ctx.use(LocalShellService)
     await ctx.flush()

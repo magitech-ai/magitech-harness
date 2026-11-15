@@ -26,6 +26,7 @@ from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
 from magitech_harness.shell.service import LocalShellService
 from magitech_harness.system_prompt.service import SystemPromptService
+from magitech_harness.tools.native_executor import NativeToolExecutor
 from magitech_harness.tools.service import ToolService
 
 EXPECTED_ROWS = [
@@ -37,6 +38,11 @@ EXPECTED_ROWS = [
     {
         "id": "tools",
         "name": "magitech_harness.tools.service:ToolService",
+        "config": {},
+    },
+    {
+        "id": "tool-executor-native",
+        "name": "magitech_harness.tools.native_executor:apply",
         "config": {},
     },
     {
@@ -176,6 +182,7 @@ def test_bundle_slots_are_row_services() -> None:
     ctx = create_harness()
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
+    assert isinstance(ctx.tools.select_executor(), NativeToolExecutor)
     assert isinstance(ctx.llm, LLMService)
     assert isinstance(ctx.shell, LocalShellService)
     assert isinstance(ctx.approvals, ApprovalService)

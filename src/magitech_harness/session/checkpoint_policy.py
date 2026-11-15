@@ -22,6 +22,7 @@ from anima import Context, Disposer, EventMode
 
 from magitech_harness.session.events import ToolCallData, ToolResultData
 from magitech_harness.session.store import Session, SessionStore
+from magitech_harness.tools.pipeline import build_aborted_result
 
 if TYPE_CHECKING:
     from magitech_harness.llm.types import ModelChunk
@@ -90,13 +91,18 @@ def apply(ctx: Context, config: dict[str, Any] | None = None) -> Disposer:
         execution: dict[str, Any], next_fn: Callable[..., Awaitable[Any]]
     ) -> Any:
         """Checkpoint a top-level tool call, then re-check for cancellation."""
-        session = execution.get("session")
+        agent = execution.get("agent")
+        session = execution.get("session") or (
+            getattr(agent, "session", None) if agent is not None else None
+        )
         if session is None or execution.get("parent") is not None:
             return await next_fn()
         await store.flush(session)
         signal = execution.get("signal")
         if signal is not None and signal.is_aborted:
-            return aborted_before_dispatch_result(execution["call"])
+            if "call" in execution:
+                return aborted_before_dispatch_result(execution["call"])
+            return build_aborted_result(before_dispatch=True)
         return await next_fn()
 
     async def _on_pre_step(
