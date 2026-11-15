@@ -41,8 +41,11 @@ from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session, derive_messages
 from magitech_harness.shell.service import LocalShellService, ShellResult
 from magitech_harness.system_prompt.service import SystemPromptService
-from magitech_harness.tools.definition import Tool, define_tool
-from magitech_harness.tools.service import ToolService
+from magitech_harness.tools.definition import Tool
+from magitech_harness.tools.native_executor import NativeToolExecutor
+from magitech_harness.tools.pipeline import ToolExecutionPipeline
+from magitech_harness.tools.schema import define_tool
+from magitech_harness.tools.service import ToolRuntime, ToolService, ToolsService
 
 _BASE_BUNDLE_PATH = Path(__file__).resolve().parent / "profiles" / "base.yaml"
 
@@ -182,6 +185,7 @@ __all__ = [
     "MockLLMProvider",
     "ModelChunk",
     "ModelResponse",
+    "NativeToolExecutor",
     "NoProviderError",
     "Session",
     "SessionEvent",
@@ -190,8 +194,11 @@ __all__ = [
     "SystemPromptService",
     "Tool",
     "ToolCallData",
+    "ToolExecutionPipeline",
     "ToolResultData",
+    "ToolRuntime",
     "ToolService",
+    "ToolsService",
     "UsageData",
     "calculate_argument_digest",
     "check_bundle_entries",

@@ -1,6 +1,4 @@
-"""
-Tool definition structures and validation.
-"""
+"""Legacy Phase 2 tool structures kept compatible during Phase 3 migration."""
 
 from __future__ import annotations
 
@@ -12,6 +10,8 @@ from pydantic import BaseModel, Field
 
 
 class Tool(BaseModel):
+    """Legacy Pydantic tool descriptor with schema export and execution."""
+
     name: str
     description: str
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -20,6 +20,7 @@ class Tool(BaseModel):
     model_config = {"arbitrary_types_allowed": True}
 
     async def execute(self, args: dict[str, Any]) -> Any:
+        """Invoke the configured tool handler synchronously or asynchronously."""
         if self.handler is None:
             raise NotImplementedError(f"Tool {self.name} has no handler")
         res = self.handler(args)
@@ -28,7 +29,7 @@ class Tool(BaseModel):
         return res
 
     def to_schema(self) -> dict[str, Any]:
-        """Generate standard JSON function calling schema."""
+        """Generate legacy function calling schema."""
         properties: dict[str, Any] = {}
         required: list[str] = []
 
@@ -63,26 +64,21 @@ class Tool(BaseModel):
         }
 
 
-def define_tool(
+def legacy_define_tool(
     name: str,
     description: str,
     parameters: dict[str, Any] | None = None,
     execute: Callable[[dict[str, Any]], Any | Awaitable[Any]] | None = None,
 ) -> Tool:
-    """Helper to define a model-callable tool.
-
-    Args:
-        name: Name of the tool.
-        description: Description of what the tool does.
-        parameters: JSON Schema properties dict or parameter specifications.
-        execute: Handler callable (sync or async) executing the tool.
-
-    Returns:
-        A configured Tool instance.
-    """
+    """Create a legacy Tool model without output validation."""
     return Tool(
         name=name,
         description=description,
         parameters=parameters or {},
         handler=execute,
     )
+
+
+define_tool = legacy_define_tool
+
+__all__ = ["Tool", "define_tool", "legacy_define_tool"]

@@ -4,6 +4,9 @@
 - id: tools
   name: magitech_harness.tools.service:ToolService
   config: {}
+- id: tool-executor-native
+  name: magitech_harness.tools.native_executor:apply
+  config: {}
 - id: llm
   name: magitech_harness.llm.service:LLMService
   config: {}
