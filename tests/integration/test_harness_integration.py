@@ -15,6 +15,7 @@ from magitech_harness import (
 from magitech_harness.llm.types import ModelChunk
 from magitech_harness.session.messages import create_user_message
 from magitech_harness.session.store import Session
+from magitech_harness.system_prompt import DEFAULT_HARNESS_IDENTITY
 
 
 class _MockProviderComponent:
@@ -118,8 +119,10 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
     ]
     by_type = {ev.type: ev for ev in session.events}
     assert by_type[EventType.TURN_START].payload == {"turn": 1}
-    # No prompt sections registered: the empty prompt reserves node 0.
-    assert by_type[EventType.SYSTEM_MESSAGE].payload["message"]["content"] == []
+    # Default harness identity is active even when no custom sections are registered.
+    assert by_type[EventType.SYSTEM_MESSAGE].payload["message"]["content"] == [
+        {"type": "text", "text": DEFAULT_HARNESS_IDENTITY}
+    ]
     user = by_type[EventType.USER_MESSAGE].payload
     assert user["content"] == [{"type": "text", "text": "What is 6 * 7?"}]
     assert user["source"] == {"kind": "user"}
@@ -140,11 +143,15 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
 
     # 6. Verify derive_messages deterministic projection (verbatim blocks).
     projected = session.derive_messages()
-    assert len(projected) == 4
-    assert projected[0]["role"] == "user"
-    assert projected[0]["content"] == [{"type": "text", "text": "What is 6 * 7?"}]
-    assert projected[1]["role"] == "assistant"
-    assert projected[1]["content"] == [
+    assert len(projected) == 5
+    assert projected[0]["role"] == "system"
+    assert projected[0]["content"] == [
+        {"type": "text", "text": DEFAULT_HARNESS_IDENTITY}
+    ]
+    assert projected[1]["role"] == "user"
+    assert projected[1]["content"] == [{"type": "text", "text": "What is 6 * 7?"}]
+    assert projected[2]["role"] == "assistant"
+    assert projected[2]["content"] == [
         {"type": "text", "text": "Let me calculate that for you."},
         {
             "type": "tool-call",
@@ -153,10 +160,10 @@ async def test_full_turn_with_tool_call(tmp_path: Path):
             "arguments": '{"a":6,"b":7}',
         },
     ]
-    assert projected[2]["role"] == "tool"
-    assert projected[2]["content"] == [{"type": "text", "text": "42"}]
-    assert projected[3]["role"] == "assistant"
-    assert projected[3]["content"] == [{"type": "text", "text": "The answer is 42."}]
+    assert projected[3]["role"] == "tool"
+    assert projected[3]["content"] == [{"type": "text", "text": "42"}]
+    assert projected[4]["role"] == "assistant"
+    assert projected[4]["content"] == [{"type": "text", "text": "The answer is 42."}]
 
     # 7. Verify JSONL file persistence on disk: one v4 header line plus
     # one physical row per event. The deferred fallback title commits on
@@ -355,7 +362,10 @@ async def test_replay_reproduces_identical_message_sequence(tmp_path: Path):
     ]
     # The system head holds the normalized rendering, once.
     assert live[0]["content"] == [
-        {"type": "text", "text": "You are a calculator. Be brief."}
+        {
+            "type": "text",
+            "text": f"{DEFAULT_HARNESS_IDENTITY}\n\nYou are a calculator. Be brief.",
+        }
     ]
     # The replacement stands where the shadowed range was; the two
     # consecutive user messages after it stay separate nodes, unmerged.

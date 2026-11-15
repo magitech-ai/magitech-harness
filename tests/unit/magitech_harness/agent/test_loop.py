@@ -10,6 +10,7 @@ from magitech_harness.session.events import EventType, SessionEvent, ToolCallDat
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
+from magitech_harness.system_prompt import DEFAULT_HARNESS_IDENTITY
 
 
 @pytest.mark.asyncio
@@ -934,7 +935,7 @@ async def test_agent_loop_system_prompt_normalization_across_turns() -> None:
     system_nodes = [e for e in session.events if e.type == EventType.SYSTEM_MESSAGE]
     assert len(system_nodes) == 1
     assert system_nodes[0].payload["message"]["content"] == [
-        {"type": "text", "text": "Prompt A"}
+        {"type": "text", "text": f"{DEFAULT_HARNESS_IDENTITY}\n\nPrompt A"}
     ]
     head_seq = system_nodes[0].seq
 
@@ -950,11 +951,13 @@ async def test_agent_loop_system_prompt_normalization_across_turns() -> None:
     }
     assert rewrite.source_event_seqs == [head_seq]
     assert rewrite.payload["message"]["content"] == [
-        {"type": "text", "text": "Prompt B"}
+        {"type": "text", "text": f"{DEFAULT_HARNESS_IDENTITY}\n\nPrompt B"}
     ]
     derived = session.derive_messages()
     assert derived[0]["role"] == "system"
-    assert derived[0]["content"] == [{"type": "text", "text": "Prompt B"}]
+    assert derived[0]["content"] == [
+        {"type": "text", "text": f"{DEFAULT_HARNESS_IDENTITY}\n\nPrompt B"}
+    ]
     assert sum(1 for m in derived if m["role"] == "system") == 1
 
 
@@ -992,7 +995,7 @@ async def test_agent_loop_resumed_turn_system_change_marks_series() -> None:
     system_nodes = [e for e in session.events if e.type == EventType.SYSTEM_MESSAGE]
     assert len(system_nodes) == 2
     assert system_nodes[1].payload["message"]["content"] == [
-        {"type": "text", "text": "Prompt B."}
+        {"type": "text", "text": f"{DEFAULT_HARNESS_IDENTITY}\n\nPrompt B."}
     ]
 
 
