@@ -14,6 +14,7 @@ from anima.loader import LoaderService
 
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.agent.loop import AgentLoopService
+from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.approval.service import (
     ApprovalRequest,
     ApprovalService,
@@ -172,6 +173,7 @@ __all__ = [
     "AbortError",
     "AbortSignal",
     "AgentLoopService",
+    "AgentRegistry",
     "ApprovalRequest",
     "ApprovalService",
     "ComponentManifest",

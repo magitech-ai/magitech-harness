@@ -82,6 +82,9 @@
 - id: token-meter
   name: magitech_harness.llm.token_meter:TokenMeter
   config: {}
+- id: agent
+  name: magitech_harness.agent.registry:AgentRegistry
+  config: {}
 - id: agent-loop
   name: magitech_harness.agent.loop:AgentLoopService
   config: {}
