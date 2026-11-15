@@ -33,6 +33,7 @@ from typing import Any, ClassVar, Literal, NotRequired, Protocol, TypedDict
 from anima import Context, Disposer, EventMode, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
+from magitech_harness.llm.call_config import is_agent_loop_request
 from magitech_harness.llm.slug import parse_model_slug
 from magitech_harness.session.events import SessionEvent
 from magitech_harness.session.projection_registry import ProjectionHandle
@@ -478,7 +479,13 @@ class SessionTitleService(Service):
         self._disposers: list[Disposer] = [
             ctx.on("session/event", self._on_session_event),
             ctx.on("session/disposed", self._on_session_disposed),
-            ctx.on("llm/stream", self._on_llm_stream, mode=EventMode.WATERFALL),
+            ctx.on(
+                "llm/stream",
+                self._on_llm_stream,
+                mode=EventMode.WATERFALL,
+                prepend=True,
+                global_=True,
+            ),
         ]
         # Row unload runs this: in-flight work must stop committing once
         # the row is gone, which listener removal alone would not ensure.
@@ -681,8 +688,14 @@ class SessionTitleService(Service):
         """Start unchanged-route pending work from a matching loop request."""
         if self._disposed:
             return await next_fn()
-        session_id = options.get("session_id")
-        if session_id is None:
+        camel_session_id = options.get("sessionId")
+        if camel_session_id is not None:
+            if not is_agent_loop_request(options):
+                return await next_fn()
+            session_id = camel_session_id
+        else:
+            session_id = options.get("session_id")
+        if not isinstance(session_id, str) or not session_id:
             return await next_fn()
         session = self._store.get(session_id)
         if session is None:
@@ -691,10 +704,25 @@ class SessionTitleService(Service):
         if state is None or state.pending is None:
             return await next_fn()
         pending = state.pending
-        model = options.get("model")
-        if not isinstance(model, str) or not model:
+        if is_agent_loop_request(options):
+            agents = self.ctx.get("agents", None, strict=False)
+            if agents is not None:
+                boundary = agents.turn_boundary_of(session).get("lastStepBoundary")
+                if boundary is None or boundary.get("kind") != "start":
+                    return await next_fn()
+        opt_provider = options.get("provider")
+        opt_model = options.get("model")
+        if (
+            isinstance(opt_provider, str)
+            and opt_provider
+            and isinstance(opt_model, str)
+            and opt_model
+        ):
+            provider_name, model_name = opt_provider, opt_model
+        elif isinstance(opt_model, str) and opt_model:
+            provider_name, model_name = parse_model_slug(opt_model)
+        else:
             return await next_fn()
-        provider_name, model_name = parse_model_slug(model)
         route = current_route(session)
         if (
             route is None
