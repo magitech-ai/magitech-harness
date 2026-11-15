@@ -11,34 +11,12 @@ import os
 import signal as sys_signal
 import subprocess
 import sys
-from collections.abc import Iterator
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from anima import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
-
-
-@dataclass(frozen=True)
-class ShellResult:
-    """Structured execution result from a shell command."""
-
-    exit_code: int
-    stdout: str
-    stderr: str
-    timed_out: bool = False
-    aborted: bool = False
-    bytes_read: int = 0
-
-    def __iter__(self) -> Iterator[Any]:
-        """Support 3-element tuple unpacking for backwards compatibility."""
-        return iter((self.exit_code, self.stdout, self.stderr))
-
-    def __getitem__(self, index: int) -> Any:
-        """Support 3-element tuple indexing for backwards compatibility."""
-        return (self.exit_code, self.stdout, self.stderr)[index]
+from magitech_harness.shell.types import ShellResult
 
 
 def _kill_process_tree(pid: int) -> None:

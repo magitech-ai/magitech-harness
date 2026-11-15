@@ -11,6 +11,7 @@ from magitech_harness.agent.cancellation import (
     AbortSignal,
     TimeoutReason,
     clamp_timeout,
+    combine_signals,
     deadline,
     timeout_of,
 )
@@ -146,3 +147,29 @@ async def test_timeout_reason_clamp_and_deadline() -> None:
     # Already aborted upstream still handles dispose cleanly
     with pytest.raises(ValueError, match="positive finite"):
         deadline(None, True, "BAD")  # type: ignore[arg-type]
+
+
+def test_combine_signals_fuses_preaborted_live_and_dispose() -> None:
+    """Fuses signals, forwards first abort reason, and cleans up on dispose."""
+    s1 = AbortController()
+    s2 = AbortController()
+    fused = combine_signals(s1.signal, s2.signal)
+    assert fused.signal.aborted is False
+    s2.abort("second")
+    assert fused.signal.aborted is True
+    assert fused.signal.reason == "second"
+    fused.dispose()
+
+    # Pre-aborted upstream aborts immediately and dispose is no-op
+    fused_pre = combine_signals(s2.signal, s1.signal)
+    assert fused_pre.signal.aborted is True
+    assert fused_pre.signal.reason == "second"
+    fused_pre.dispose()
+
+    # Disposing un-aborted fusion detaches listeners cleanly
+    a = AbortController()
+    b = AbortController()
+    fused_live = combine_signals(a.signal, b.signal)
+    fused_live.dispose()
+    a.abort("later")
+    assert fused_live.signal.aborted is False

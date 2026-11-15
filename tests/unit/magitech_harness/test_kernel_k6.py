@@ -42,7 +42,7 @@ from magitech_harness.session.projection_cache import (
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.title import SessionTitleService
-from magitech_harness.shell.service import LocalShellService
+from magitech_harness.shell.bash_local import LocalBashExecutor
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.service import ToolService
 
@@ -111,7 +111,7 @@ def test_bundle_boot_exposes_nine_services_and_owned_components() -> None:
     assert isinstance(ctx.system_prompt, SystemPromptService)
     assert isinstance(ctx.tools, ToolService)
     assert isinstance(ctx.llm, LLMService)
-    assert isinstance(ctx.shell, LocalShellService)
+    assert isinstance(ctx.shell, LocalBashExecutor)
     assert isinstance(ctx.approvals, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
     assert isinstance(ctx.components, ComponentService)
@@ -294,14 +294,14 @@ async def test_check_bundle_entries_fails_before_flush_on_loop_path() -> None:
     with pytest.raises(RuntimeError, match="no bundle entries"):
         check_bundle_entries(ctx)
     await ctx.flush()
-    assert len(list(loader.entries())) == 25
+    assert len(list(loader.entries())) == 31
     check_bundle_entries(ctx)
 
 
 def test_check_bundle_entries_sync_path_settles_at_load() -> None:
     """With no running loop the rows settle at load, before any flush.
 
-    The sync path is not vacuous: loading the bundle mounts all twenty-five
+    The sync path is not vacuous: loading the bundle mounts all thirty-one
     rows ACTIVE at once, the slots are reachable immediately, and the
     audit passes on the settled rows.
     """
@@ -309,7 +309,7 @@ def test_check_bundle_entries_sync_path_settles_at_load() -> None:
     loader = LoaderService(ctx, {"filename": _base_bundle_path()})
     loader.load(_base_bundle_path())
     entries = list(loader.entries())
-    assert len(entries) == 25
+    assert len(entries) == 31
     assert all(
         entry.fiber is not None and entry.fiber.state is FiberState.ACTIVE
         for entry in entries

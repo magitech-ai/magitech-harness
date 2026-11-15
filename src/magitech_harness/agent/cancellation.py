@@ -191,6 +191,35 @@ def deadline(
     return Deadline(fused.signal, _cleanup)
 
 
+def combine_signals(*signals: AbortSignal) -> Deadline:
+    """Fuse multiple AbortSignals into one Deadline whose signal aborts with the first."""
+    fused = AbortController()
+    unsubs: list[Callable[[], None]] = []
+
+    def _cleanup() -> None:
+        for unsub in unsubs:
+            unsub()
+        unsubs.clear()
+
+    for sig in signals:
+        if sig.aborted:
+            fused.abort(sig.reason)
+            return Deadline(fused.signal, lambda: None)
+
+    for sig in signals:
+
+        def _make_handler(source: AbortSignal) -> Callable[[], None]:
+            def _on_abort() -> None:
+                fused.abort(source.reason)
+                _cleanup()
+
+            return _on_abort
+
+        unsubs.append(sig.on_abort(_make_handler(sig)))
+
+    return Deadline(fused.signal, _cleanup)
+
+
 def timeout_of(
     carrier: Any,
     code: str | None = None,
