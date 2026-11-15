@@ -467,6 +467,24 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
     assert await h_epipe.done == {"exitCode": 0, "signal": None}
     monkeypatch.undo()
 
+    orig_signal_tree = local_mod.signal_tree
+    monkeypatch.setattr(
+        local_mod,
+        "signal_tree",
+        lambda pid, sig: None if sig == signal.SIGTERM else orig_signal_tree(pid, sig),
+    )
+    h_force = rt.spawn(
+        {
+            "argv": [sys.executable, "-c", "import time; time.sleep(5)"],
+            "cwd": str(tmp_path),
+            "stdio": {"stdin": "ignore", "stdout": "inherit", "stderr": "inherit"},
+            "graceMs": 30,
+        }
+    )
+    h_force.terminate()
+    await h_force.done
+    monkeypatch.undo()
+
     # Dispose live processes via context teardown + terminate_for_host_exit
     h_live1 = rt.spawn(
         {
@@ -491,7 +509,12 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
     assert h_live2.pid is not None
     await ctx.fiber.dispose()
     res2 = await h_live2.done
-    assert res2["signal"] == "SIGTERM"
+    expected_res2 = (
+        {"exitCode": 1, "signal": None}
+        if sys.platform == "win32"
+        else {"exitCode": None, "signal": "SIGTERM"}
+    )
+    assert res2 == expected_res2
 
 
 def test_signal_helpers_and_platform_guards(monkeypatch: pytest.MonkeyPatch) -> None:

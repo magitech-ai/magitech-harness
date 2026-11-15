@@ -822,7 +822,7 @@ async def test_local_filesystem_error_branches_and_edge_cases(
         await fs.resolve("enotdir_probe/leaf.txt")
     assert enotdir_err.value.code == "FS_NOT_FOUND"
     root_missing = await fs.resolve("/enotdir_other_missing")
-    assert root_missing["targetKey"] == os.path.abspath("/enotdir_other_missing")
+    assert root_missing["targetKey"] == f"{tmp_path.drive}{os.sep}enotdir_other_missing"
 
     def _child_rp_err(p: str, *, strict: bool = False) -> str:
         if "src_move.txt" in p and strict:
