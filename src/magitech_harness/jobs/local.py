@@ -578,8 +578,11 @@ class LocalJobRegistry(JobRegistry):
             waiter_done: asyncio.Future[None] = loop.create_future()
             dl = deadline(signal, timeout_ms, TASK_WAIT_TIMEOUT)
 
+            unsub: Callable[[], None] = lambda: None
+
             def _on_settled() -> None:
                 job.wait_resolvers.discard(_on_settled)
+                unsub()
                 waiter_done.set_result(None)
 
             def _on_abort() -> None:

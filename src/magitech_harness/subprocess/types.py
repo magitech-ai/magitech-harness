@@ -11,13 +11,7 @@ from magitech_harness.agent.cancellation import AbortSignal
 
 MAGITECH_ENV_PREFIX = "MAGITECH_"
 
-SENSITIVE_ENV_PATTERN = re.compile(
-    r"^(?:"
-    r"MAGITECH_|MTH_|ANTHROPIC_|OPENAI_|OPENROUTER_|GEMINI_|GOOGLE_|"
-    r"AZURE_OPENAI_|COHERE_|MISTRAL_|TOGETHER_|GROQ_|FIREWORKS_|"
-    r"REPLICATE_|PERPLEXITY_|XAI_|AI21_|HUGGINGFACE_|HF_|VERTEX_"
-    r").+$"
-)
+SENSITIVE_ENV_PATTERN = re.compile(r"KEY|PASSWORD|SECRET|TOKEN", re.IGNORECASE)
 
 
 class SubprocessSpillSpec(TypedDict):

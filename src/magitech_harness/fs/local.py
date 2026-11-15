@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import contextlib
 import errno
 import os
 import re
@@ -38,9 +39,56 @@ from magitech_harness.fs.types import (
 )
 
 _DEFAULT_DIFF_BASIS_MAX_BYTES = 10 * 1024 * 1024
+_MAX_DIFF_BASIS_BYTES = 512 * 1024 * 1024
 _BINARY_SAMPLE_BYTES = 8192
 _STREAM_CHUNK_BYTES = 65536
+_WATCH_POLL_INTERVAL_S = 0.05
 _PARENT_SEG_RE = re.compile(r"(?:^|[\\/])\.\.(?:[\\/]|$)")
+
+
+def _version_after_write(target_key: str) -> FsVersion:
+    probed = _probe(target_key)
+    return probed[0] if probed is not None else f"missing:{target_key}"
+
+
+def _read_bytes_bounded(path_str: str, display_path: str, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    with Path(path_str).open("rb") as fh:
+        while True:
+            chunk = fh.read(_STREAM_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                raise FsError(
+                    f'cannot read "{display_path}": size {total} exceeds {max_bytes}',
+                    "FS_TOO_LARGE",
+                )
+            chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _watch_snapshot(path_str: str, is_dir: bool) -> Any:
+    try:
+        if is_dir:
+            with os.scandir(path_str) as it:
+                entries: list[tuple[str, tuple[int, int, int] | None]] = []
+                for entry in sorted(it, key=lambda e: e.name):
+                    try:
+                        st = entry.stat(follow_symlinks=False)
+                        entries.append(
+                            (entry.name, (st.st_mtime_ns, st.st_size, st.st_mode))
+                        )
+                    except OSError:
+                        entries.append((entry.name, None))
+                return tuple(entries)
+        st = os.lstat(path_str)
+        return (st.st_mtime_ns, st.st_size, st.st_ino, st.st_mode)
+    except OSError as exc:
+        if exc.errno in (errno.ENOENT, errno.ENOTDIR):
+            return None
+        raise
 
 
 def _throw_if_aborted(signal: AbortSignal | None, verb: str) -> None:
@@ -213,7 +261,9 @@ def _restore_line_endings(text: str, style: Literal["crlf", "lf"]) -> str:
     return text
 
 
-def _write_atomic(path: Path, data: bytes, *, mode: int) -> None:
+def _write_atomic(
+    path: Path, data: bytes, *, mode: int, create_if_absent: bool = False
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=".mth-stage-", dir=str(path.parent)))
     temp_path = staging / f".tmp-{uuid.uuid4().hex}"
@@ -229,7 +279,10 @@ def _write_atomic(path: Path, data: bytes, *, mode: int) -> None:
             os.fsync(handle.fileno())
         if sys.platform != "win32":
             os.chmod(temp_path, mode)
-        os.replace(temp_path, path)
+        if create_if_absent:
+            os.link(temp_path, path)
+        else:
+            os.replace(temp_path, path)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -250,36 +303,63 @@ class LocalFileSystem(FileSystem):
     def __init__(self, ctx: Context, config: Mapping[str, Any] | None = None) -> None:
         super().__init__(ctx)
         cfg = config or {}
-        raw_cwd = cfg.get("cwd")
-        self._cwd = (
-            str(raw_cwd) if isinstance(raw_cwd, str) and raw_cwd else os.getcwd()
-        )
-        raw_limit = cfg.get(
-            "diff_basis_max_bytes",
-            cfg.get("diffBasisMaxBytes", _DEFAULT_DIFF_BASIS_MAX_BYTES),
-        )
-        self._diff_basis_max_bytes = (
-            int(raw_limit)
-            if isinstance(raw_limit, (int, float))
-            and not isinstance(raw_limit, bool)
-            and raw_limit > 0
-            else _DEFAULT_DIFF_BASIS_MAX_BYTES
-        )
-        self._locks: dict[str, asyncio.Lock] = {}
+        if "cwd" in cfg:
+            raw_cwd = cfg["cwd"]
+            if not isinstance(raw_cwd, str) or not raw_cwd.strip():
+                raise ValueError("fs-local: cwd must be a non-empty string")
+            self._cwd = raw_cwd
+        else:
+            self._cwd = os.getcwd()
+        if "diff_basis_max_bytes" in cfg or "diffBasisMaxBytes" in cfg:
+            raw_limit = cfg.get("diff_basis_max_bytes", cfg.get("diffBasisMaxBytes"))
+            if (
+                isinstance(raw_limit, bool)
+                or not isinstance(raw_limit, int)
+                or raw_limit <= 0
+                or raw_limit > _MAX_DIFF_BASIS_BYTES
+            ):
+                raise ValueError(
+                    "fs-local: diffBasisMaxBytes must be a positive integer "
+                    f"no greater than {_MAX_DIFF_BASIS_BYTES}"
+                )
+            self._diff_basis_max_bytes = raw_limit
+        else:
+            self._diff_basis_max_bytes = _DEFAULT_DIFF_BASIS_MAX_BYTES
+        self._locks: dict[str, list[Any]] = {}
+        self._watchers: set[asyncio.Task[None]] = set()
+
+        async def _dispose() -> None:
+            tasks = list(self._watchers)
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        ctx.effect(lambda: _dispose, label="fs-local lifecycle")
 
     @asynccontextmanager
     async def _lock_targets(self, *keys: str) -> AsyncIterator[None]:
         ordered = sorted(set(keys))
-        held: list[asyncio.Lock] = []
-        for key in ordered:
-            lock = self._locks.setdefault(key, asyncio.Lock())
-            await lock.acquire()
-            held.append(lock)
+        acquired: list[asyncio.Lock] = []
+        ref_entries: list[tuple[str, list[Any]]] = []
         try:
+            for key in ordered:
+                entry = self._locks.get(key)
+                if entry is None:
+                    entry = [asyncio.Lock(), 0]
+                    self._locks[key] = entry
+                entry[1] += 1
+                ref_entries.append((key, entry))
+                await entry[0].acquire()
+                acquired.append(entry[0])
             yield
         finally:
-            for lock in reversed(held):
+            for lock in reversed(acquired):
                 lock.release()
+            for key, entry in reversed(ref_entries):
+                entry[1] -= 1
+                if entry[1] == 0:
+                    del self._locks[key]
 
     async def watch(
         self,
@@ -287,12 +367,47 @@ class LocalFileSystem(FileSystem):
         changed: Callable[[Exception | None], None],
         signal: AbortSignal,
     ) -> Callable[[], Awaitable[None]]:
-        """Install lightweight polling watch handle until closed or aborted."""
+        """Install polling watch handle until closed or aborted."""
         _throw_if_aborted(signal, "watch")
-        del changed
+        target_path = os.path.abspath(self.process_path(target))
+        info = await self.stat(target, signal)
+        _throw_if_aborted(signal, "watch")
+        is_dir = info is not None and info["type"] == "directory"
+        prev_snapshot = _watch_snapshot(target_path, is_dir)
+        stop_event = asyncio.Event()
+        unsub = signal.on_abort(stop_event.set)
+
+        async def _poll() -> None:
+            nonlocal prev_snapshot
+            try:
+                while not stop_event.is_set() and not signal.aborted:
+                    try:
+                        await asyncio.wait_for(
+                            stop_event.wait(), timeout=_WATCH_POLL_INTERVAL_S
+                        )
+                        break
+                    except TimeoutError:
+                        pass
+                    try:
+                        current = _watch_snapshot(target_path, is_dir)
+                    except OSError as exc:
+                        changed(exc)
+                        return
+                    if current != prev_snapshot:
+                        prev_snapshot = current
+                        changed(None)
+            finally:
+                unsub()
+
+        task = asyncio.create_task(_poll())
+        self._watchers.add(task)
+        task.add_done_callback(self._watchers.discard)
 
         async def _close() -> None:
-            return None
+            stop_event.set()
+            unsub()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
         return _close
 
@@ -314,8 +429,8 @@ class LocalFileSystem(FileSystem):
         return target["targetKey"]
 
     def process_path_from_host_path(self, host_path: str) -> str | None:
-        """Host paths identify the same execution world in LocalFileSystem."""
-        return host_path
+        """Resolve absolute host paths onto LocalFileSystem targets."""
+        return os.path.abspath(host_path) if os.path.isabs(host_path) else None
 
     def file_url(self, target: FsTarget) -> str:
         """Return canonical ``file://`` URI."""
@@ -351,7 +466,7 @@ class LocalFileSystem(FileSystem):
         _throw_if_aborted(signal, "lstat")
         expanded = expand_home_prefix(path)
         if not expanded.strip():
-            return None
+            raise FsError("file_path must be a non-empty string", "FS_NOT_FOUND")
         base_cwd = (
             str(opts["cwd"])
             if opts and isinstance(opts.get("cwd"), str) and opts["cwd"]
@@ -446,15 +561,11 @@ class LocalFileSystem(FileSystem):
                 "FS_TOO_LARGE",
             )
         try:
-            data = Path(target["targetKey"]).read_bytes()
+            return _read_bytes_bounded(
+                target["targetKey"], target["displayPath"], max_bytes
+            )
         except OSError as exc:
             raise _translate_os_error("read", target["displayPath"], exc) from exc
-        if len(data) > max_bytes:
-            raise FsError(
-                f'cannot read "{target["displayPath"]}": size {len(data)} exceeds {max_bytes}',
-                "FS_TOO_LARGE",
-            )
-        return data
 
     async def read_byte_range(
         self,
@@ -596,15 +707,25 @@ class LocalFileSystem(FileSystem):
         )
         after_lf, _ = _normalize_line_endings(content)
         encoded = content.encode("utf-8")
+        create_if_absent = expected is not None and expected["kind"] == "createIfAbsent"
         try:
-            _write_atomic(key_path, encoded, mode=mode)
+            _write_atomic(
+                key_path,
+                encoded,
+                mode=mode,
+                create_if_absent=create_if_absent,
+            )
+        except FileExistsError as exc:
+            raise FsError(
+                f'cannot create "{target["displayPath"]}": file already exists',
+                "FS_NOT_OBSERVED",
+                cause=exc,
+            ) from exc
         except OSError as exc:
             raise _translate_os_error("write", target["displayPath"], exc) from exc
-        after_probe = _probe(target["targetKey"])
-        assert after_probe is not None
         return {
             "operation": operation,
-            "version": after_probe[0],
+            "version": _version_after_write(target["targetKey"]),
             "before": before,
             "after": after_lf,
         }
@@ -617,14 +738,9 @@ class LocalFileSystem(FileSystem):
     ) -> tuple[str, Literal["crlf", "lf"], int]:
         probed = _probe(target["targetKey"])
         if probed is None:
-            if expected is not None:
-                raise FsError(
-                    f'cannot {verb} "{target["displayPath"]}": stale or missing',
-                    "FS_STALE_VERSION",
-                )
             raise FsError(
-                f'cannot {verb} "{target["displayPath"]}": not found',
-                "FS_NOT_FOUND",
+                f'cannot {verb} "{target["displayPath"]}": stale or missing',
+                "FS_STALE_VERSION",
             )
         version, mode, kind, _size = probed
         if kind != "file":
@@ -684,9 +800,11 @@ class LocalFileSystem(FileSystem):
                 _write_atomic(Path(target["targetKey"]), encoded, mode=mode)
             except OSError as exc:
                 raise _translate_os_error("edit", target["displayPath"], exc) from exc
-            after_probe = _probe(target["targetKey"])
-            assert after_probe is not None
-            return {"version": after_probe[0], "before": before, "after": after}
+            return {
+                "version": _version_after_write(target["targetKey"]),
+                "before": before,
+                "after": after,
+            }
 
     async def patch_text(
         self,
@@ -715,9 +833,11 @@ class LocalFileSystem(FileSystem):
                 _write_atomic(Path(target["targetKey"]), encoded, mode=mode)
             except OSError as exc:
                 raise _translate_os_error("patch", target["displayPath"], exc) from exc
-            after_probe = _probe(target["targetKey"])
-            assert after_probe is not None
-            return {"version": after_probe[0], "before": before, "after": after}
+            return {
+                "version": _version_after_write(target["targetKey"]),
+                "before": before,
+                "after": after,
+            }
 
     async def delete_file(
         self,

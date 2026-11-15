@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import secrets
 import tempfile
@@ -31,10 +32,10 @@ class SpillOptions:
 def log_spill_failure(
     logger: Any, component: str = "subprocess-local"
 ) -> Callable[[BaseException, str], None]:
-    """Create a spill failure reporter logging warnings via *logger*."""
+    """Create a spill failure reporter logging errors via *logger*."""
 
     def _report(error: BaseException, label: str) -> None:
-        logger.warning(
+        logger.error(
             f"{component}: failed to write {label} spill file; continuing with bounded tail: {error}"
         )
 
@@ -118,7 +119,8 @@ class OutputCollector:
                 os.write(self._spill_fd, chunk)
         except BaseException as exc:  # noqa: BLE001 - best-effort spill in stream callback
             self._discard_spill()
-            spill.on_failure(exc, self._label)
+            with contextlib.suppress(Exception):
+                spill.on_failure(exc, self._label)
 
     def _discard_spill(self) -> None:
         fd = self._spill_fd

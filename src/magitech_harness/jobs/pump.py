@@ -24,6 +24,7 @@ class PumpHandle:
     """Lifecycle handle for an active output pump."""
 
     done: asyncio.Future[None]
+    task: asyncio.Task[None] | None = None
 
 
 def start_pump(
@@ -79,8 +80,8 @@ def start_pump(
         finally:
             done.set_result(None)
 
-    asyncio.create_task(_loop())
-    return PumpHandle(done=done)
+    task = asyncio.create_task(_loop())
+    return PumpHandle(done=done, task=task)
 
 
 __all__ = ["PumpHandle", "PumpSink", "start_pump"]

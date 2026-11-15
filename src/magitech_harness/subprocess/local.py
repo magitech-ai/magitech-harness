@@ -9,9 +9,9 @@ import os
 import signal as signal_mod
 import subprocess as py_subprocess
 import sys
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import IO, Any, cast
 
 from anima import Context
 
@@ -121,6 +121,191 @@ def _is_collect_mode(mode: SubprocessOutputMode) -> SubprocessCollect | None:
     return None
 
 
+def _linux_process_group_has_live_members(pgid: int) -> bool | None:
+    try:
+        entries = [p.name for p in Path("/proc").iterdir() if p.name.isdigit()]
+    except OSError:
+        return None
+    matched = False
+    for entry in entries:
+        try:
+            stat_text = Path(f"/proc/{entry}/stat").read_text(
+                encoding="ascii", errors="replace"
+            )
+        except OSError:
+            continue
+        rparen = stat_text.rfind(")")
+        if rparen == -1:
+            continue
+        fields = stat_text[rparen + 2 :].split()
+        if len(fields) < 3:
+            continue
+        try:
+            proc_pgrp = int(fields[2])
+        except ValueError:
+            continue
+        if proc_pgrp != pgid:
+            continue
+        matched = True
+        if fields[0] not in ("Z", "X", "x"):
+            return True
+    return False if matched else None
+
+
+def _process_group_has_live_members(pid: int) -> bool:
+    if sys.platform == "win32":
+        return False
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    if sys.platform == "linux" and _linux_process_group_has_live_members(pid) is False:
+        return False
+    return True
+
+
+def _write_stdin_sync(pipe: IO[bytes], data: bytes) -> None:
+    try:
+        pipe.write(data)
+        pipe.flush()
+    except OSError:
+        pass
+    finally:
+        try:
+            pipe.close()
+        except OSError:
+            pass
+
+
+class _PipeStreamWriter:
+    """Synchronous-on-creation StreamWriter adapter over ``Popen.stdin``."""
+
+    def __init__(self, pipe: IO[bytes]) -> None:
+        self._pipe = pipe
+        self._closing = False
+
+    def write(self, data: bytes) -> None:
+        self._pipe.write(data)
+
+    def writelines(self, lines: Sequence[bytes]) -> None:
+        self._pipe.writelines(lines)
+
+    def write_eof(self) -> None:
+        self.close()
+
+    def can_write_eof(self) -> bool:
+        return True
+
+    def is_closing(self) -> bool:
+        return self._closing
+
+    def close(self) -> None:
+        if self._closing:
+            return
+        self._closing = True
+        try:
+            self._pipe.flush()
+        except OSError:
+            pass
+        try:
+            self._pipe.close()
+        except OSError:
+            pass
+
+    async def drain(self) -> None:
+        await asyncio.to_thread(self._pipe.flush)
+
+    async def wait_closed(self) -> None:
+        return None
+
+
+def _start_popen(
+    argv: Sequence[str],
+    kwargs: dict[str, Any],
+) -> py_subprocess.Popen[bytes]:
+    return py_subprocess.Popen(list(argv), **kwargs)
+
+
+def _close_pipe(pipe: IO[bytes]) -> None:
+    try:
+        pipe.close()
+    except OSError:
+        pass
+
+
+class _StreamPump:
+    """Drain one ``Popen`` output pipe into an ``OutputCollector`` or ``StreamReader``."""
+
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        pipe: IO[bytes],
+        on_data: Callable[[bytes], Any],
+        on_eof: Callable[[], None],
+    ) -> None:
+        self._loop = loop
+        self._pipe = pipe
+        self._on_data = on_data
+        self._on_eof = on_eof
+        self.done = asyncio.Event()
+        self._fd: int | None = None
+        self._closed = False
+        self._thread_task: asyncio.Task[None] | None = None
+
+        if sys.platform != "win32":
+            fd = pipe.fileno()
+            os.set_blocking(fd, False)
+            self._fd = fd
+            loop.add_reader(fd, self._on_readable)
+        else:
+            self._thread_task = asyncio.create_task(self._read_threaded())
+
+    def _finish(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._fd is not None:
+            with contextlib.suppress(RuntimeError, OSError):
+                self._loop.remove_reader(self._fd)
+            self._fd = None
+        _close_pipe(self._pipe)
+        self._on_eof()
+        self.done.set()
+
+    def _on_readable(self) -> None:
+        assert self._fd is not None
+        try:
+            chunk = os.read(self._fd, _READ_CHUNK_BYTES)
+        except BlockingIOError:
+            return
+        except OSError:
+            chunk = b""
+        if not chunk:
+            self._finish()
+            return
+        self._on_data(chunk)
+
+    async def _read_threaded(self) -> None:
+        try:
+            while not self._closed:
+                chunk = await asyncio.to_thread(self._pipe.read, _READ_CHUNK_BYTES)
+                if not chunk:
+                    break
+                self._on_data(chunk)
+        except OSError:
+            pass
+        finally:
+            self._finish()
+
+    def stop(self) -> None:
+        """Stop reading (for collect grace-timeout cutoff) and release the pipe."""
+        self._finish()
+
+
 class LocalSubprocessHandle:
     """Managed async subprocess handle with bounded collectors and escalation."""
 
@@ -139,7 +324,13 @@ class LocalSubprocessHandle:
         self._loop = asyncio.get_running_loop()
         self._done: asyncio.Future[SubprocessOutcome] = self._loop.create_future()
         self._exited = asyncio.Event()
-        self._proc: asyncio.subprocess.Process | None = None
+        self._popen: py_subprocess.Popen[bytes] | None = None
+        self._stdin_writer: asyncio.StreamWriter | None = None
+        self._stdout_reader: asyncio.StreamReader | None = None
+        self._stderr_reader: asyncio.StreamReader | None = None
+        self._stdin_task: asyncio.Task[None] | None = None
+        self._collect_pumps: list[_StreamPump] = []
+        self._all_pumps: list[_StreamPump] = []
         self._termination_started = False
         self._process_exited = False
         self._grace_handle: asyncio.TimerHandle | None = None
@@ -152,6 +343,79 @@ class LocalSubprocessHandle:
             self._collected["stdout"] = self._make_collector("stdout", out_spec)
         if err_spec is not None:
             self._collected["stderr"] = self._make_collector("stderr", err_spec)
+
+        stdio = spec["stdio"]
+        stdin_arg = (
+            py_subprocess.DEVNULL if stdio["stdin"] == "ignore" else py_subprocess.PIPE
+        )
+        stdout_arg = None if stdio["stdout"] == "inherit" else py_subprocess.PIPE
+        stderr_arg = None if stdio["stderr"] == "inherit" else py_subprocess.PIPE
+        kwargs: dict[str, Any] = {
+            "cwd": spec["cwd"],
+            "env": child_env(spec.get("env")),
+            "stdin": stdin_arg,
+            "stdout": stdout_arg,
+            "stderr": stderr_arg,
+        }
+        if sys.platform == "win32":
+            kwargs["creationflags"] = getattr(
+                py_subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+            )
+        else:
+            kwargs["start_new_session"] = True
+
+        try:
+            popen = _start_popen(spec["argv"], kwargs)
+        except OSError as exc:
+            self._cleanup_after_exit()
+            self._done.set_exception(exc)
+            self._driver_task: asyncio.Task[None] | None = None
+            return
+
+        self._popen = popen
+        if stdio["stdin"] == "pipe" and popen.stdin is not None:
+            self._stdin_writer = cast(
+                asyncio.StreamWriter, _PipeStreamWriter(popen.stdin)
+            )
+        elif isinstance(stdio["stdin"], dict) and popen.stdin is not None:
+            data = stdio["stdin"]["data"]
+            self._stdin_task = asyncio.create_task(
+                asyncio.to_thread(_write_stdin_sync, popen.stdin, data)
+            )
+
+        out_coll = self._collected.get("stdout")
+        if popen.stdout is not None:
+            if isinstance(out_coll, OutputCollector):
+                pump = _StreamPump(
+                    self._loop, popen.stdout, out_coll.push, lambda: None
+                )
+                self._collect_pumps.append(pump)
+                self._all_pumps.append(pump)
+            else:
+                reader = asyncio.StreamReader(loop=self._loop)
+                self._stdout_reader = reader
+                self._all_pumps.append(
+                    _StreamPump(
+                        self._loop, popen.stdout, reader.feed_data, reader.feed_eof
+                    )
+                )
+
+        err_coll = self._collected.get("stderr")
+        if popen.stderr is not None:
+            if isinstance(err_coll, OutputCollector):
+                pump = _StreamPump(
+                    self._loop, popen.stderr, err_coll.push, lambda: None
+                )
+                self._collect_pumps.append(pump)
+                self._all_pumps.append(pump)
+            else:
+                reader = asyncio.StreamReader(loop=self._loop)
+                self._stderr_reader = reader
+                self._all_pumps.append(
+                    _StreamPump(
+                        self._loop, popen.stderr, reader.feed_data, reader.feed_eof
+                    )
+                )
 
         sig = spec.get("signal")
         if sig is not None:
@@ -174,29 +438,23 @@ class LocalSubprocessHandle:
 
     @property
     def pid(self) -> int | None:
-        """Return child OS process ID once started."""
-        return None if self._proc is None else self._proc.pid
+        """Return child OS process ID if spawn succeeded."""
+        return None if self._popen is None else self._popen.pid
 
     @property
     def stdin(self) -> asyncio.StreamWriter | None:
-        """Exposed stdin StreamWriter when configured as ``pipe``."""
-        if self._spec["stdio"]["stdin"] != "pipe" or self._proc is None:
-            return None
-        return self._proc.stdin
+        """Exposed writer when ``stdio.stdin == 'pipe'``."""
+        return self._stdin_writer
 
     @property
     def stdout(self) -> asyncio.StreamReader | None:
         """Exposed stdout StreamReader when configured as ``pipe``."""
-        if self._spec["stdio"]["stdout"] != "pipe" or self._proc is None:
-            return None
-        return self._proc.stdout
+        return self._stdout_reader
 
     @property
     def stderr(self) -> asyncio.StreamReader | None:
         """Exposed stderr StreamReader when configured as ``pipe``."""
-        if self._spec["stdio"]["stderr"] != "pipe" or self._proc is None:
-            return None
-        return self._proc.stderr
+        return self._stderr_reader
 
     @property
     def collected(self) -> SubprocessCollected:
@@ -215,37 +473,39 @@ class LocalSubprocessHandle:
 
     def _force_kill(self) -> None:
         self._grace_handle = None
-        if self._process_exited or self._proc is None:
+        if self._popen is None or not (
+            not self._process_exited or _process_group_has_live_members(self._popen.pid)
+        ):
             return
-        signal_tree(self._proc.pid, _FORCE_KILL_SIGNAL)
+        signal_tree(self._popen.pid, _FORCE_KILL_SIGNAL)
 
     def terminate(self) -> None:
         """Start SIGTERM -> grace -> SIGKILL escalation for the spawned tree."""
-        if self._process_exited or self._termination_started:
+        if self._termination_started or self._exited.is_set():
             return
         self._termination_started = True
-        if self._proc is not None:
-            signal_tree(self._proc.pid, signal_mod.SIGTERM)
-            self._grace_handle = self._loop.call_later(
-                self._spec["graceMs"] / 1000.0,
-                self._force_kill,
-            )
+        assert self._popen is not None
+        signal_tree(self._popen.pid, signal_mod.SIGTERM)
+        self._grace_handle = self._loop.call_later(
+            self._spec["graceMs"] / 1000.0,
+            self._force_kill,
+        )
 
     def terminate_for_host_exit(self) -> None:
         """Synchronously force-terminate the managed process tree on host exit."""
-        if self._process_exited or self._proc is None:
+        if self._exited.is_set() or self._popen is None:
             return
-        signal_tree(self._proc.pid, _FORCE_KILL_SIGNAL)
+        signal_tree(self._popen.pid, _FORCE_KILL_SIGNAL)
 
     async def wait_for_exit(self, signal: AbortSignal | None = None) -> bool:
-        """Wait until the managed process and drain complete, or *signal* aborts."""
+        """Wait until the managed process tree has exited, or return False if aborted."""
         if self._exited.is_set():
             return True
         if signal is None:
             await self._exited.wait()
             return True
         if signal.aborted:
-            raise _abort_error(signal)
+            return False
         abort_fut: asyncio.Future[None] = self._loop.create_future()
 
         def _on_abort() -> None:
@@ -258,9 +518,7 @@ class LocalSubprocessHandle:
                 (wait_task, abort_fut),
                 return_when=asyncio.FIRST_COMPLETED,
             )
-            if abort_fut.done() and not wait_task.done():
-                raise _abort_error(signal)
-            return True
+            return not (abort_fut.done() and not wait_task.done())
         finally:
             unsub()
             if not wait_task.done():
@@ -268,82 +526,18 @@ class LocalSubprocessHandle:
                 with contextlib.suppress(asyncio.CancelledError):
                     await wait_task
 
-    async def _pump(
-        self,
-        stream: asyncio.StreamReader,
-        collector: OutputCollector,
-    ) -> None:
-        while True:
-            chunk = await stream.read(_READ_CHUNK_BYTES)
-            if not chunk:
-                break
-            collector.push(chunk)
-
     async def _run(self) -> None:
-        stdio = self._spec["stdio"]
-        stdin_arg: int | None
-        if stdio["stdin"] == "ignore":
-            stdin_arg = asyncio.subprocess.DEVNULL
-        else:
-            stdin_arg = asyncio.subprocess.PIPE
-
-        stdout_arg = None if stdio["stdout"] == "inherit" else asyncio.subprocess.PIPE
-        stderr_arg = None if stdio["stderr"] == "inherit" else asyncio.subprocess.PIPE
-
-        env = child_env(self._spec.get("env"))
-        kwargs: dict[str, Any] = {
-            "cwd": self._spec["cwd"],
-            "env": env,
-            "stdin": stdin_arg,
-            "stdout": stdout_arg,
-            "stderr": stderr_arg,
-        }
-        if sys.platform == "win32":
-            kwargs["creationflags"] = getattr(
-                py_subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
-            )
-        else:
-            kwargs["start_new_session"] = True
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *self._spec["argv"],
-                **kwargs,
-            )
-        except BaseException as exc:  # noqa: BLE001
-            self._cleanup_after_exit()
-            self._done.set_exception(exc)
-            return
-
-        self._proc = proc
-        if self._termination_started:
-            # terminate() arrived while create_subprocess_exec was still starting
-            self._termination_started = False
-            self.terminate()
-
-        stdin_mode = stdio["stdin"]
-        if isinstance(stdin_mode, dict) and proc.stdin is not None:
-            try:
-                proc.stdin.write(stdin_mode["data"])
-                proc.stdin.close()
-            except OSError:
-                pass
-
-        out_coll = self._collected.get("stdout")
-        err_coll = self._collected.get("stderr")
-        pumps: list[asyncio.Task[None]] = []
-        if isinstance(out_coll, OutputCollector) and proc.stdout is not None:
-            pumps.append(asyncio.create_task(self._pump(proc.stdout, out_coll)))
-        if isinstance(err_coll, OutputCollector) and proc.stderr is not None:
-            pumps.append(asyncio.create_task(self._pump(proc.stderr, err_coll)))
-
-        returncode = await proc.wait()
+        popen = self._popen
+        assert popen is not None
+        returncode = await asyncio.to_thread(popen.wait)
         self._process_exited = True
-        self._clear_grace()
 
-        if pumps:
+        if self._collect_pumps:
+            pump_waits = [
+                asyncio.create_task(p.done.wait()) for p in self._collect_pumps
+            ]
             done_pumps, pending_pumps = await asyncio.wait(
-                pumps,
+                pump_waits,
                 timeout=self._spec["graceMs"] / 1000.0,
             )
             del done_pumps
@@ -351,13 +545,23 @@ class LocalSubprocessHandle:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            for pump in self._collect_pumps:
+                pump.stop()
 
-        for coll in (out_coll, err_coll):
+        for key in ("stdout", "stderr"):
+            coll = self._collected.get(key)
             if isinstance(coll, OutputCollector):
                 coll.seal()
 
-        self._cleanup_after_exit()
         self._done.set_result(_decode_returncode(returncode))
+
+        while _process_group_has_live_members(popen.pid):
+            await asyncio.sleep(0.01)
+
+        if self._stdin_task is not None:
+            with contextlib.suppress(BaseException):
+                await self._stdin_task
+        self._cleanup_after_exit()
 
     def _cleanup_after_exit(self) -> None:
         self._clear_grace()
@@ -473,7 +677,8 @@ class LocalSubprocessRuntime(SubprocessRuntime):
             on_spill_failure=self._report_spill_failure,
             on_released=self._live.discard,
         )
-        self._live.add(handle)
+        if not handle.done.done():
+            self._live.add(handle)
         return handle
 
 

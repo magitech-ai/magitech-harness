@@ -55,6 +55,13 @@ async def test_working_directory_rejects_relative_default() -> None:
     assert fiber.state == FiberState.FAILED
     with pytest.raises(ValueError, match="must be absolute"):
         WorkingDirectoryService(ctx, {"default_directory": "relative/dir"})
+    for bad_cfg in (
+        {"default_directory": None},
+        {"defaultDirectory": ""},
+        {"defaultDirectory": 123},
+    ):
+        with pytest.raises(ValueError, match="must be a non-empty string"):
+            WorkingDirectoryService(ctx, bad_cfg)
 
 
 @pytest.mark.asyncio

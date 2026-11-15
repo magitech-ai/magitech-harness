@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
@@ -11,6 +12,7 @@ from anima import Context, Service
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.error import HarnessError
 from magitech_harness.subprocess.types import (
+    MAGITECH_ENV_PREFIX,
     SENSITIVE_ENV_PATTERN,
     SubprocessHandle,
     SubprocessSpawnSpec,
@@ -31,12 +33,13 @@ class SubprocessExecutableNotFoundError(HarnessError):
 def scrubbed_parent_env(
     base_env: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
-    """Copy parent environment removing harness and provider secret variables."""
+    """Copy parent environment removing credential-shaped and harness-prefixed vars."""
     source = os.environ if base_env is None else base_env
     return {
         key: value
         for key, value in source.items()
-        if not SENSITIVE_ENV_PATTERN.match(key)
+        if not SENSITIVE_ENV_PATTERN.search(key)
+        and not key.upper().startswith(MAGITECH_ENV_PREFIX)
     }
 
 
@@ -47,7 +50,14 @@ def child_env(
     """Build child environment by overlaying explicit *overrides* on scrubbed parent env."""
     env = scrubbed_parent_env(base_env)
     if overrides is not None:
-        env.update(overrides)
+        if sys.platform == "win32":
+            for key, value in overrides.items():
+                upper = key.upper()
+                for existing in [k for k in env if k.upper() == upper]:
+                    del env[existing]
+                env[key] = value
+        else:
+            env.update(overrides)
     return env
 
 

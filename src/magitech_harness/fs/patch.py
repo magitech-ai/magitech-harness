@@ -31,7 +31,7 @@ class AddPatchOperation(TypedDict):
     kind: Literal["add"]
     lineNumber: int
     path: str
-    contents: str
+    content: str
 
 
 class DeletePatchOperation(TypedDict):
@@ -203,12 +203,12 @@ def _read_update(operation: UpdatePatchOperation, text_raw: str, line_num: int) 
             raise PatchParseError(line_num, f"Empty hunk before '{_EOF}'")
         previous["isEndOfFile"] = True
         return
-    if text == "":
+    if text_raw == "":
         previous["oldLines"].append("")
         previous["newLines"].append("")
         return
-    prefix = text[0]
-    body = text[1:]
+    prefix = text_raw[0]
+    body = text_raw[1:]
     if prefix == " ":
         previous["oldLines"].append(body)
         previous["newLines"].append(body)
@@ -233,7 +233,7 @@ def parse_patch(patch: str) -> list[PatchOperation]:
                 "kind": "add",
                 "lineNumber": line_num,
                 "path": trimmed[len(_ADD) :],
-                "contents": "",
+                "content": "",
             }
             operations.append(current)
             continue
@@ -256,6 +256,11 @@ def parse_patch(patch: str) -> list[PatchOperation]:
             }
             operations.append(current)
             continue
+        if not operations and trimmed.startswith("*** Environment ID:"):
+            raise PatchParseError(
+                line_num,
+                "Environment ID headers are unsupported; the caller selects the filesystem provider",
+            )
         if current is None:
             if text.strip() == "":
                 continue
@@ -265,7 +270,7 @@ def parse_patch(patch: str) -> list[PatchOperation]:
         if current["kind"] == "add":
             if not text.startswith("+"):
                 raise PatchParseError(line_num, "Add file line must start with '+'")
-            current["contents"] += f"{text[1:]}\n"
+            current["content"] += f"{text[1:]}\n"
             continue
         if current["kind"] == "delete":
             if text.strip() == "":
@@ -389,6 +394,7 @@ def apply_hunks(before: str, hunks: Sequence[PatchHunk]) -> ApplyHunksResult:
         replacements.append((found, len(search_pattern), applied_new))
         line_index = found + len(search_pattern)
 
+    replacements.sort(key=lambda item: item[0])
     updated = list(original)
     for start, old_len, repl_lines in reversed(replacements):
         updated[start : start + old_len] = list(repl_lines)

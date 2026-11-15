@@ -257,8 +257,7 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
             "graceMs": 500,
         }
     )
-    while h_pipe.pid is None:
-        await asyncio.sleep(0.005)
+    assert h_pipe.pid is not None
     assert h_pipe.stdin is not None
     assert h_pipe.stdout is not None
     assert h_pipe.stderr is not None
@@ -304,18 +303,17 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
     )
     while not ready_file.exists():
         await asyncio.sleep(0.005)
-    # Test wait_for_exit abort before exit
+    # Test wait_for_exit abort before exit returns False
     wait_abort = AbortController()
     wait_task = asyncio.create_task(h_sleep.wait_for_exit(wait_abort.signal))
     await asyncio.sleep(0.01)
     wait_abort.abort(RuntimeError("wait stopped"))
-    with pytest.raises(RuntimeError, match="wait stopped"):
-        await wait_task
+    assert await wait_task is False
+    assert await h_sleep.wait_for_exit(wait_abort.signal) is False  # already aborted
 
     pre_aborted_wait = AbortController()
     pre_aborted_wait.abort("plain-stop")
-    with pytest.raises(RuntimeError, match="aborted: plain-stop"):
-        await h_sleep.wait_for_exit(pre_aborted_wait.signal)
+    assert await h_sleep.wait_for_exit(pre_aborted_wait.signal) is False
 
     abort_sig.abort("kill-now")
     sleep_outcome = await h_sleep.done
@@ -358,56 +356,63 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
     signal_tree(h_drain.pid, signal.SIGKILL)
 
     # Stdin write OSError (simulated EPIPE on closed writer) + win32 creationflags branch
-    orig_exec = asyncio.create_subprocess_exec
+    import magitech_harness.subprocess.local as local_mod
 
-    async def _mock_win32_exec(*args: Any, **kwargs: Any) -> Any:
+    orig_start_popen = local_mod._start_popen
+
+    def _mock_win32_popen(argv: Any, kwargs: Any) -> Any:
         assert "creationflags" in kwargs
         del kwargs["creationflags"]
         kwargs["start_new_session"] = True
-        return await orig_exec(*args, **kwargs)
-
-    import magitech_harness.subprocess.local as local_mod
+        return orig_start_popen(argv, kwargs)
 
     monkeypatch.setattr(local_mod.sys, "platform", "win32")
-    monkeypatch.setattr(local_mod.asyncio, "create_subprocess_exec", _mock_win32_exec)
+    monkeypatch.setattr(local_mod, "_start_popen", _mock_win32_popen)
     h_win = rt.spawn(
         {
-            "argv": [sys.executable, "-c", "import time; time.sleep(0.01)"],
+            "argv": [
+                sys.executable,
+                "-c",
+                "import sys; print('win-out'); sys.stderr.write('win-err')",
+            ],
             "cwd": str(tmp_path),
             "stdio": {
                 "stdin": {"kind": "bytes", "data": b"data"},
-                "stdout": "inherit",
-                "stderr": "inherit",
+                "stdout": {"kind": "collect", "maxBytes": 64},
+                "stderr": {"kind": "collect", "maxBytes": 64},
             },
             "graceMs": 100,
         }
     )
+    assert h_win.pid is not None
     await h_win.done
+    assert "win-out" in h_win.collected["stdout"].finalize()["text"]
+    assert h_win.collected["stderr"].finalize()["text"] == "win-err"
     monkeypatch.undo()
 
-    # Patch stdin.write to raise OSError during launch via mock proc
+    # Patch stdin.write to raise OSError during launch via mock Popen
     class _StubProc:
         pid = 999999
         returncode = 0
 
         class _BadStdin:
-            def write(self, _d: bytes) -> None:
+            def write(self, _d: bytes) -> int:
                 raise BrokenPipeError("epipe")
 
-            def close(self) -> None:
+            def flush(self) -> None:
                 pass
+
+            def close(self) -> None:
+                raise OSError("close fail")
 
         stdin = _BadStdin()
         stdout = None
         stderr = None
 
-        async def wait(self) -> int:
+        def wait(self) -> int:
             return 0
 
-    async def _stub_exec(*_a: Any, **_kw: Any) -> Any:
-        return _StubProc()
-
-    monkeypatch.setattr(local_mod.asyncio, "create_subprocess_exec", _stub_exec)
+    monkeypatch.setattr(local_mod, "_start_popen", lambda _argv, _kw: _StubProc())
     h_epipe = rt.spawn(
         {
             "argv": [sys.executable],
@@ -432,8 +437,7 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
             "graceMs": 200,
         }
     )
-    while h_live1.pid is None:
-        await asyncio.sleep(0.005)
+    assert h_live1.pid is not None
     h_live1.terminate_for_host_exit()
     await h_live1.done
 
@@ -445,10 +449,8 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
             "graceMs": 200,
         }
     )
-    while h_live2.pid is None:
-        await asyncio.sleep(0.005)
-    await ctx.fiber.dispose()
     assert h_live2.pid is not None
+    await ctx.fiber.dispose()
     res2 = await h_live2.done
     assert res2["signal"] == "SIGTERM"
 
@@ -507,4 +509,228 @@ def test_signal_helpers_and_platform_guards(monkeypatch: pytest.MonkeyPatch) -> 
         lambda *_a: (_ for _ in ()).throw(ProcessLookupError("gone")),
     )
     signal_tree(42, signal.SIGTERM)
+    monkeypatch.undo()
+
+
+@pytest.mark.asyncio
+async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Covers SENSITIVE_ENV_PATTERN, win32 child_env, _PipeStreamWriter, _StreamPump, and pgrp."""
+    import magitech_harness.subprocess.local as local_mod
+    import magitech_harness.subprocess.service as service_mod
+    from magitech_harness.subprocess import child_env, scrubbed_parent_env
+
+    # SENSITIVE_ENV_PATTERN + MAGITECH_* scrubbing, while preserving non-secret vars
+    scrubbed = scrubbed_parent_env(
+        {
+            "MY_CUSTOM_KEY": "secret",
+            "DB_PASSWORD": "pw",
+            "AUTH_SECRET": "sec",
+            "github_token": "tok",
+            "MAGITECH_HOME": "/tmp/mth",
+            "magitech_debug": "1",
+            "OPENAI_BASE_URL": "https://example.invalid/v1",
+            "PATH": "/bin",
+        }
+    )
+    assert "OPENAI_BASE_URL" in scrubbed
+    assert "PATH" in scrubbed
+    for dropped in (
+        "MY_CUSTOM_KEY",
+        "DB_PASSWORD",
+        "AUTH_SECRET",
+        "github_token",
+        "MAGITECH_HOME",
+        "magitech_debug",
+    ):
+        assert dropped not in scrubbed
+
+    monkeypatch.setattr(service_mod.sys, "platform", "win32")
+    win_env = child_env(
+        overrides={"path": "C:\\bin"},
+        base_env={"Path": "C:\\old", "KEEP": "1"},
+    )
+    assert win_env == {"KEEP": "1", "path": "C:\\bin"}
+    monkeypatch.undo()
+
+    # _PipeStreamWriter full contract + OSError paths
+    class _MemPipe:
+        def __init__(self, fail_flush: bool = False, fail_close: bool = False) -> None:
+            self.chunks: list[bytes] = []
+            self.fail_flush = fail_flush
+            self.fail_close = fail_close
+
+        def write(self, data: bytes) -> int:
+            self.chunks.append(data)
+            return len(data)
+
+        def writelines(self, lines: Any) -> None:
+            self.chunks.extend(lines)
+
+        def flush(self) -> None:
+            if self.fail_flush:
+                raise OSError("flush fail")
+
+        def close(self) -> None:
+            if self.fail_close:
+                raise OSError("close fail")
+
+    p_ok = _MemPipe()
+    writer = local_mod._PipeStreamWriter(p_ok)  # type: ignore[arg-type]
+    assert writer.can_write_eof() is True
+    assert writer.is_closing() is False
+    writer.writelines([b"a", b"b"])
+    await writer.drain()
+    writer.write_eof()
+    assert writer.is_closing() is True
+    writer.close()  # idempotent second close
+    await writer.wait_closed()
+    assert p_ok.chunks == [b"a", b"b"]
+
+    writer_err = local_mod._PipeStreamWriter(
+        _MemPipe(fail_flush=True, fail_close=True)  # type: ignore[arg-type]
+    )
+    writer_err.close()
+
+    # _close_pipe error swallow
+    local_mod._close_pipe(_MemPipe(fail_close=True))  # type: ignore[arg-type]
+
+    # _StreamPump edge cases: BlockingIOError, OSError in _on_readable, win32 threaded error
+    loop = asyncio.get_running_loop()
+    r_fd, w_fd = os.pipe()
+    os.write(w_fd, b"x")
+    r_file = os.fdopen(r_fd, "rb", buffering=0)
+    seen: list[bytes] = []
+    eof_count = 0
+
+    def _on_eof() -> None:
+        nonlocal eof_count
+        eof_count += 1
+
+    pump = local_mod._StreamPump(loop, r_file, seen.append, _on_eof)
+    monkeypatch.setattr(
+        local_mod.os,
+        "read",
+        lambda *_a: (_ for _ in ()).throw(BlockingIOError()),
+    )
+    pump._on_readable()
+    monkeypatch.setattr(
+        local_mod.os,
+        "read",
+        lambda *_a: (_ for _ in ()).throw(OSError("bad read")),
+    )
+    pump._on_readable()
+    pump.stop()  # idempotent when already closed
+    monkeypatch.undo()
+    os.close(w_fd)
+    assert eof_count == 1
+
+    class _ErrReadPipe:
+        def read(self, _n: int) -> bytes:
+            raise OSError("thread read err")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(local_mod.sys, "platform", "win32")
+    pump_w = local_mod._StreamPump(
+        loop,
+        _ErrReadPipe(),
+        seen.append,
+        _on_eof,  # type: ignore[arg-type]
+    )
+    await pump_w.done.wait()
+
+    class _OneChunkPipe:
+        def read(self, _n: int) -> bytes:
+            return b"once"
+
+        def close(self) -> None:
+            pass
+
+    pump_w2 = local_mod._StreamPump(
+        loop,
+        _OneChunkPipe(),
+        lambda _c: pump_w2.stop(),
+        _on_eof,  # type: ignore[arg-type]
+    )
+    await pump_w2.done.wait()
+    monkeypatch.undo()
+
+    # _abort_error helper
+    ctrl_none = AbortController()
+    ctrl_none.abort(None)
+    assert str(local_mod._abort_error(ctrl_none.signal)) == "aborted"
+    ctrl_str = AbortController()
+    ctrl_str.abort("stop now")
+    assert str(local_mod._abort_error(ctrl_str.signal)) == "aborted: stop now"
+    ctrl_exc = AbortController()
+    err = RuntimeError("boom")
+    ctrl_exc.abort(err)
+    assert local_mod._abort_error(ctrl_exc.signal) is err
+
+    # _process_group_has_live_members & _linux_process_group_has_live_members branches
+    assert local_mod._linux_process_group_has_live_members(os.getpgrp()) is True
+    assert local_mod._process_group_has_live_members(os.getpgrp()) is True
+
+    monkeypatch.setattr(local_mod.sys, "platform", "win32")
+    assert local_mod._process_group_has_live_members(123) is False
+    monkeypatch.undo()
+
+    monkeypatch.setattr(
+        local_mod.os,
+        "killpg",
+        lambda *_a: (_ for _ in ()).throw(PermissionError("perm")),
+    )
+    assert local_mod._process_group_has_live_members(123) is True
+    monkeypatch.setattr(
+        local_mod.os,
+        "killpg",
+        lambda *_a: (_ for _ in ()).throw(OSError("other")),
+    )
+    assert local_mod._process_group_has_live_members(123) is False
+    monkeypatch.setattr(local_mod.os, "killpg", lambda *_a: None)
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
+    monkeypatch.setattr(
+        local_mod, "_linux_process_group_has_live_members", lambda _p: False
+    )
+    assert local_mod._process_group_has_live_members(123) is False
+    monkeypatch.undo()
+
+    # Mock /proc entries for _linux_process_group_has_live_members edge branches
+    fake_proc = tmp_path / "proc"
+    fake_proc.mkdir()
+    (fake_proc / "notpid").mkdir()
+    (fake_proc / "10").mkdir()  # no stat file -> OSError skip
+    (fake_proc / "11").mkdir()
+    (fake_proc / "11" / "stat").write_text("bad_format", encoding="ascii")
+    (fake_proc / "12").mkdir()
+    (fake_proc / "12" / "stat").write_text("12 (sh) S 1", encoding="ascii")
+    (fake_proc / "13").mkdir()
+    (fake_proc / "13" / "stat").write_text("13 (sh) S 1 bad 1", encoding="ascii")
+    (fake_proc / "14").mkdir()
+    (fake_proc / "14" / "stat").write_text("14 (sh) Z 1 999 999", encoding="ascii")
+    (fake_proc / "15").mkdir()
+    (fake_proc / "15" / "stat").write_text("15 (sh) Z 1 777 777", encoding="ascii")
+
+    orig_path = local_mod.Path
+
+    def _patched_path(arg: Any) -> Path:
+        if arg == "/proc":
+            return fake_proc
+        if isinstance(arg, str) and arg.startswith("/proc/"):
+            return fake_proc / arg.removeprefix("/proc/")
+        return orig_path(arg)
+
+    monkeypatch.setattr(local_mod, "Path", _patched_path)
+    assert local_mod._linux_process_group_has_live_members(777) is False
+    assert local_mod._linux_process_group_has_live_members(888) is None
+    fake_proc.rmdir() if False else None
+    monkeypatch.setattr(
+        local_mod,
+        "Path",
+        lambda arg: tmp_path / "no-such-proc" if arg == "/proc" else orig_path(arg),
+    )
+    assert local_mod._linux_process_group_has_live_members(777) is None
     monkeypatch.undo()

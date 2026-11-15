@@ -37,18 +37,29 @@ def test_output_collector_spilling_and_best_effort_failures(
     """Writes spill files lazily on overflow and degrades cleanly on cap/IO errors."""
     assert "magitech-subprocess-" in default_spill_dir()
 
-    warnings: list[str] = []
+    errors: list[str] = []
 
     class _Logger:
-        def warning(self, msg: str) -> None:
-            warnings.append(msg)
+        def error(self, msg: str) -> None:
+            errors.append(msg)
 
     reporter = log_spill_failure(_Logger())
     reporter(RuntimeError("disk full"), "stdout")
-    assert len(warnings) == 1 and "disk full" in warnings[0]
+    assert len(errors) == 1 and "disk full" in errors[0]
+
+    # Throwing reporter does not crash collector push
+    spill_dir = str(tmp_path / "spills")
+    c_boom = OutputCollector(
+        2,
+        "stdout",
+        SpillOptions(
+            1, spill_dir, lambda _exc, _lbl: (_ for _ in ()).throw(RuntimeError("rep"))
+        ),
+    )
+    c_boom.push(b"abc")
+    assert c_boom.finalize()["text"] == "bc"
 
     # Successful spill across overflow + read_from + finalize
-    spill_dir = str(tmp_path / "spills")
     failures: list[tuple[BaseException, str]] = []
     c1 = OutputCollector(
         4,
@@ -128,3 +139,20 @@ def test_output_collector_spilling_and_best_effort_failures(
     monkeypatch.undo()
     # Close actual leaked fd if still tracked from test above? No, _spill_fd was cleared on seal.
     assert failures  # Sanity check reporter received IO errors
+
+    # Throwing reporter on spill IO failure does not propagate out of _spill_all
+    monkeypatch.setattr(
+        out_mod.os,
+        "open",
+        lambda *_a, **_kw: (_ for _ in ()).throw(OSError("open fail")),
+    )
+    c_io_boom = OutputCollector(
+        2,
+        "stdout",
+        SpillOptions(
+            64, spill_dir, lambda _exc, _lbl: (_ for _ in ()).throw(RuntimeError("rep"))
+        ),
+    )
+    c_io_boom.push(b"abcde")
+    assert c_io_boom.finalize()["text"] == "de"
+    monkeypatch.undo()

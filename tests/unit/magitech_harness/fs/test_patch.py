@@ -38,7 +38,7 @@ EOF"""
         "kind": "add",
         "lineNumber": 3,
         "path": "notes/hello.txt",
-        "contents": "alpha\nbeta\n",
+        "content": "alpha\nbeta\n",
     }
     assert ops[1] == {
         "kind": "delete",
@@ -310,3 +310,43 @@ def test_apply_hunks_passes_and_failures() -> None:
     )
     assert old_fail["ok"] is False
     assert old_fail["failure"]["stage"] == "oldLines"
+
+
+def test_parse_patch_env_id_trailing_space_and_out_of_order_hunks() -> None:
+    """Rejects Environment ID headers, preserves trailing spaces, and sorts hunks."""
+    with pytest.raises(PatchParseError, match="Environment ID") as exc_env:
+        parse_patch("*** Begin Patch\n*** Environment ID: local\n*** End Patch")
+    assert exc_env.value.line_number == 2
+
+    ops = parse_patch(
+        "*** Begin Patch\n"
+        "*** Update File: space.txt\n"
+        "@@\n"
+        " keep  \n"
+        "-old  \n"
+        "+new  \n"
+        "*** End Patch"
+    )
+    assert ops[0]["kind"] == "update"
+    assert ops[0]["hunks"][0]["oldLines"] == ["keep  ", "old  "]
+    assert ops[0]["hunks"][0]["newLines"] == ["keep  ", "new  "]
+
+    # Out-of-order hunks resolved with non-monotonic offsets still apply cleanly
+    applied = apply_hunks(
+        "first\nsecond\n",
+        [
+            {
+                "lineNumber": 1,
+                "oldLines": [],
+                "newLines": ["after-second"],
+                "isEndOfFile": False,
+            },
+            {
+                "lineNumber": 5,
+                "oldLines": ["first"],
+                "newLines": ["FIRST"],
+                "isEndOfFile": False,
+            },
+        ],
+    )
+    assert applied == {"ok": True, "text": "FIRST\nsecond\nafter-second\n"}

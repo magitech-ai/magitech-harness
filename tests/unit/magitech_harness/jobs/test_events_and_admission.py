@@ -104,6 +104,9 @@ def test_job_layer_is_empty_and_hub_routing() -> None:
     # Double unsubscribe / dispose safety
     unsub_all()
     unsub_all()
+    unsub_unscoped = hub.subscribe(root, {"owners": "all"}, lambda _ev: None)
+    unsub_unscoped()
+    unsub_unscoped()
     hub.emit({"type": "registered", "job": _sample_job("j-after")}, None)
     assert seen_all == ["j-s1", "j-s2", "j-open"]
 

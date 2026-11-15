@@ -366,6 +366,23 @@ async def test_wait_settlement_timeout_abort_and_pull_sources() -> None:
     assert (await reg.wait(jid, 10, signal=aborted_ctrl.signal))[
         "status"
     ] == "completed"
+    # Same-tick settlement + abort does not crash _on_abort (synchronous unsub)
+    hk_race = _ManualHooks()
+    jid_race = reg.start({"kind": "bash", "label": "race", "run": lambda _h: hk_race})
+    race_ctrl = AbortController()
+    unsub_race = reg.events.subscribe(
+        {"owners": "all"},
+        lambda ev: (
+            race_ctrl.abort("same-tick-after-settle")
+            if ev["type"] == "settled" and ev["job"]["id"] == jid_race
+            else None
+        ),
+    )
+    wait_race = asyncio.create_task(reg.wait(jid_race, 5000, signal=race_ctrl.signal))
+    await asyncio.sleep(0)
+    hk_race.done.set_result({"status": "completed"})
+    assert (await wait_race)["status"] == "completed"
+    unsub_race()
     # Check Task wait constant symbol imported cleanly
     assert TASK_WAIT_TIMEOUT == "TASK_WAIT_TIMEOUT"
 

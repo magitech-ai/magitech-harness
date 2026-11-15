@@ -253,6 +253,7 @@ class SubprocessShellExecutor(ShellExecutor, ABC):
         }
         if "pwshPath" in raw:
             self.config["pwshPath"] = raw["pwshPath"]
+        self._settle_tasks: set[asyncio.Task[None]] = set()
 
     def resolve(self, request: ShellExecRequest) -> ShellExecSpec:
         """Apply defaults and clamps to produce a resolved :class:`ShellExecSpec`."""
@@ -517,7 +518,9 @@ class SubprocessShellExecutor(ShellExecutor, ABC):
                 disarm()
                 done.set_result(None)
 
-        loop.create_task(_settle_handle())
+        settle_task = loop.create_task(_settle_handle())
+        self._settle_tasks.add(settle_task)
+        settle_task.add_done_callback(self._settle_tasks.discard)
         if not preparation_timed_out and on_started is not None:
             on_started(proc)
         return proc

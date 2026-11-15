@@ -72,7 +72,7 @@ class JobEventHub:
             self._unscoped.append(sub)
 
             def _remove() -> None:
-                self._unscoped.remove(sub)
+                self._unscoped = [s for s in self._unscoped if s is not sub]
 
             return _remove
 

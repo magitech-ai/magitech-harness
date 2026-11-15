@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -524,23 +525,27 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     assert oversize_again["before"] is None
 
     # Empty lstat & negative/zero byte ranges & missing stats
-    assert await fs.lstat("   ") is None
+    with pytest.raises(FsError) as empty_lstat:
+        await fs.lstat("   ")
+    assert empty_lstat.value.code == "FS_NOT_FOUND"
     assert await fs.read_byte_range(t_bad, {"offset": 0, "length": 0}) == b""
     with pytest.raises(ValueError, match="non-negative"):
         await fs.read_byte_range(t_bad, {"offset": -1, "length": 1})
 
-    # Missing file error paths for read/edit/delete/list_dir
+    # Missing file error paths for read/list_dir (FS_NOT_FOUND) and edit (FS_STALE_VERSION)
     t_absent = await fs.resolve("never_created.txt")
     for fn in (
         lambda: fs.read_text(t_absent),
         lambda: fs.list_dir(t_absent),
-        lambda: fs.edit_text(
-            t_absent, {"oldString": "a", "newString": "b", "replaceAll": False}
-        ),
     ):
         with pytest.raises(FsError) as not_found_e:
             await fn()
         assert not_found_e.value.code == "FS_NOT_FOUND"
+    with pytest.raises(FsError) as edit_missing_e:
+        await fs.edit_text(
+            t_absent, {"oldString": "a", "newString": "b", "replaceAll": False}
+        )
+    assert edit_missing_e.value.code == "FS_STALE_VERSION"
     with pytest.raises(FsError) as stale_edit:
         await fs.edit_text(
             t_absent,
@@ -651,8 +656,12 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     monkeypatch.setattr(local_mod.os, "lstat", real_lstat)
 
     # read_bytes size growth race (small file on disk, larger bytes returned)
+    import io
+
     monkeypatch.setattr(
-        local_mod.Path, "read_bytes", lambda _self: b"12345678901234567890"
+        local_mod.Path,
+        "open",
+        lambda _self, *_a, **_kw: io.BytesIO(b"12345678901234567890"),
     )
     with pytest.raises(FsError) as race_large:
         await fs.read_bytes(t_edge, None, 10)
@@ -673,6 +682,13 @@ async def test_local_filesystem_error_branches_and_edge_cases(
         local_mod.Path,
         "read_bytes",
         lambda _self: (_ for _ in ()).throw(PermissionError(errno.EACCES, "denied")),
+    )
+    monkeypatch.setattr(
+        local_mod.Path,
+        "open",
+        lambda _self, *_a, **_kw: (_ for _ in ()).throw(
+            PermissionError(errno.EACCES, "denied")
+        ),
     )
     for call in (
         lambda: fs.read_text(t_bad),
@@ -800,3 +816,170 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     link_t = tmp_path / "dangling_or_dir_link"
     link_t.symlink_to(tmp_path / "dir_here")
     assert fs._read_diff_basis(str(link_t)) is None
+
+
+@pytest.mark.asyncio
+async def test_local_filesystem_fail_loud_watch_link_race_locks_and_host_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Covers fail-loud config, polling watch, createIfAbsent FileExistsError, lock eviction, and host paths."""
+    import errno
+
+    import magitech_harness.fs.local as local_mod
+
+    bad_ctx = Context()
+    for bad_cfg in (
+        {"cwd": ""},
+        {"cwd": 123},
+        {"diffBasisMaxBytes": 0},
+        {"diffBasisMaxBytes": True},
+        {"diffBasisMaxBytes": "1024"},
+        {"diffBasisMaxBytes": local_mod._MAX_DIFF_BASIS_BYTES + 1},
+    ):
+        with pytest.raises(ValueError):
+            LocalFileSystem(bad_ctx, bad_cfg)
+
+    ctx = Context()
+    ctx.use(LocalFileSystem, {"cwd": str(tmp_path), "diffBasisMaxBytes": 64})
+    await ctx.flush()
+    fs: LocalFileSystem = ctx.fs
+
+    # process_path_from_host_path rejects relative paths and normalizes absolute paths
+    assert fs.process_path_from_host_path("relative/path.txt") is None
+    assert fs.process_path_from_host_path(str(tmp_path / "a" / ".." / "b")) == str(
+        tmp_path / "b"
+    )
+
+    # _version_after_write missing sentinel & _read_bytes_bounded TOCTOU race
+    assert local_mod._version_after_write(
+        str(tmp_path / "missing-after.txt")
+    ).startswith("missing:")
+    race_f = tmp_path / "grow.bin"
+    race_f.write_bytes(b"123456")
+    t_race = await fs.resolve("grow.bin")
+    monkeypatch.setattr(local_mod, "_STREAM_CHUNK_BYTES", 2)
+    monkeypatch.setattr(
+        fs,
+        "_require_regular_file",
+        lambda _t, _v: ("0:0:1:0:0", 0o644, 1),
+    )
+    with pytest.raises(FsError) as race_err:
+        await fs.read_bytes(t_race, None, 3)
+    assert race_err.value.code == "FS_TOO_LARGE"
+    monkeypatch.undo()
+
+    # Atomic createIfAbsent link race -> FS_NOT_OBSERVED
+    existing_link = tmp_path / "link_race.txt"
+    existing_link.write_text("already", encoding="utf-8")
+    t_link_race = await fs.resolve("link_race.txt")
+    real_probe = local_mod._probe
+    monkeypatch.setattr(
+        local_mod,
+        "_probe",
+        lambda p: None if p == t_link_race["targetKey"] else real_probe(p),
+    )
+    with pytest.raises(FsError) as obs_err:
+        await fs.write_text(t_link_race, "new", {"kind": "createIfAbsent"})
+    assert obs_err.value.code == "FS_NOT_OBSERVED"
+    monkeypatch.undo()
+
+    # Contended lock eviction (refcount increments >0 -> 0 and clears self._locks)
+    t_lock = await fs.resolve("contended.txt")
+    lock_entered = asyncio.Event()
+    allow_release = asyncio.Event()
+
+    async def _hold_first() -> None:
+        async with fs._lock_targets(t_lock["targetKey"]):
+            lock_entered.set()
+            await allow_release.wait()
+
+    async def _wait_second() -> None:
+        await lock_entered.wait()
+        async with fs._lock_targets(t_lock["targetKey"]):
+            assert t_lock["targetKey"] in fs._locks
+
+    first_task = asyncio.create_task(_hold_first())
+    second_task = asyncio.create_task(_wait_second())
+    await lock_entered.wait()
+    await asyncio.sleep(0)
+    allow_release.set()
+    await asyncio.gather(first_task, second_task)
+    assert fs._locks == {}
+
+    # Dispose a context with no active watchers cleanly
+    idle_ctx = Context()
+    idle_ctx.use(LocalFileSystem, {"cwd": str(tmp_path)})
+    await idle_ctx.flush()
+    await idle_ctx.fiber.dispose()
+
+    # Polling watch on directory (child add + vanish stat edge), file change, OSError, abort & dispose
+    monkeypatch.setattr(local_mod, "_WATCH_POLL_INTERVAL_S", 0.01)
+    watch_dir = tmp_path / "watched_dir"
+    watch_dir.mkdir()
+    dir_t = await fs.resolve("watched_dir")
+    dir_events: list[Exception | None] = []
+    dir_ctrl = AbortController()
+    unwatch_dir = await fs.watch(dir_t, dir_events.append, dir_ctrl.signal)
+    await asyncio.sleep(0.025)
+    (watch_dir / "item.txt").write_text("hi", encoding="utf-8")
+    await asyncio.sleep(0.03)
+    assert None in dir_events
+    await unwatch_dir()
+
+    # Cover stat(follow_symlinks=False) OSError fallback inside _watch_snapshot on dir
+    class _VanishEntry:
+        name = "vanished"
+
+        def stat(self, *, follow_symlinks: bool = False) -> Any:
+            del follow_symlinks
+            raise FileNotFoundError(errno.ENOENT, "gone")
+
+    class _FakeScandir:
+        def __enter__(self) -> list[_VanishEntry]:
+            return [_VanishEntry()]
+
+        def __exit__(self, *_a: object) -> None:
+            return None
+
+    monkeypatch.setattr(local_mod.os, "scandir", lambda _p: _FakeScandir())
+    assert local_mod._watch_snapshot(str(watch_dir), True) == (("vanished", None),)
+    monkeypatch.undo()
+
+    # Watch file -> detect modification -> stop on non-ENOENT OSError
+    monkeypatch.setattr(local_mod, "_WATCH_POLL_INTERVAL_S", 0.01)
+    watch_file = tmp_path / "watched.txt"
+    watch_file.write_text("v1", encoding="utf-8")
+    file_t = await fs.resolve("watched.txt")
+    file_events: list[Exception | None] = []
+    file_ctrl = AbortController()
+    unwatch_file = await fs.watch(file_t, file_events.append, file_ctrl.signal)
+    await asyncio.sleep(0.02)
+    watch_file.write_text("v2-longer", encoding="utf-8")
+    await asyncio.sleep(0.03)
+    assert None in file_events
+
+    real_lstat = local_mod.os.lstat
+
+    def _perm_lstat(p: Any) -> Any:
+        if str(p) == str(watch_file):
+            raise PermissionError(errno.EACCES, "denied")
+        return real_lstat(p)
+
+    monkeypatch.setattr(local_mod.os, "lstat", _perm_lstat)
+    await asyncio.sleep(0.03)
+    assert any(isinstance(ev, PermissionError) for ev in file_events)
+    await unwatch_file()
+    monkeypatch.undo()
+
+    # Abort signal exits poll cleanly, and context dispose cancels open watchers
+    monkeypatch.setattr(local_mod, "_WATCH_POLL_INTERVAL_S", 0.01)
+    abort_ctrl = AbortController()
+    _unwatch_abort = await fs.watch(file_t, lambda _e: None, abort_ctrl.signal)
+    await asyncio.sleep(0.02)
+    abort_ctrl.abort("done")
+    await asyncio.sleep(0.02)
+
+    leak_ctrl = AbortController()
+    await fs.watch(file_t, lambda _e: None, leak_ctrl.signal)
+    await ctx.fiber.dispose()
+    monkeypatch.undo()

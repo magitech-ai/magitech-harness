@@ -32,8 +32,15 @@ class WorkingDirectoryService(Service):
     def __init__(self, ctx: Context, config: Mapping[str, Any] | None = None) -> None:
         super().__init__(ctx, "workingDirectory")
         cfg = config or {}
-        raw_dir = cfg.get("default_directory", cfg.get("defaultDirectory"))
-        directory = str(raw_dir) if isinstance(raw_dir, str) else os.getcwd()
+        if "default_directory" in cfg or "defaultDirectory" in cfg:
+            raw_dir = cfg.get("default_directory", cfg.get("defaultDirectory"))
+            if not isinstance(raw_dir, str) or not raw_dir.strip():
+                raise ValueError(
+                    "working-directory: defaultDirectory must be a non-empty string"
+                )
+            directory = raw_dir
+        else:
+            directory = os.getcwd()
         if not os.path.isabs(directory):
             raise ValueError("working-directory: defaultDirectory must be absolute")
         self.default_directory = directory
