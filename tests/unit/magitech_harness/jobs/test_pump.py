@@ -44,8 +44,16 @@ async def test_pump_rejects_invalid_poll_ms() -> None:
 async def test_pump_drains_synchronously_polls_and_flushes_on_stop() -> None:
     loop = asyncio.get_running_loop()
     stop: asyncio.Future[None] = loop.create_future()
+    reached_tail = asyncio.Event()
 
-    src_out = _FakeSource(
+    class _SignallingSource(_FakeSource):
+        def read(self, from_byte: int) -> JobOutputSourceRead:
+            out = super().read(from_byte)
+            if self._calls >= 3:
+                reached_tail.set()
+            return out
+
+    src_out = _SignallingSource(
         "stdout",
         [
             {"text": "first", "nextOffset": 5, "lossy": False, "spillPath": "/tmp/s1"},
@@ -81,8 +89,7 @@ async def test_pump_drains_synchronously_polls_and_flushes_on_stop() -> None:
     ]
     assert spills == [(0, "/tmp/s1"), (1, None)]
 
-    # Wait long enough for at least one periodic sleep tick to fire naturally
-    await asyncio.sleep(0.02)
+    await asyncio.wait_for(reached_tail.wait(), timeout=2.0)
     stop.set_result(None)
     await handle.done
 

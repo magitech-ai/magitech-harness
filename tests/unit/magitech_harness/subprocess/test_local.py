@@ -366,12 +366,12 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
             "graceMs": 50,
         }
     )
-    await h_drain.done
-    signal_tree(h_drain.pid, signal.SIGKILL)
-
-    # Stdin write OSError (simulated EPIPE on closed writer) + win32 creationflags branch
     import magitech_harness.subprocess.local as local_mod
 
+    await h_drain.done
+    signal_tree(h_drain.pid, local_mod._FORCE_KILL_SIGNAL)
+
+    # Stdin write OSError (simulated EPIPE on closed writer) + win32/posix spawn branches
     orig_start_popen = local_mod._start_popen
 
     def _mock_win32_popen(argv: Any, kwargs: Any) -> Any:
@@ -402,6 +402,31 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
     await h_win.done
     assert "win-out" in h_win.collected["stdout"].finalize()["text"]
     assert h_win.collected["stderr"].finalize()["text"] == "win-err"
+    monkeypatch.undo()
+
+    def _mock_posix_popen(argv: Any, kwargs: Any) -> Any:
+        assert kwargs.get("start_new_session") is True
+        if sys.platform == "win32":
+            del kwargs["start_new_session"]
+            kwargs["creationflags"] = 0x00000200
+        return orig_start_popen(argv, kwargs)
+
+    pgrp_polls = iter([True, False])
+    monkeypatch.setattr(local_mod.sys, "platform", "linux")
+    monkeypatch.setattr(local_mod, "_start_popen", _mock_posix_popen)
+    monkeypatch.setattr(
+        local_mod, "_process_group_has_live_members", lambda _p: next(pgrp_polls, False)
+    )
+    h_posix = rt.spawn(
+        {
+            "argv": [sys.executable, "-c", "print('posix-ok')"],
+            "cwd": str(tmp_path),
+            "stdio": {"stdin": "ignore", "stdout": "ignore", "stderr": "ignore"},
+            "graceMs": 50,
+        }
+    )
+    await h_posix.done
+    assert await h_posix.wait_for_exit() is True
     monkeypatch.undo()
 
     # Patch stdin.write to raise OSError during launch via mock Popen
@@ -730,6 +755,13 @@ async def test_env_scrubbing_pattern_win32_stream_pumps_and_pgrp_helpers(
     monkeypatch.undo()
 
     monkeypatch.setattr(local_mod.sys, "platform", "linux")
+    monkeypatch.setattr(
+        local_mod.os,
+        "killpg",
+        lambda *_a: (_ for _ in ()).throw(ProcessLookupError("gone")),
+        raising=False,
+    )
+    assert local_mod._process_group_has_live_members(123) is False
     monkeypatch.setattr(
         local_mod.os,
         "killpg",

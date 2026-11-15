@@ -439,9 +439,21 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     # Home prefix expansion (POSIX + win32) & containment equal target
     monkeypatch.setattr(local_mod.sys, "platform", "linux")
     assert local_mod.expand_home_prefix("~/sub") == f"{Path.home()}/sub"
+    if os.name == "nt":
+        # Windows' native realpath collapses "missing_dir/.." lexically before I/O;
+        # simulate POSIX realpath ENOENT on nonexistent segments to exercise the guard.
+        orig_realpath = local_mod.os.path.realpath
+
+        def _posix_like_realpath(p: str, *, strict: bool = False) -> str:
+            if strict and "missing_dir" in p:
+                raise FileNotFoundError(errno.ENOENT, "missing", p)
+            return orig_realpath(p, strict=strict)
+
+        monkeypatch.setattr(local_mod.os.path, "realpath", _posix_like_realpath)
     with pytest.raises(FsError) as missing_dotdot:
         await fs.resolve("missing_dir/../x.txt")
     assert missing_dotdot.value.code == "FS_NOT_FOUND"
+    monkeypatch.undo()
 
     monkeypatch.setattr(local_mod.sys, "platform", "win32")
     assert local_mod.expand_home_prefix("~\\sub") == f"{Path.home()}\\sub"

@@ -205,7 +205,8 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
     asyncio.get_running_loop().call_later(0.05, sig.abort, "stop")
     aborted_run = await exe.run(sleep_cmd, signal=sig.signal)
     assert aborted_run.aborted is True
-    assert aborted_run.exit_code == -1
+    # Windows taskkill exits killed processes with exitCode=1 rather than None.
+    assert aborted_run.exit_code == (1 if is_win else -1)
 
     await f2.dispose()
     await f1.dispose()
