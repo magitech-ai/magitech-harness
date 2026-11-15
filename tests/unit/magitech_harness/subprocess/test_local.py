@@ -421,7 +421,7 @@ async def test_local_subprocess_spawn_collect_pipe_terminate_and_teardown(
         {
             "argv": [sys.executable, "-c", "print('posix-ok')"],
             "cwd": str(tmp_path),
-            "stdio": {"stdin": "ignore", "stdout": "ignore", "stderr": "ignore"},
+            "stdio": {"stdin": "ignore", "stdout": "inherit", "stderr": "inherit"},
             "graceMs": 50,
         }
     )

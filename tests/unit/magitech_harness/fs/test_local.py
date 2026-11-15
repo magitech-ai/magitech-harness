@@ -453,6 +453,7 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     with pytest.raises(FsError) as missing_dotdot:
         await fs.resolve("missing_dir/../x.txt")
     assert missing_dotdot.value.code == "FS_NOT_FOUND"
+    await fs.write_text(await fs.resolve("posix_chmod.txt"), "ok")
     monkeypatch.undo()
 
     monkeypatch.setattr(local_mod.sys, "platform", "win32")
@@ -812,7 +813,7 @@ async def test_local_filesystem_error_branches_and_edge_cases(
     def _enotdir_realpath(p: str, *, strict: bool = False) -> str:
         if "enotdir_probe" in p:
             raise OSError(errno.ENOTDIR, "not a dir")
-        if strict and p == "/":
+        if strict and os.path.dirname(p) == p:
             raise FileNotFoundError(errno.ENOENT, "missing root")
         return real_realpath(p, strict=strict)
 
@@ -821,7 +822,7 @@ async def test_local_filesystem_error_branches_and_edge_cases(
         await fs.resolve("enotdir_probe/leaf.txt")
     assert enotdir_err.value.code == "FS_NOT_FOUND"
     root_missing = await fs.resolve("/enotdir_other_missing")
-    assert root_missing["targetKey"] == "/enotdir_other_missing"
+    assert root_missing["targetKey"] == os.path.abspath("/enotdir_other_missing")
 
     def _child_rp_err(p: str, *, strict: bool = False) -> str:
         if "src_move.txt" in p and strict:
