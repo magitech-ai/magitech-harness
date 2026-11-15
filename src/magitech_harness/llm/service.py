@@ -656,38 +656,47 @@ class LLMService(Service):
     # Parity LlmRuntime adapter registry, discovery, metadata & streaming
     # ------------------------------------------------------------------
 
-    def _warn_adapters_listener_failure(self, error: Any) -> None:
-        self.ctx.logger.warning("llm: an llm/adapters-updated listener failed")
+    def _warn_listener_failure(self, event: str, error: Any) -> None:
+        self.ctx.logger.warning(f"llm: an {event} listener failed")
         self.ctx.logger.warning(error)
 
-    async def _await_listener_safely(self, awaitable: Awaitable[Any]) -> None:
+    async def _await_listener_safely(
+        self, event: str, awaitable: Awaitable[Any]
+    ) -> None:
         try:
             await awaitable
         except Exception as exc:  # noqa: BLE001
             # Contained topology observer rejections warn instead of failing emits.
-            self._warn_adapters_listener_failure(exc)
+            self._warn_listener_failure(event, exc)
 
-    def _emit_adapters_updated(self) -> None:
+    def _emit_contained(self, event: str, *args: Any) -> None:
         bus = self.ctx.events
-        for listener in bus._filter_listeners(
-            "llm/adapters-updated", this_arg=self.ctx
-        ):
+        for listener in bus._filter_listeners(event, this_arg=self.ctx):
             try:
-                returned = listener.callback()
+                returned = listener.callback(*args)
             except Exception as exc:  # noqa: BLE001
                 # Contained topology observer throws cannot starve later listeners.
-                self._warn_adapters_listener_failure(exc)
+                self._warn_listener_failure(event, exc)
                 continue
             if inspect.isawaitable(returned):
                 try:
                     loop = asyncio.get_running_loop()
                 except RuntimeError:
                     # Run outside an active event loop during synchronous teardown.
-                    asyncio.run(self._await_listener_safely(returned))
+                    asyncio.run(self._await_listener_safely(event, returned))
                 else:
-                    task = loop.create_task(self._await_listener_safely(returned))
+                    task = loop.create_task(
+                        self._await_listener_safely(event, returned)
+                    )
                     self._listener_tasks.add(task)
                     task.add_done_callback(self._listener_tasks.discard)
+
+    def _emit_adapters_updated(self) -> None:
+        self._emit_contained("llm/adapters-updated")
+
+    def emit_models_updated(self, provider: str) -> None:
+        """Emit ``llm/models-updated`` for *provider* while containing errors."""
+        self._emit_contained("llm/models-updated", provider)
 
     def _registration(self, provider: str) -> _AdapterRegistration:
         reg = self._adapters.get(provider)
@@ -1766,6 +1775,7 @@ class LLMService(Service):
     resolveModelInfo = resolve_model_info
     resolveCallConfig = resolve_call_config
     prepareCall = prepare_call
+    emitModelsUpdated = emit_models_updated
 
 
 LlmRuntime = LLMService
