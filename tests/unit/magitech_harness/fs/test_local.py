@@ -994,12 +994,12 @@ async def test_local_filesystem_fail_loud_watch_link_race_locks_and_host_path(
     monkeypatch.undo()
 
     # Abort signal exits poll cleanly, and context dispose cancels open watchers
-    monkeypatch.setattr(local_mod, "_WATCH_POLL_INTERVAL_S", 0.01)
+    monkeypatch.setattr(local_mod, "_WATCH_POLL_INTERVAL_S", 5.0)
     abort_ctrl = AbortController()
     _unwatch_abort = await fs.watch(file_t, lambda _e: None, abort_ctrl.signal)
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(0)
     abort_ctrl.abort("done")
-    await asyncio.sleep(0.02)
+    await asyncio.sleep(0)
 
     leak_ctrl = AbortController()
     await fs.watch(file_t, lambda _e: None, leak_ctrl.signal)
