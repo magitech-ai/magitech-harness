@@ -12,6 +12,13 @@
   - **Tool-Pairing Integrity**: Turn cuts and compaction boundaries must never sever an assistant tool call from its matching tool result.
 - **Cooperative Cancellation**: Long-running streaming turns and tool executions support cooperative cancellation via `AbortSignal`.
 
+## Shared Development Guidance
+
+Follow [home AGENTS](../home/AGENTS.md) for cross-repository standards,
+[uv skill](../home/skills/uv/SKILL.md) for package management and standard
+test/type-check commands, and [Ruff skill](../home/skills/ruff/SKILL.md) for
+linting and formatting.
+
 ## Harness-Specific References
 
 ### Issue tracker
