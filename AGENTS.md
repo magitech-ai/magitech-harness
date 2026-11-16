@@ -14,10 +14,7 @@
 
 ## Shared Development Guidance
 
-Follow [agents-home AGENTS](../agents-home/AGENTS.md) for cross-repository
-standards, [uv skill](../agents-home/skills/uv/SKILL.md) for package management
-and standard test/type-check commands, and
-[Ruff skill](../agents-home/skills/ruff/SKILL.md) for linting and formatting.
+Follow the shared development guidance in [agents-home AGENTS](../agents-home/AGENTS.md).
 
 ## Harness-Specific References
 
