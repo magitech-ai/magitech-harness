@@ -398,7 +398,7 @@ async def test_ask_routing_and_pre_execute_deny() -> None:
     assert degraded["isError"] is True
     assert (
         degraded["content"][0]["text"]
-        == 'Error: tool "echo" requires approval (not yet supported)'
+        == 'Error: tool "echo" requires approval but no approval service is mounted'
     )
     unsub_ask()
 

@@ -111,9 +111,14 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
-        "id": "approvals",
+        "id": "approval",
         "name": "magitech_harness.approval.service:ApprovalService",
-        "config": {"default_verdict": False},
+        "config": {"policy": "ask"},
+    },
+    {
+        "id": "approval-guard",
+        "name": "magitech_harness.approval.guard:apply",
+        "config": {},
     },
     {
         "id": "layers",
@@ -253,7 +258,7 @@ def test_bundle_slots_are_row_services() -> None:
     )
     assert isinstance(ctx.jobs, LocalJobRegistry)
     assert isinstance(ctx.workingDirectory, WorkingDirectoryService)
-    assert isinstance(ctx.approvals, ApprovalService)
+    assert isinstance(ctx.approval, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
     assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
@@ -263,7 +268,7 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.agentLoop, AgentLoop)
     assert isinstance(ctx.sessionPersistence, JsonlSessionPersistenceService)
     assert isinstance(ctx.sessionProjectionCache, SessionProjectionCacheService)
-    assert ctx.approvals.default_verdict is False
+    assert ctx.approval.policy == "ask"
     assert ctx.sessions.base_storage_dir is None
     # Memory-only boot activates both rows hollow: no backend, no cache.
     persistence = ctx.get("sessionPersistence", None, strict=False)

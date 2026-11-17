@@ -42,10 +42,13 @@
 - id: working-directory
   name: magitech_harness.session.working_directory:WorkingDirectoryService
   config: {}
-- id: approvals
+- id: approval
   name: magitech_harness.approval.service:ApprovalService
   config:
-    default_verdict: false
+    policy: ask
+- id: approval-guard
+  name: magitech_harness.approval.guard:apply
+  config: {}
 - id: layers
   name: magitech_harness.components.layers:LayerResolutionService
   config: {}
