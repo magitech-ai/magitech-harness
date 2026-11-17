@@ -491,6 +491,8 @@ def define_tool_definition(spec: Mapping[str, Any]) -> dict[str, Any]:
         definition["finalizeContent"] = spec["finalizeContent"]
     if timeout_ms is not None:
         definition["timeoutMs"] = timeout_ms
+    if spec.get("requiresApproval") is True:
+        definition["requiresApproval"] = True
     if spec.get("deferLoading") is True:
         definition["deferLoading"] = True
 

@@ -117,7 +117,7 @@ def test_bundle_boot_exposes_nine_services_and_owned_components() -> None:
         ctx.shell,
         LocalPwshExecutor if sys.platform == "win32" else LocalBashExecutor,
     )
-    assert isinstance(ctx.approvals, ApprovalService)
+    assert isinstance(ctx.approval, ApprovalService)
     assert isinstance(ctx.layers, LayerResolutionService)
     assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.sessions, SessionService)
@@ -125,7 +125,7 @@ def test_bundle_boot_exposes_nine_services_and_owned_components() -> None:
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.sessionPersistence, JsonlSessionPersistenceService)
     assert isinstance(ctx.sessionProjectionCache, SessionProjectionCacheService)
-    assert ctx.approvals.default_verdict is False
+    assert ctx.approval.policy == "ask"
     assert ctx.sessions.base_storage_dir is None
     persistence = ctx.get("sessionPersistence", None, strict=False)
     assert persistence.backend is None
@@ -305,7 +305,7 @@ async def test_check_bundle_entries_fails_before_flush_on_loop_path() -> None:
     with pytest.raises(RuntimeError, match="no bundle entries"):
         check_bundle_entries(ctx)
     await ctx.flush()
-    assert len(list(loader.entries())) == 33
+    assert len(list(loader.entries())) == 34
     check_bundle_entries(ctx)
 
 
@@ -321,10 +321,10 @@ def test_check_bundle_entries_sync_path_settles_at_load() -> None:
     loader = LoaderService(ctx, {"filename": _base_bundle_path()})
     loader.load(_base_bundle_path())
     entries = list(loader.entries())
-    assert len(entries) == 33
+    assert len(entries) == 34
     enabled = [entry for entry in entries if not entry.disabled]
     disabled = [entry for entry in entries if entry.disabled]
-    assert len(enabled) == 32
+    assert len(enabled) == 33
     assert len(disabled) == 1
     assert all(
         entry.fiber is not None and entry.fiber.state is FiberState.ACTIVE

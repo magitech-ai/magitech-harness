@@ -133,6 +133,7 @@ class ToolDefinition(TypedDict):
         Callable[[ToolExecution, ToolExecutionResult], Sequence[ContentBlock] | None]
     ]
     timeoutMs: NotRequired[float]
+    requiresApproval: NotRequired[bool]
     isConcurrencySafe: NotRequired[Callable[[Any], bool]]
     presentCall: NotRequired[Callable[[Any], ToolCallView | None]]
     presentResult: NotRequired[Callable[[Any, ToolResult], ToolResultView | None]]

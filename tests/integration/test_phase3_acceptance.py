@@ -545,7 +545,9 @@ async def test_phase3_approval_fail_closed_in_pipeline(tmp_path: Path) -> None:
     )
     res_unmounted = batch_unmounted["results"][0]["result"]
     assert res_unmounted["isError"] is True
-    assert "Requires user consent" in res_unmounted["content"][0]["text"]
+    # The approval service is mounted by default; an ask outside an open
+    # turn fails closed with the turn-enclosure error (finding #14).
+    assert "outside an open turn" in res_unmounted["content"][0]["text"]
     assert handler_calls == 0
 
     # 2) Mounted approval returning rejected / unavailable / cancelled & agent=None
@@ -560,7 +562,7 @@ async def test_phase3_approval_fail_closed_in_pipeline(tmp_path: Path) -> None:
             return self.verdict
 
     stub = _StubApproval()
-    dispose_approval = ctx.provide("approval", stub)
+    ctx.set("approval", stub)
 
     batch_no_agent = await ctx.tools.execute(
         {
@@ -647,7 +649,6 @@ async def test_phase3_approval_fail_closed_in_pipeline(tmp_path: Path) -> None:
     assert live_req["displayReason"] == "Confirm sensitive op"
     assert isinstance(live_req["signal"], AbortSignal)
 
-    dispose_approval()
     await handle["dispose"]()
     await ctx.fiber.dispose()
 
