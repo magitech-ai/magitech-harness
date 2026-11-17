@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import logging
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from anima import Context, Disposer
@@ -11,6 +12,8 @@ from magitech_harness.llm.pi_ai.adapter import PiAiAdapter
 from magitech_harness.llm.pi_ai.config import ResolvedProfile, resolve_profiles
 from magitech_harness.llm.pi_ai.provider_data import LANES, PROVIDER_DATA
 from magitech_harness.llm.types import LlmConfigurableProvider
+
+logger = logging.getLogger("magitech_harness.llm.pi_ai")
 
 SETTINGS_NS = "llm-pi-ai"
 
@@ -59,6 +62,34 @@ def directory_entries(
     return list(entries.values())
 
 
+def _directory_facts(entries: Sequence[LlmConfigurableProvider]) -> tuple[Any, ...]:
+    """Stable, comparable snapshot of directory facts for change detection."""
+    return tuple(
+        sorted(
+            (
+                entry.get("provider"),
+                entry.get("displayName"),
+                entry.get("settingsNs"),
+                tuple(entry.get("settingsPath", ())),
+            )
+            for entry in entries
+        )
+    )
+
+
+def _route_facts(resolved: Mapping[str, ResolvedProfile]) -> tuple[Any, ...]:
+    """Stable, comparable snapshot of route facts for change detection."""
+    return tuple(
+        sorted(
+            (
+                provider,
+                profile.retry_policy.get("mode") if profile.retry_policy else None,
+            )
+            for provider, profile in resolved.items()
+        )
+    )
+
+
 def apply(
     ctx: Context,
     config: Mapping[str, Any] | None = None,
@@ -66,6 +97,13 @@ def apply(
     **kwargs: Any,
 ) -> Disposer:
     """Mount the pi-ai multi-provider adapter onto ctx.llm.
+
+    The mount is reactive: whenever a volatile config commit touches this
+    component's fiber, the directory entries and adapter routes are
+    atomically re-resolved from the fiber's live config and re-registered
+    only when the facts actually changed (atomic replace, never
+    dispose-then-register, matching the reference implementation). A bare
+    mount with zero routes stays dormant (directory only).
 
     Args:
         ctx: Active Anima Context.
@@ -98,7 +136,52 @@ def apply(
     if routes:
         registration = llm.register_adapter(routes, adapter)
 
+    current_dir_facts = _directory_facts(directory_entries(resolved))
+    # Sentinel: "no route facts established yet" so an empty volatile commit
+    # on a dormant mount is still reconciled (branch coverage).
+    current_route_facts: Any = None
+
+    fiber = ctx.fiber
+
+    def refresh() -> None:
+        """Re-resolve from the fiber's live config and replace on change."""
+        nonlocal directory_handle, registration
+        nonlocal current_dir_facts, current_route_facts, resolved
+        live = dict(fiber.raw_config or {})
+        new_resolved = resolve_profiles(live)
+        new_entries = directory_entries(new_resolved)
+        new_dir_facts = _directory_facts(new_entries)
+        new_routes = list(new_resolved)
+        new_route_facts = _route_facts(new_resolved)
+        if new_dir_facts != current_dir_facts:
+            directory_handle.replace(new_entries)
+            current_dir_facts = new_dir_facts
+        if new_route_facts != current_route_facts:
+            if registration is None:
+                if new_routes:
+                    registration = llm.register_adapter(new_routes, adapter)
+            else:
+                registration.replace(new_routes)
+            current_route_facts = new_route_facts
+        resolved = new_resolved
+
+    def on_volatile_update(_paths: Any) -> None:
+        """Reconcile directory and routes after a volatile config commit.
+
+        A resolution failure leaves the previous registration serving (the
+        reference logs the conflict and keeps prior state).
+        """
+        try:
+            refresh()
+        except Exception:  # observer must not crash the emitter
+            logger.exception(
+                "pi-ai: volatile config update conflicts with existing provider route"
+            )
+
+    volatile_listener = ctx.on("loader/volatile-update", on_volatile_update)
+
     def _teardown() -> None:
+        volatile_listener()
         if registration is not None:
             registration()
         directory_handle()
