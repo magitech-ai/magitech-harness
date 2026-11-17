@@ -8,8 +8,10 @@ import asyncio
 import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from anima import Context, FiberState
+from anima.jsexpr import load_yaml
 from anima.loader import LoaderService
 
 from magitech_harness.agent.agent_loop import AgentLoop, FactoryOwnership
@@ -42,6 +44,7 @@ from magitech_harness.llm.service import (
 )
 from magitech_harness.llm.slug import parse_model_slug
 from magitech_harness.llm.types import ModelChunk, ModelResponse, UsageData
+from magitech_harness.profiles.merge import merge_bundle_rows, profile_rows_from_source
 from magitech_harness.session.events import (
     EventType,
     SessionEvent,
@@ -128,6 +131,7 @@ def _settle_default_bundle(ctx: Context, loader: LoaderService) -> None:
 def create_harness(
     storage_dir: Path | str | None = None,
     *,
+    profile: Path | str | list[Any] | dict[str, Any] | None = None,
     prepare: Callable[[Context], None] | None = None,
 ) -> Context:
     """Factory creating a standard Context populated with core Harness services.
@@ -181,7 +185,11 @@ def create_harness(
     loader = LoaderService(ctx, {"filename": _BASE_BUNDLE_PATH})
     if prepare is not None:
         prepare(ctx)
-    loader.load(_BASE_BUNDLE_PATH, env=env)
+    with open(_BASE_BUNDLE_PATH, encoding="utf-8") as base_stream:
+        base_rows = load_yaml(base_stream)
+    if profile is not None:
+        base_rows = merge_bundle_rows(base_rows, profile_rows_from_source(profile))
+    loader.load(base_rows, env=env)
     _settle_default_bundle(ctx, loader)
 
     return ctx
