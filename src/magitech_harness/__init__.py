@@ -28,6 +28,7 @@ from magitech_harness.approval.service import (
 from magitech_harness.components.layers import ConfigLayer, LayerResolutionService
 from magitech_harness.components.manifest import ComponentManifest
 from magitech_harness.components.service import ComponentService
+from magitech_harness.context.service import ContextService
 from magitech_harness.fs.local import LocalFileSystem
 from magitech_harness.fs.service import FileSystem
 from magitech_harness.jobs.local import LocalJobRegistry
@@ -199,6 +200,7 @@ __all__ = [
     "ComponentManifest",
     "ComponentService",
     "ConfigLayer",
+    "ContextService",
     "EventType",
     "FactoryOwnership",
     "FileSystem",

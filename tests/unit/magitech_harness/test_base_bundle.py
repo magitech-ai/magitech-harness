@@ -80,6 +80,11 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "context",
+        "name": "magitech_harness.context.service:ContextService",
+        "config": {},
+    },
+    {
         "id": "bash-local",
         "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
         "disabled": {"__jsExpr": "process.platform === 'win32'"},
