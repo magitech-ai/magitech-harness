@@ -89,10 +89,17 @@ async def test_profile_duplicate_id_in_profile_raises() -> None:
         create_harness(profile=[row, dict(row)])
 
 
-async def test_profile_row_missing_id_raises() -> None:
-    """A profile row without an id fails loud."""
-    with pytest.raises(ValueError, match="id"):
-        create_harness(profile=[{"name": "magitech_harness.fs.local:LocalFileSystem"}])
+async def test_profile_row_without_id_appends_when_named() -> None:
+    """An id-less named row appends; a non-string id fails loud."""
+    ctx = create_harness(
+        profile=[{"name": "magitech_harness.fs.local:LocalFileSystem"}]
+    )
+    await ctx.flush()
+    assert isinstance(ctx.get("fs", None, strict=False), LocalFileSystem)
+    with pytest.raises(ValueError, match="'id'"):
+        create_harness(
+            profile=[{"id": 42, "name": "magitech_harness.fs.local:LocalFileSystem"}]
+        )
 
 
 async def test_profile_unknown_row_missing_name_raises() -> None:
@@ -145,16 +152,18 @@ def test_merge_bundle_rows_rejects_profile_duplicates_and_bad_rows() -> None:
         merge_bundle_rows(
             base, [{"id": "x", "name": "m:X"}, {"id": "x", "name": "m:X2"}]
         )
-    with pytest.raises(ValueError, match="id"):
-        merge_bundle_rows(base, [{"name": "m:X"}])
-    with pytest.raises(ValueError, match="name"):
+    with pytest.raises(ValueError, match="'id'"):
+        merge_bundle_rows(base, [{"id": 42, "name": "m:X"}])
+    with pytest.raises(ValueError, match="declare a 'name'"):
         merge_bundle_rows(base, [{"id": "x"}])
+    with pytest.raises(ValueError, match="declare a 'name'"):
+        merge_bundle_rows(base, [{}])
 
 
 def test_merge_bundle_rows_rejects_non_dict_profile_row() -> None:
     """A non-mapping profile row fails loud."""
     with pytest.raises(TypeError, match="mappings"):
-        merge_bundle_rows([], ["not-a-row"])
+        merge_bundle_rows([], [42])
 
 
 def test_merge_bundle_rows_rejects_known_id_cleared_name() -> None:

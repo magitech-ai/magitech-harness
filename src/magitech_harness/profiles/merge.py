@@ -40,9 +40,10 @@ def merge_bundle_rows(base_rows: list[Any], profile_rows: list[Any]) -> list[Any
     A profile row with a known base id overlays its keys onto a copy of the
     base row, preserving the base slot position and any base fields the
     profile does not set (including conditional-disable expression nodes).
-    Rows with unknown ids append after the base rows in profile order.
-    Duplicate ids within the profile, rows without an id, and final rows
-    without a resolvable service name fail loud.
+    Rows with unknown ids append after the base rows in profile order; an
+    id-less named row (including a bare component-name string) also appends.
+    Duplicate profile ids, non-string ids, and rows without a resolvable
+    service name fail loud.
     """
     merged: list[Any] = [
         dict(row) if isinstance(row, dict) else row for row in base_rows
@@ -55,9 +56,18 @@ def merge_bundle_rows(base_rows: list[Any], profile_rows: list[Any]) -> list[Any
     seen: set[str] = set()
     appended: list[Any] = []
     for row in profile_rows:
+        if isinstance(row, str):
+            # Loader semantics: a bare string row names a component to mount.
+            row = {"name": row}
         if not isinstance(row, dict):
             raise TypeError("profile rows must be mappings with an 'id'")
         row_id = row.get("id")
+        if row_id is None:
+            # An id-less row (e.g. a bare string name) always appends.
+            if not row.get("name"):
+                raise ValueError("profile row without an 'id' must declare a 'name'")
+            appended.append(dict(row))
+            continue
         if not isinstance(row_id, str) or not row_id:
             raise ValueError("profile rows must carry a non-empty string 'id'")
         if row_id in seen:
