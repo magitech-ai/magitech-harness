@@ -614,30 +614,6 @@ class ToolExecutionPipeline:
     async def _dispatch_tool_body(
         self, exec_view: dict[str, Any]
     ) -> ToolExecutionResult:
-        # Repeat-tool reminder: notify observers when the same tool + arguments
-        # recur, so an agent loop can break out of a stuck retry cycle.
-        _recent = getattr(self, "_recent_calls", None)
-        if _recent is None:
-            _recent = []
-            self._recent_calls = _recent
-        signature = (
-            exec_view["name"],
-            json.dumps(exec_view.get("arguments", {}), sort_keys=True),
-        )
-        repeats = sum(1 for entry in _recent if entry == signature)
-        if repeats >= 2:
-            self._ctx.emit(
-                "tools/repeat-reminder",
-                {
-                    "name": exec_view["name"],
-                    "callId": exec_view["callId"],
-                    "repeats": repeats + 1,
-                },
-            )
-        _recent.append(signature)
-        if len(_recent) > 16:
-            del _recent[: len(_recent) - 16]
-
         state = self._require_state(exec_view)
         wrapper_signal: AbortSignal = exec_view["signal"]
         if state.caller_signal is wrapper_signal:
@@ -663,17 +639,23 @@ class ToolExecutionPipeline:
             if tool is None:
                 raise ToolNotFoundError(exec_view["name"])
             state.body_invoked = True
+            # Timeout enforcement is a cooperative, scoped-deadline concern of
+            # a mounted tools/execute guard (TOOL_TIMEOUT), not a hard cancel.
+            # A sync body that declares timeoutMs runs in a worker thread so
+            # the event-loop deadline can fire while it polls its signal.
             timeout_ms = tool.get("timeoutMs")
-            raw_returned = tool["execute"](
-                exec_view["arguments"], cast(ToolRunContext, exec_view)
-            )
+            if timeout_ms is not None:
+                raw_returned = await asyncio.to_thread(
+                    tool["execute"],
+                    exec_view["arguments"],
+                    cast(ToolRunContext, exec_view),
+                )
+            else:
+                raw_returned = tool["execute"](
+                    exec_view["arguments"], cast(ToolRunContext, exec_view)
+                )
             if inspect.isawaitable(raw_returned):
-                if timeout_ms is not None:  # pragma: no branch
-                    raw_returned = await asyncio.wait_for(  # pragma: no cover
-                        raw_returned, timeout=timeout_ms / 1000.0
-                    )
-                else:
-                    raw_returned = await raw_returned
+                raw_returned = await raw_returned
             result = self._create_success_result(exec_view, tool, raw_returned)
             if signal.is_aborted:
                 return build_aborted_result(before_dispatch=False, prior=result)

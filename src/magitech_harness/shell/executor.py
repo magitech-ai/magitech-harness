@@ -65,6 +65,8 @@ class ShellExecutor(Service, ABC):
         stdout = res["stdout"]["text"]
         stderr = res["stderr"]["text"]
         exit_code = res["exitCode"] if res["exitCode"] is not None else -1
+        stdout_data = res["stdout"]
+        stderr_data = res["stderr"]
         return ShellResult(
             exit_code=exit_code,
             stdout=stdout,
@@ -72,6 +74,11 @@ class ShellExecutor(Service, ABC):
             timed_out=res["timedOut"],
             aborted=res["aborted"],
             bytes_read=len(stdout.encode("utf-8")) + len(stderr.encode("utf-8")),
+            truncated=bool(
+                stdout_data.get("truncated") or stderr_data.get("truncated")
+            ),
+            stdout_spill_path=stdout_data.get("spillPath"),
+            stderr_spill_path=stderr_data.get("spillPath"),
         )
 
 
