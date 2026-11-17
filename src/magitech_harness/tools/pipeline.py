@@ -546,20 +546,36 @@ class ToolExecutionPipeline:
                 if isinstance(reason, str) and reason
                 else f'tool "{tool_name}" requires approval (not yet supported)'
             )
+            self._ctx.emit(
+                "approval/decided",
+                {
+                    "toolName": tool_name,
+                    "callId": exec_view["callId"],
+                    "outcome": "denied",
+                    "reason": msg,
+                },
+            )
             return _AskResolution(
                 decision={"kind": "deny", "reason": msg},
                 approval_cancelled=False,
             )
         agent = exec_view.get("agent")
         if agent is None:
-            return _AskResolution(
-                decision={
-                    "kind": "deny",
-                    "reason": (
-                        f'tool "{tool_name}" requires approval, '
-                        "but the call has no agent to route it through"
-                    ),
+            msg = (
+                f'tool "{tool_name}" requires approval, '
+                "but the call has no agent to route it through"
+            )
+            self._ctx.emit(
+                "approval/decided",
+                {
+                    "toolName": tool_name,
+                    "callId": exec_view["callId"],
+                    "outcome": "denied",
+                    "reason": msg,
                 },
+            )
+            return _AskResolution(
+                decision={"kind": "deny", "reason": msg},
                 approval_cancelled=False,
             )
         req: dict[str, Any] = {
@@ -572,9 +588,14 @@ class ToolExecutionPipeline:
             req["reason"] = ask["reason"]
         if "displayReason" in ask and ask["displayReason"] is not None:
             req["displayReason"] = ask["displayReason"]
+        self._ctx.emit("approval/asked", dict(req))
         outcome = approval.request(req)
         if inspect.isawaitable(outcome):
             outcome = await outcome
+        self._ctx.emit(
+            "approval/decided",
+            {**req, "outcome": outcome},
+        )
         if outcome == "allowed-once":
             return _AskResolution(decision={"kind": "allow"}, approval_cancelled=False)
         if outcome == "rejected":
