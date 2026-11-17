@@ -25,6 +25,7 @@ from magitech_harness.approval.service import (
     ApprovalService,
     calculate_argument_digest,
 )
+from magitech_harness.compaction.service import CompactionService
 from magitech_harness.components.layers import ConfigLayer, LayerResolutionService
 from magitech_harness.components.manifest import ComponentManifest
 from magitech_harness.components.service import ComponentService
@@ -197,6 +198,7 @@ __all__ = [
     "ApprovalRequest",
     "ApprovalService",
     "AssistantStreamAttempt",
+    "CompactionService",
     "ComponentManifest",
     "ComponentService",
     "ConfigLayer",
