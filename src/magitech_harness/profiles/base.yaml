@@ -22,6 +22,9 @@
 - id: shell-env
   name: magitech_harness.shell_env.service:ShellEnvRegistry
   config: {}
+- id: context
+  name: magitech_harness.context.service:ContextService
+  config: {}
 - id: bash-local
   name: magitech_harness.shell.bash_local:LocalBashExecutor
   disabled: !!js process.platform === 'win32'
