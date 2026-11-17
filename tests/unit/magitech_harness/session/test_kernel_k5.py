@@ -20,7 +20,7 @@ from anima.jsexpr import dump_yaml, load_yaml
 
 import magitech_harness
 from magitech_harness import MockLLMProvider, check_bundle_entries, create_harness
-from magitech_harness.llm.service import LLMService
+from magitech_harness.llm.service import LLMService, MockLlmAdapter
 from magitech_harness.session.events import EventType
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
@@ -29,6 +29,7 @@ from magitech_harness.session.title import SessionTitleService
 from magitech_harness.session.title_first_prompt import (
     apply as apply_title_first_prompt,
 )
+from tests.agent_turn_helper import run_agent_turn, stream_agent_turn
 
 PROVIDER_CONFIG = {
     "target_words": 5,
@@ -52,6 +53,7 @@ class _MockProviderComponent:
 
     def __init__(self, ctx: Context) -> None:
         ctx.llm.register_provider("mock", MockLLMProvider())
+        ctx.llm.register_adapter(["mock"], MockLlmAdapter())
 
 
 def _manual_ctx() -> Context:
@@ -261,9 +263,11 @@ async def test_automatic_title_fires_through_run_turn() -> None:
     ctx = create_harness()
     ctx.use(_MockProviderComponent)
     await ctx.flush()
-    session = ctx.sessions.create("k5-run-turn")
-    result = await ctx.agent_loop.run_turn(session, "Explain quantum computing simply")
-    assert result == "Default mock response"
+    result = await run_agent_turn(
+        ctx, "Explain quantum computing simply", session_id="k5-run-turn"
+    )
+    session = result.session
+    assert result.text == "Default mock response"
     await ctx.sessionTitle.drain()
     titles = _provider_title_events(session)
     assert len(titles) == 1
@@ -288,14 +292,10 @@ async def test_automatic_title_fires_through_stream_turn() -> None:
     ctx = create_harness()
     ctx.use(_MockProviderComponent)
     await ctx.flush()
-    session = ctx.sessions.create("k5-stream-turn")
-    streamed = [
-        chunk
-        async for chunk in ctx.agent_loop.stream_turn(
-            session, "Explain quantum computing simply"
-        )
-    ]
-    assert streamed[-1] == {"type": "turn_end", "text": "Default mock response"}
+    frames, session = await stream_agent_turn(
+        ctx, "Explain quantum computing simply", session_id="k5-stream-turn"
+    )
+    assert any(frame.get("type") == "chunk" for frame in frames)
     await ctx.sessionTitle.drain()
     titles = _provider_title_events(session)
     assert len(titles) == 1
@@ -310,8 +310,10 @@ async def test_disabling_provider_row_restores_fallback() -> None:
     await ctx.flush()
     loader = ctx.get("loader", None, strict=False)
     await loader.disable("session-title-first-prompt")
-    session = ctx.sessions.create("k5-no-provider")
-    await ctx.agent_loop.run_turn(session, "Explain quantum computing simply")
+    result = await run_agent_turn(
+        ctx, "Explain quantum computing simply", session_id="k5-no-provider"
+    )
+    session = result.session
     await ctx.sessionTitle.drain()
     titles = [event for event in session.events if event.type == "session/title"]
     assert len(titles) == 1
@@ -348,8 +350,10 @@ async def test_swapped_new_rows_still_wire(
     await ctx.flush()
     check_bundle_entries(ctx)
     assert ctx.has("components")
-    session = ctx.sessions.create("k5-swapped")
-    await ctx.agent_loop.run_turn(session, "Explain quantum computing simply")
+    result = await run_agent_turn(
+        ctx, "Explain quantum computing simply", session_id="k5-swapped"
+    )
+    session = result.session
     await ctx.sessionTitle.drain()
     titles = _provider_title_events(session)
     assert len(titles) == 1

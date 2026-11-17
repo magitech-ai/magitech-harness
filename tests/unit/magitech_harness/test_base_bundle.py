@@ -12,7 +12,6 @@ from anima.jsexpr import dump_yaml, load_yaml
 import magitech_harness
 from magitech_harness import EventType, check_bundle_entries, create_harness
 from magitech_harness.agent.agent_loop import AgentLoop
-from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.components.layers import LayerResolutionService
@@ -221,11 +220,6 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
-        "id": "agent-loop-legacy",
-        "name": "magitech_harness.agent.loop:AgentLoopService",
-        "config": {},
-    },
-    {
         "id": "agent-loop",
         "name": "magitech_harness.agent.agent_loop:AgentLoop",
         "config": {"agents": []},
@@ -266,7 +260,6 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.sessions, SessionService)
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agents, AgentRegistry)
-    assert isinstance(ctx.agent_loop, AgentLoopService)
     assert isinstance(ctx.agentLoop, AgentLoop)
     assert isinstance(ctx.sessionPersistence, JsonlSessionPersistenceService)
     assert isinstance(ctx.sessionProjectionCache, SessionProjectionCacheService)
@@ -304,7 +297,6 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert not ctx.has("sessionPersistence")
     assert not ctx.has("sessionProjectionCache")
     assert not ctx.has("agents")
-    assert not ctx.has("agent_loop")
     assert not ctx.has("agentLoop")
     assert not ctx.has("components")
     await ctx.flush()
@@ -322,7 +314,6 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert ctx.has("sessionPersistence")
     assert ctx.has("sessionProjectionCache")
     assert ctx.has("agents")
-    assert ctx.has("agent_loop")
     assert ctx.has("agentLoop")
     assert ctx.has("components")
     assert isinstance(ctx.components, ComponentService)
@@ -332,7 +323,6 @@ async def test_bundle_slots_settle_on_flush_inside_running_loop() -> None:
     assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.agents, AgentRegistry)
-    assert isinstance(ctx.agent_loop, AgentLoopService)
     assert isinstance(ctx.agentLoop, AgentLoop)
 
 

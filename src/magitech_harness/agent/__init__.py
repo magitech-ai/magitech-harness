@@ -52,7 +52,6 @@ from magitech_harness.agent.inbox import (
     ReactLoopInbox,
     inbox_projection_definition,
 )
-from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.agent.model_selection import (
     AgentModel,
     install_model_selection,
@@ -76,7 +75,6 @@ __all__ = [
     "AgentHandle",
     "AgentInbox",
     "AgentLoop",
-    "AgentLoopService",
     "AgentMeta",
     "AgentModel",
     "AgentOptions",

@@ -269,6 +269,28 @@ class LlmAdapter:
         raise NotImplementedError("LlmAdapter subclasses must implement stream()")
 
 
+class MockLlmAdapter(LlmAdapter):
+    """Deterministic offline adapter for the unified (pi-ai style) driver.
+
+    Mirrors :class:`MockLLMProvider` output ("Default mock response") so the
+    CLI fallback works on the new driver as it did on the retired legacy loop.
+    """
+
+    async def list_models(self, provider: str) -> list[LlmModelInfo]:
+        return [{"provider": provider, "id": "mock", "name": "mock"}]
+
+    async def stream(self, options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+        text = "Default mock response"
+        yield {"type": "block-start", "index": 0, "blockType": "text"}
+        yield {"type": "text-delta", "index": 0, "text": text}
+        yield {
+            "type": "block-end",
+            "index": 0,
+            "block": {"type": "text", "text": text},
+        }
+        yield {"type": "finish", "reason": {"kind": "stop"}}
+
+
 @dataclass(frozen=True)
 class PreparedLlmCall:
     """One model call whose config and adapter registration resolved together."""
