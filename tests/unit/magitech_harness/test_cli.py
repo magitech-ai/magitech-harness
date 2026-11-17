@@ -8,7 +8,6 @@ from unittest.mock import patch
 
 import pytest
 from anima import Context, EventMode
-from anima.loader import load_profile
 
 import magitech_harness
 from magitech_harness import check_bundle_entries, create_harness
@@ -404,6 +403,34 @@ async def test_main_async_component_command(
     captured = capsys.readouterr().out
     assert "Loaded components" in captured
     assert "test-listed-component (1.2.3)" in captured
+    # Bundle service rows are listed too, including Phase 3/4 services.
+    assert "Bundle service rows" in captured
+    assert "- context [bundle row]" in captured
+    assert "- compaction [bundle row]" in captured
+
+    # A context without a loader skips the bundle-row section.
+    def mock_create_no_loader(*args, **kwargs):
+        c = old_create(*args, **kwargs)
+        real_get = c.get
+
+        def get_without_loader(name, *a, **k):
+            if name == "loader":
+                return None
+            return real_get(name, *a, **k)
+
+        c.get = get_without_loader  # type: ignore[method-assign]
+        return c
+
+    monkeypatch.setattr("magitech_harness.cli.create_harness", mock_create_no_loader)
+
+    # The boot audit requires a loader; skip it for this loader-less probe.
+    async def noop_check(_ctx: Context) -> None:
+        return None
+
+    monkeypatch.setattr("magitech_harness.cli.check_bundle_entries", noop_check)
+    await main_async(["component", "list"])
+    captured = capsys.readouterr().out
+    assert "Bundle service rows" not in captured
 
 
 @pytest.mark.asyncio
@@ -494,6 +521,7 @@ async def test_main_async_boot_order_bundle_profile_fallback_dispatch(
 
     def spy_create(*args, **kwargs):
         order.append("create_harness")
+        seen["profile"] = kwargs.get("profile")
         return real_create(*args, **kwargs)
 
     monkeypatch.setattr("magitech_harness.cli.create_harness", spy_create)
@@ -503,12 +531,6 @@ async def test_main_async_boot_order_bundle_profile_fallback_dispatch(
         return check_bundle_entries(ctx)
 
     monkeypatch.setattr("magitech_harness.cli.check_bundle_entries", spy_audit)
-
-    def spy_load(ctx, path):
-        order.append("load_profile")
-        return load_profile(ctx, path)
-
-    monkeypatch.setattr("magitech_harness.cli.load_profile", spy_load)
 
     dummy_pkg = types.ModuleType("k5_order_provider_pkg")
 
@@ -536,9 +558,9 @@ async def test_main_async_boot_order_bundle_profile_fallback_dispatch(
     assert order == [
         "create_harness",
         "check_bundle_entries",
-        "load_profile",
         "dispatch",
     ]
+    assert seen["profile"] == str(profile_file)
     assert seen["providers"] == {"dummy_p"}
 
 

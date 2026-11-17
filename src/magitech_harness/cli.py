@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from anima import Context
-from anima.loader import load_profile
 
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
@@ -460,13 +459,9 @@ async def main_async(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     storage_path = Path(args.storage) if args.storage and args.storage.strip() else None
-    ctx = create_harness(storage_dir=storage_path)
+    ctx = create_harness(storage_dir=storage_path, profile=args.profile)
     await ctx.flush()
     check_bundle_entries(ctx)
-
-    if args.profile:
-        load_profile(ctx, args.profile)
-        await ctx.flush()
 
     if not ctx.llm.providers and not ctx.llm.list_providers():
         from magitech_harness.llm.service import MockLLMProvider
@@ -517,6 +512,15 @@ async def main_async(argv: list[str] | None = None) -> int:
         print(f"Loaded components ({len(components)}):")
         for manifest, _fiber in components.values():
             print(f"  - {manifest.name} ({manifest.version})")
+        loader = ctx.get("loader", None, strict=False)
+        if loader is not None:
+            entries = [e for e in loader.entries() if getattr(e, "options", None)]
+            print(f"Bundle service rows ({len(entries)}):")
+            for entry in entries:
+                name = entry.options.get("name", "?")
+                disabled = bool(entry.options.get("disabled"))
+                state = "disabled" if disabled else "mounted"
+                print(f"  - {entry.id} [bundle row] ({name}, {state})")
         return 0
 
     else:
