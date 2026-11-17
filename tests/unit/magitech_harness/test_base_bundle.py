@@ -229,6 +229,16 @@ EXPECTED_ROWS = [
         "name": "magitech_harness.agent.agent_loop:AgentLoop",
         "config": {"agents": []},
     },
+    {
+        "id": "repeat-tool-reminder-guard",
+        "name": "magitech_harness.tools.repeat_guard:apply",
+        "config": {"thresholds": [3, 5, 8]},
+    },
+    {
+        "id": "timeout-policy-guard",
+        "name": "magitech_harness.tools.timeout_guard:apply",
+        "config": {},
+    },
 ]
 
 

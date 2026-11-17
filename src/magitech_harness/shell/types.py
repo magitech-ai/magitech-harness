@@ -29,6 +29,9 @@ class ShellResult:
     timed_out: bool = False
     aborted: bool = False
     bytes_read: int = 0
+    truncated: bool = False
+    stdout_spill_path: str | None = None
+    stderr_spill_path: str | None = None
 
     def __iter__(self) -> Iterator[Any]:
         """Support 3-element tuple unpacking for backwards compatibility."""
