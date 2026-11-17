@@ -4,8 +4,9 @@
 
 - **Repository Role & Separation of Concerns**:
   - `magitech-harness` is the host runtime substrate and agent turn engine powered by `anima`.
-  - **Everything is a Component**: Contains **zero built-in domain tools** and **zero built-in model providers**.
-  - All domain tools, model providers, guardrails, and compaction policies reside in `mth-plugins`.
+  - **Everything is a Component**: Contains **zero built-in domain tools** and **zero default-mounted model providers**.
+  - All domain tools, guardrails, compaction policies, and single-vendor provider plugins (`openrouter-provider`, `pollinations-provider`) reside in `mth-plugins`.
+  - Exception — Tier 1 substrate: the multi-provider adapter `magitech_harness.llm.pi_ai` ships in-tree (ADR 0012) but is opt-in: no default bundle row mounts it (see `docs/adr/0012-tier-1-provider-substrate-in-harness.md`).
 - **Session Event-Sourcing Invariants**:
   - **Model-Visible ⟺ Logged**: Any data or prompt fragment that reaches an LLM request must be reconstructable from the session event log. A new model-visible input requires an explicit session event.
   - **Append-Only History**: The raw session log is immutable and append-only. Compaction checkpoints fold historical context for model projection (`derive_messages`), preserving the full event trace.
