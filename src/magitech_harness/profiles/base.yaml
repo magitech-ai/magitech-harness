@@ -25,6 +25,9 @@
 - id: context
   name: magitech_harness.context.service:ContextService
   config: {}
+- id: compaction
+  name: magitech_harness.compaction.service:CompactionService
+  config: {}
 - id: bash-local
   name: magitech_harness.shell.bash_local:LocalBashExecutor
   disabled: !!js process.platform === 'win32'

@@ -85,6 +85,11 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "compaction",
+        "name": "magitech_harness.compaction.service:CompactionService",
+        "config": {},
+    },
+    {
         "id": "bash-local",
         "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
         "disabled": {"__jsExpr": "process.platform === 'win32'"},
