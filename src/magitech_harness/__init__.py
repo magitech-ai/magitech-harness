@@ -18,7 +18,6 @@ from magitech_harness.agent.agent_loop import AgentLoop, FactoryOwnership
 from magitech_harness.agent.assistant_stream import AssistantStreamAttempt
 from magitech_harness.agent.cancellation import AbortController, AbortError, AbortSignal
 from magitech_harness.agent.constants import DEFAULT_MAX_PARALLEL_TOOL_CALLS
-from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.agent.react_loop import ReactLoopAgent
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.agent.runtime_context import RuntimeContextProjection
@@ -201,7 +200,6 @@ __all__ = [
     "AbortError",
     "AbortSignal",
     "AgentLoop",
-    "AgentLoopService",
     "AgentRegistry",
     "ApprovalRequest",
     "ApprovalService",

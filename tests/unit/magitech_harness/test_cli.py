@@ -3,6 +3,7 @@
 import asyncio
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import patch
 
@@ -19,7 +20,54 @@ from magitech_harness.cli import (
     run_repl,
 )
 from magitech_harness.llm.service import MockLLMProvider
-from magitech_harness.session.events import EventType, ToolCallData
+from magitech_harness.session.events import EventType, SessionEvent
+
+
+class _FakeReplAgent:
+    """Minimal unified-driver agent that replays scripted REPL turn behavior."""
+
+    def __init__(self, ctx: Any, session: Any, behavior: Any = None) -> None:
+        self.session = session
+        self._ctx = ctx
+        self._behavior = behavior
+        self.model = SimpleNamespace(current=lambda: None, select=lambda _sel: None)
+
+    def followup(self, message: Any) -> None:
+        if self._behavior is not None:
+            self._behavior(self._ctx, self.session)
+
+    async def when_idle(self) -> None:
+        return None
+
+    def cancel(self, cause: Any, options: Any = None) -> None:
+        if self._behavior is not None and getattr(self._behavior, "on_cancel", None):
+            self._behavior.on_cancel()
+
+
+def _install_fake_repl_agent(ctx: Any, behavior: Any = None) -> Any:
+    """Patch ``ctx.agents.create`` to return a scripted unified-driver agent."""
+    created: list[Any] = []
+
+    async def _fake_create(options: Any) -> Any:
+        session = ctx.sessions.create(str(options.get("sessionId", "repl-fake")))
+        agent = _FakeReplAgent(ctx, session, behavior)
+        created.append(agent)
+        return {"agent": agent, "dispose": lambda: None}
+
+    ctx.agents.create = _fake_create  # type: ignore[method-assign]
+    return created
+
+
+def _emit_stream(ctx: Any, text: str) -> None:
+    ctx.emit(
+        "agent/assistant-stream",
+        {
+            "frame": {
+                "type": "chunk",
+                "chunk": {"type": "text-delta", "index": 0, "text": text},
+            }
+        },
+    )
 
 
 class _MockProviderComponent:
@@ -110,34 +158,34 @@ async def test_repl_dispatcher_all_commands(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_repl_interactive_stream_and_tools() -> None:
-    """Verifies run_repl prompt loop with streamed chunks and tool events."""
+    """Verifies run_repl renders streamed chunks and tool events from the bus."""
     ctx = create_harness()
-    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
-    mock_llm: MockLLMProvider = ctx.llm.active_provider
-    tc = ToolCallData(call_id="c1", name="dummy_tool", arguments={"val": 1})
-    tc_err = ToolCallData(call_id="c2", name="error_tool", arguments={})
-    mock_llm.queue_response(text="Tool result needed", tool_calls=[tc, tc_err])
-    mock_llm.queue_response(text="Final answer")
-
-    # Register dummy tools
-    from magitech_harness.tools.definition import define_tool
-
-    ctx.tools.register(
-        define_tool(
-            name="dummy_tool",
-            description="dummy",
-            execute=lambda args: "dummy success",
+    def _behavior(repl_ctx: Any, repl_session: Any) -> None:
+        _emit_stream(repl_ctx, "Final answer")
+        repl_ctx.emit(
+            "session/event",
+            repl_session,
+            SessionEvent(
+                id="c1",
+                session_id=repl_session.id,
+                type=EventType.TOOL_CALL,
+                payload={"name": "dummy_tool", "arguments": {"val": 1}},
+            ),
         )
-    )
-    ctx.tools.register(
-        define_tool(
-            name="error_tool",
-            description="fails",
-            execute=lambda args: (_ for _ in ()).throw(ValueError("boom")),
+        repl_ctx.emit(
+            "session/event",
+            repl_session,
+            SessionEvent(
+                id="r1",
+                session_id=repl_session.id,
+                type=EventType.TOOL_RESULT,
+                payload={"name": "dummy_tool", "is_error": False},
+            ),
         )
-    )
+
+    _install_fake_repl_agent(ctx, behavior=_behavior)
 
     inputs = ["", "/help", "Run tool query", "interrupted_after"]
     input_idx = 0
@@ -152,30 +200,26 @@ async def test_run_repl_interactive_stream_and_tools() -> None:
             return res
         raise EOFError
 
-    out_lines = []
+    out_lines: list[str] = []
 
-    def mock_out(*args, **kwargs) -> None:
+    def mock_out(*args: Any, **kwargs: Any) -> None:
         out_lines.append(" ".join(str(a) for a in args))
 
     await run_repl(ctx, input_fn=mock_input, out_fn=mock_out)
 
     assert any("Tool Start" in line for line in out_lines)
-    assert any("Tool Complete" in line or "OK" in line for line in out_lines)
+    assert any("OK" in line for line in out_lines)
     assert any("Final answer" in line for line in out_lines)
 
 
 @pytest.mark.asyncio
 async def test_run_repl_signal_handler_unsupported_and_usage_event() -> None:
-    """Verifies run_repl when loop.add_signal_handler raises NotImplementedError and handles usage events."""
+    """Verifies run_repl when loop.add_signal_handler raises NotImplementedError."""
     ctx = create_harness()
-    ctx.use(_MockProviderComponent)
     await ctx.flush()
-
-    async def mock_stream_turn(session, prompt, **kwargs):
-        yield {"type": "usage", "usage": {"total_tokens": 100}}
-        yield {"type": "chunk", "text": "streamed reply"}
-
-    ctx.agent_loop.stream_turn = mock_stream_turn
+    _install_fake_repl_agent(
+        ctx, behavior=lambda repl_ctx, _s: _emit_stream(repl_ctx, "streamed reply")
+    )
 
     inputs = ["hello", "/exit"]
     input_idx = 0
@@ -203,13 +247,10 @@ async def test_run_repl_signal_handler_unsupported_and_usage_event() -> None:
 async def test_run_repl_remove_signal_handler_exception() -> None:
     """Verifies run_repl handles exception when loop.remove_signal_handler fails."""
     ctx = create_harness()
-    ctx.use(_MockProviderComponent)
     await ctx.flush()
-
-    async def mock_stream_turn(session, prompt, **kwargs):
-        yield {"type": "chunk", "text": "ok"}
-
-    ctx.agent_loop.stream_turn = mock_stream_turn
+    _install_fake_repl_agent(
+        ctx, behavior=lambda repl_ctx, _s: _emit_stream(repl_ctx, "ok")
+    )
 
     inputs = ["test", "/exit"]
     input_idx = 0
@@ -227,25 +268,40 @@ async def test_run_repl_remove_signal_handler_exception() -> None:
 
 @pytest.mark.asyncio
 async def test_run_repl_sigint_handler_invocation() -> None:
-    """Verifies that the registered SIGINT handler invokes sig.abort('SIGINT')."""
+    """Verifies that the registered SIGINT handler cancels the agent turn."""
     ctx = create_harness()
-    ctx.use(_MockProviderComponent)
     await ctx.flush()
 
     handler_ref: list[Any] = []
+    cancelled = {"value": False}
 
     def mock_add_signal_handler(sig_num: Any, callback: Any) -> None:
         handler_ref.append(callback)
 
-    async def mock_stream_turn(session: Any, prompt: Any, **kwargs: Any) -> Any:
+    def _behavior(repl_ctx: Any, _s: Any) -> None:
         if handler_ref:
             handler_ref[0]()
-        sig = kwargs.get("signal")
-        if sig:
-            sig.throw_if_aborted()
-        yield {"type": "chunk", "text": "never reached"}
 
-    ctx.agent_loop.stream_turn = mock_stream_turn  # type: ignore[assignment]
+    _install_fake_repl_agent(ctx, behavior=_behavior)
+
+    original_create = ctx.agents.create
+
+    async def _wrapped_create(options: Any) -> Any:
+        handle = await original_create(options)
+        agent = handle["agent"]
+
+        def _on_cancel(cause: Any = None) -> None:
+            cancelled["value"] = True
+
+        async def _abort_when_idle() -> None:
+            if cancelled["value"]:
+                raise AbortError("Cancelled by SIGINT")
+
+        agent.cancel = _on_cancel  # type: ignore[method-assign]
+        agent.when_idle = _abort_when_idle  # type: ignore[method-assign]
+        return handle
+
+    ctx.agents.create = _wrapped_create  # type: ignore[method-assign]
 
     inputs = ["cancel turn", "/exit"]
     input_idx = 0
@@ -269,10 +325,57 @@ async def test_run_repl_sigint_handler_invocation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_repl_abort_error_and_turn_exception() -> None:
-    """Verifies run_repl handling AbortError and generic Exception."""
+async def test_run_repl_ignores_foreign_session_and_non_text_chunks() -> None:
+    """REPL ignores other sessions' events and non-text stream frames."""
     ctx = create_harness()
-    ctx.use(_MockProviderComponent)
+    await ctx.flush()
+    other = ctx.sessions.create("other-session")
+
+    def _behavior(repl_ctx: Any, repl_session: Any) -> None:
+        # foreign session event (should be ignored)
+        repl_ctx.emit(
+            "session/event",
+            other,
+            SessionEvent(
+                id="x",
+                session_id=other.id,
+                type=EventType.TOOL_CALL,
+                payload={"name": "foreign"},
+            ),
+        )
+        # non-chunk frame (should be ignored)
+        repl_ctx.emit("agent/assistant-stream", {"frame": {"type": "start"}})
+        # chunk frame with a non-dict chunk (should be ignored)
+        repl_ctx.emit(
+            "agent/assistant-stream",
+            {"frame": {"type": "chunk", "chunk": "not-a-dict"}},
+        )
+        _emit_stream(repl_ctx, "shown")
+
+    _install_fake_repl_agent(ctx, behavior=_behavior)
+    out_lines: list[str] = []
+
+    inputs = ["go", "/exit"]
+    idx = [0]
+
+    def mock_input() -> str:
+        r = inputs[idx[0]]
+        idx[0] += 1
+        return r
+
+    await run_repl(
+        ctx,
+        input_fn=mock_input,
+        out_fn=lambda *a, **k: out_lines.append(" ".join(str(x) for x in a)),
+    )
+    assert any("shown" in line for line in out_lines)
+    assert not any("foreign" in line for line in out_lines)
+
+
+@pytest.mark.asyncio
+async def test_run_repl_abort_error_and_turn_exception() -> None:
+    """Verifies run_repl handling AbortError and generic Exception from when_idle."""
+    ctx = create_harness()
     await ctx.flush()
 
     inputs = ["abort me", "crash me", "/exit"]
@@ -284,25 +387,37 @@ async def test_run_repl_abort_error_and_turn_exception() -> None:
         input_idx += 1
         return res
 
-    out_lines = []
+    out_lines: list[str] = []
 
-    def mock_out(*args, **kwargs) -> None:
+    def mock_out(*args: Any, **kwargs: Any) -> None:
         out_lines.append(" ".join(str(a) for a in args))
 
-    # Mock stream_turn to throw AbortError on first call, Exception on second call
     call_count = 0
 
-    async def mock_stream_turn(session, prompt, **kwargs):
+    async def _flaky_idle() -> None:
         nonlocal call_count
         call_count += 1
         if call_count == 1:
             raise AbortError("Cancelled")
         raise RuntimeError("LLM exploded")
-        yield  # make it a generator
 
-    ctx.agent_loop.stream_turn = mock_stream_turn
+    original_create = ctx.agents.create
 
-    await run_repl(ctx, input_fn=mock_input, out_fn=mock_out)
+    async def _wrapped_create(options: Any) -> Any:
+        handle = await original_create(options)
+        handle["agent"].when_idle = _flaky_idle  # type: ignore[method-assign]
+        return handle
+
+    ctx.agents.create = _wrapped_create  # type: ignore[method-assign]
+
+    # Force SIGINT handler installation to succeed so the second turn
+    # deterministically exercises the already-installed path on all OSes.
+    loop = asyncio.get_running_loop()
+    with (
+        patch.object(loop, "add_signal_handler", return_value=None),
+        patch.object(loop, "remove_signal_handler", return_value=None),
+    ):
+        await run_repl(ctx, input_fn=mock_input, out_fn=mock_out)
 
     assert any("Turn cancelled by user" in line for line in out_lines)
     assert any("Error during turn: LLM exploded" in line for line in out_lines)

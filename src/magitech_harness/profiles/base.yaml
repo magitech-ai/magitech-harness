@@ -114,9 +114,6 @@
 - id: agent
   name: magitech_harness.agent.registry:AgentRegistry
   config: {}
-- id: agent-loop-legacy
-  name: magitech_harness.agent.loop:AgentLoopService
-  config: {}
 - id: agent-loop
   name: magitech_harness.agent.agent_loop:AgentLoop
   config:

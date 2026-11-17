@@ -401,6 +401,8 @@ class ReactLoopAgent:
                     "step": position["step"],
                     "signal": signal,
                     "modelSelection": selection,
+                    "agent": self,
+                    "session": self.session,
                 },
                 default_handler=_default_pre_step,
             )

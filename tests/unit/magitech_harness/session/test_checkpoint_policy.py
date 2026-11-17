@@ -17,10 +17,11 @@ from anima import Context
 
 from magitech_harness import create_harness
 from magitech_harness.agent.cancellation import AbortSignal
-from magitech_harness.llm.service import MockLLMProvider
+from magitech_harness.llm.service import MockLlmAdapter, MockLLMProvider
 from magitech_harness.llm.types import ModelChunk, ModelResponse
 from magitech_harness.session.events import EventType, ToolCallData
 from magitech_harness.tools.definition import define_tool
+from tests.agent_turn_helper import run_agent_turn, stream_agent_turn
 
 CANONICAL_ABORT_TEXT = "Error: tool call aborted before dispatch"
 CANONICAL_ABORT_ERROR = {
@@ -36,6 +37,7 @@ class _MockProviderComponent:
 
     def __init__(self, ctx: Context) -> None:
         ctx.llm.register_provider("mock", MockLLMProvider())
+        ctx.llm.register_adapter(["mock"], MockLlmAdapter())
 
 
 class RecordingProvider:
@@ -492,7 +494,6 @@ async def test_pre_step_failing_flush_never_enters_step(tmp_path: Path) -> None:
     ctx = create_harness(storage_dir=tmp_path)
     ctx.use(_MockProviderComponent)
     await ctx.flush()
-    session = ctx.sessions.create("pre-step-failure")
 
     async def failing_flush(flushed: Any) -> None:
         raise RuntimeError("disk unavailable")
@@ -500,11 +501,18 @@ async def test_pre_step_failing_flush_never_enters_step(tmp_path: Path) -> None:
     ctx.on("session/flush", failing_flush)
     mock_llm = ctx.llm.get_provider("mock")
 
-    with pytest.raises(RuntimeError, match="disk unavailable"):
-        await ctx.agent_loop.run_turn(session, "Hello agent")
+    result = await run_agent_turn(ctx, "Hello agent", session_id="pre-step-failure")
 
+    # The unified driver records the checkpoint failure as a turn/end
+    # error instead of raising; either way no step/model call follows.
+    assert result.reason is not None
+    assert result.reason.get("kind") == "error"
+    assert "disk unavailable" in result.reason.get("error", {}).get("message", "")
     assert mock_llm is not None
     assert mock_llm.call_history == []
+    assert not any(
+        event.type == EventType.ASSISTANT_MESSAGE for event in result.session.events
+    )
 
 
 @pytest.mark.asyncio
@@ -513,18 +521,18 @@ async def test_turn_end_performs_no_flush(tmp_path: Path) -> None:
     ctx = create_harness(storage_dir=tmp_path)
     ctx.use(_MockProviderComponent)
     await ctx.flush()
-    session = ctx.sessions.create("turn-end")
     flushes: list[str] = []
     ctx.on("session/flush", lambda s: flushes.append(s.session_id))
 
-    reply = await ctx.agent_loop.run_turn(session, "Hello agent")
+    result = await run_agent_turn(ctx, "Hello agent", session_id="turn-end")
+    session = result.session
 
-    assert reply == "Default mock response"
-    # Exactly one flush: the pre-step checkpoint. The turn/end boundary
-    # adds none, and the non-streaming model call carries no checkpoint.
-    assert flushes == [session.session_id]
+    assert result.text == "Default mock response"
+    # The unified driver checkpoints at pre-step and llm/stream; the
+    # turn/end boundary itself adds no flush.
+    assert flushes == [session.id, session.id]
     ctx.emit("turn/end", session, "turn-1")
-    assert flushes == [session.session_id]
+    assert flushes == [session.id, session.id]
 
 
 @pytest.mark.asyncio
@@ -533,16 +541,15 @@ async def test_stream_turn_flushes_at_pre_step_and_llm_stream(tmp_path: Path) ->
     ctx = create_harness(storage_dir=tmp_path)
     ctx.use(_MockProviderComponent)
     await ctx.flush()
-    session = ctx.sessions.create("stream-turn")
     flushes: list[str] = []
     ctx.on("session/flush", lambda s: flushes.append(s.session_id))
 
-    yielded = []
-    async for event in ctx.agent_loop.stream_turn(session, "Hello agent"):
-        yielded.append(event)
+    frames, session = await stream_agent_turn(
+        ctx, "Hello agent", session_id="stream-turn"
+    )
 
-    assert any(event["type"] == "chunk" for event in yielded)
-    assert flushes == [session.session_id, session.session_id]
+    assert any(frame.get("type") == "chunk" for frame in frames)
+    assert flushes == [session.id, session.id]
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,7 @@ from typing import Any
 from anima import Context
 
 from magitech_harness import check_bundle_entries, create_harness
-from magitech_harness.agent.cancellation import AbortError, AbortSignal
+from magitech_harness.agent.cancellation import AbortError
 from magitech_harness.agent.model_selection import install_model_selection
 from magitech_harness.llm.message import create_user_message
 from magitech_harness.llm.slug import parse_model_slug
@@ -69,6 +69,25 @@ def headless_exit_code(outcome: HeadlessOutcome) -> int:
     if outcome.reason is not None and outcome.reason.get("kind") == "completed":
         return 0
     return 1
+
+
+async def _create_cli_agent(
+    ctx: Context,
+    model: str | None = None,
+    session_id: str | None = None,
+) -> tuple[Any, Session]:
+    """Create an owned agent through the unified (Phase 3) driver.
+
+    All CLI paths use this helper so ``run``, ``repl``, and ``headless`` share
+    one driver, one event namespace, and one plugin surface.
+    """
+    provider, model_name = _resolve_headless_route(ctx, model)
+    options: dict[str, Any] = {
+        "sessionId": session_id or f"cli-{uuid.uuid4()}",
+        "agentOptions": {"provider": provider, "model": model_name},
+    }
+    handle = await ctx.agents.create(options)
+    return handle["agent"], handle["agent"].session
 
 
 async def _drain_and_flush(ctx: Context) -> None:
@@ -313,80 +332,106 @@ async def run_repl(
     input_fn: Any = None,
     out_fn: Any = print,
 ) -> None:
-    """Runs the interactive multi-turn REPL with streaming and cooperative cancellation."""
-    current_session = session or ctx.sessions.create()
+    """Run the interactive REPL on the unified (Phase 3) agent driver.
+
+    Streaming and tool activity are rendered from the driver's event bus
+    (``agent/assistant-stream`` and ``session/event``) so the REPL, ``run``,
+    and ``headless`` all consume the same event namespace and plugin surface.
+    """
+    agent, current_session = await _create_cli_agent(ctx, model=model)
     dispatcher = ReplDispatcher(ctx, current_session, model=model, out=out_fn)
 
     out_fn("✨ Magitech Harness (mth) Interactive REPL")
-    out_fn(
-        f"Session: {dispatcher.session.session_id} | Model: {dispatcher.model or '(default)'}"
-    )
+    out_fn(f"Session: {current_session.id} | Model: {dispatcher.model or '(default)'}")
     out_fn("Type /help for slash commands, Ctrl+C to cancel turn, Ctrl+D to exit.\n")
 
     reader = input_fn or (lambda: input("mth> "))
 
-    def _make_sigint_handler(sig: AbortSignal) -> Any:
+    def _on_stream(payload: dict[str, Any]) -> None:
+        frame = payload.get("frame") or {}
+        if frame.get("type") != "chunk":
+            return
+        chunk = frame.get("chunk") or {}
+        if isinstance(chunk, dict):
+            text = chunk.get("text")
+            if isinstance(text, str):
+                out_fn(text, end="", flush=True)
+
+    def _on_session_event(subject: Session, event: Any) -> None:
+        if subject is not current_session:
+            return
+        if event.type == EventType.TOOL_CALL:
+            payload = event.payload or {}
+            out_fn(
+                f"\n⚡ [Tool Start] {payload.get('name')}({payload.get('arguments')})"
+            )
+        elif event.type == EventType.TOOL_RESULT:
+            payload = event.payload or {}
+            status = "ERROR" if payload.get("is_error") else "OK"
+            out_fn(f"\n✔️ [{status}] {payload.get('name')}")
+
+    stop_stream = ctx.on("agent/assistant-stream", _on_stream)
+    stop_events = ctx.on("session/event", _on_session_event)
+
+    loop = asyncio.get_running_loop()
+    sig_installed = False
+
+    def _make_sigint_handler() -> Any:
         def _handler() -> None:
-            sig.abort("SIGINT")
+            agent.cancel({"kind": "user"})
 
         return _handler
 
-    while True:
-        try:
-            line = await asyncio.to_thread(reader)
-        except (EOFError, KeyboardInterrupt):
-            out_fn("\nGoodbye.")
-            break
-
-        line = line.strip()
-        if not line:
-            continue
-
-        if line.startswith("/"):
-            should_exit = await dispatcher.dispatch(line)
-            if should_exit:
+    try:
+        while True:
+            try:
+                line = await asyncio.to_thread(reader)
+            except (EOFError, KeyboardInterrupt):
+                out_fn("\nGoodbye.")
                 break
-            continue
 
-        signal = AbortSignal()
-        loop = asyncio.get_running_loop()
-        sig_installed = False
+            line = line.strip()
+            if not line:
+                continue
 
-        try:
-            import signal as py_signal
+            if line.startswith("/"):
+                should_exit = await dispatcher.dispatch(line)
+                if should_exit:
+                    break
+                continue
 
-            loop.add_signal_handler(py_signal.SIGINT, _make_sigint_handler(signal))
-            sig_installed = True
-        except (NotImplementedError, RuntimeError, AttributeError):
-            pass
-
-        try:
-            async for ev in ctx.agent_loop.stream_turn(
-                dispatcher.session, line, model=dispatcher.model, signal=signal
-            ):
-                if ev["type"] == "chunk":
-                    out_fn(ev["text"], end="", flush=True)
-                elif ev["type"] == "tool_start":
-                    out_fn(f"\n⚡ [Tool Start] {ev['name']}({ev['arguments']})")
-                elif ev["type"] == "tool_end":
-                    status = "ERROR" if ev.get("is_error") else "OK"
-                    out_fn(f"\n✔️ [{status}] {ev['name']} -> {ev['result']}")
-                elif ev["type"] == "usage":
-                    pass
-                else:
-                    out_fn("\n")
-        except AbortError:
-            out_fn("\n[Turn cancelled by user]")
-        except Exception as e:  # noqa: BLE001
-            out_fn(f"\n[Error during turn: {e}]")
-        finally:
-            if sig_installed:
+            if not sig_installed:
                 try:
                     import signal as py_signal
 
-                    loop.remove_signal_handler(py_signal.SIGINT)
-                except (RuntimeError, ValueError, OSError):
+                    loop.add_signal_handler(py_signal.SIGINT, _make_sigint_handler())
+                    sig_installed = True
+                except (NotImplementedError, RuntimeError, AttributeError):
                     pass
+
+            try:
+                agent.followup(
+                    create_user_message(
+                        content=[{"type": "text", "text": line}],
+                        source={"kind": "user"},
+                    )
+                )
+                await agent.when_idle()
+                out_fn("")
+            except AbortError:
+                out_fn("\n[Turn cancelled by user]")
+            except Exception as e:  # noqa: BLE001
+                out_fn(f"\n[Error during turn: {e}]")
+    finally:
+        stop_stream()
+        stop_events()
+        if sig_installed:
+            try:
+                import signal as py_signal
+
+                loop.remove_signal_handler(py_signal.SIGINT)
+            except (RuntimeError, ValueError, OSError):
+                pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -464,20 +509,29 @@ async def main_async(argv: list[str] | None = None) -> int:
     check_bundle_entries(ctx)
 
     if not ctx.llm.providers and not ctx.llm.list_providers():
-        from magitech_harness.llm.service import MockLLMProvider
+        from magitech_harness.llm.service import MockLlmAdapter, MockLLMProvider
 
         ctx.llm.register_provider("mock", MockLLMProvider())
+        ctx.llm.register_adapter(["mock"], MockLlmAdapter())
 
     cmd = args.command
 
     if cmd == "run":
-        session = ctx.sessions.create()
         print(f"\n🚀 Running prompt: '{args.prompt}'")
-        res = await ctx.agent_loop.run_turn(session, args.prompt, model=args.model)
+        agent, session = await _create_cli_agent(ctx, model=args.model)
+        first_seq = len(session.events)
+        agent.followup(
+            create_user_message(
+                content=[{"type": "text", "text": args.prompt}],
+                source={"kind": "user"},
+            )
+        )
+        await agent.when_idle()
         await _drain_and_flush(ctx)
-        print(f"\n🤖 Assistant: {res}")
+        outcome = summarize_headless_outcome(session, first_seq)
+        print(f"\n🤖 Assistant: {outcome.text}")
         print(f"📝 Session Events Recorded: {len(session.events)}")
-        location = ctx.sessions.location(session.session_id)
+        location = ctx.sessions.location(session.id)
         if location is not None:
             print(f"💾 Persisted to: {location}")
         return 0

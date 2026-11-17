@@ -27,12 +27,11 @@ from magitech_harness import (
     create_harness,
     derive_messages,
 )
-from magitech_harness.agent.loop import AgentLoopService
 from magitech_harness.approval.service import ApprovalService
 from magitech_harness.cli import main_async
 from magitech_harness.components.layers import LayerResolutionService
 from magitech_harness.components.service import ComponentService
-from magitech_harness.llm.service import LLMService
+from magitech_harness.llm.service import LLMService, MockLlmAdapter
 from magitech_harness.session.persistence_jsonl import (
     JsonlSessionPersistenceService,
 )
@@ -46,6 +45,7 @@ from magitech_harness.shell.bash_local import LocalBashExecutor
 from magitech_harness.shell.pwsh_local import LocalPwshExecutor
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.service import ToolService
+from tests.agent_turn_helper import run_agent_turn
 
 
 class _MockProviderComponent:
@@ -55,6 +55,7 @@ class _MockProviderComponent:
 
     def __init__(self, ctx: Context) -> None:
         ctx.llm.register_provider("mock", MockLLMProvider())
+        ctx.llm.register_adapter(["mock"], MockLlmAdapter())
 
 
 def _base_bundle_path() -> Path:
@@ -120,7 +121,6 @@ def test_bundle_boot_exposes_nine_services_and_owned_components() -> None:
     assert isinstance(ctx.layers, LayerResolutionService)
     assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.sessions, SessionService)
-    assert isinstance(ctx.agent_loop, AgentLoopService)
     assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
     assert isinstance(ctx.sessionTitle, SessionTitleService)
     assert isinstance(ctx.sessionPersistence, JsonlSessionPersistenceService)
@@ -163,16 +163,21 @@ async def test_replay_reproduces_identical_message_sequence(
     ctx = create_harness(storage_dir=tmp_path)
     ctx.use(_MockProviderComponent)
     await ctx.flush()
-    session = ctx.sessions.create("k6-replay")
-    result = await ctx.agent_loop.run_turn(session, "Explain quantum computing simply")
-    assert result == "Default mock response"
+    result = await run_agent_turn(
+        ctx, "Explain quantum computing simply", session_id="k6-replay"
+    )
+    session = result.session
+    assert result.text == "Default mock response"
     await ctx.sessionTitle.drain()
     assert len(_provider_title_events(session)) == 1
     await ctx.sessions.flush()
     first_types = [event.type for event in session.events]
     first_messages = derive_messages(session.events)
-    # Release the write lease before the second boot opens the same log.
-    assert ctx.sessions.close("k6-replay") is True
+    # Release the agent's ownership and write lease before the second boot.
+    await result.close()
+    # The unified driver's disposer already detaches the session; close()
+    # returning False here means no live lease remains.
+    ctx.sessions.close("k6-replay")
 
     ctx2 = create_harness(storage_dir=tmp_path)
     await ctx2.flush()
@@ -203,9 +208,11 @@ async def test_full_bundle_reversed_still_wires(
     ctx.use(_MockProviderComponent)
     await ctx.flush()
     assert ctx.sessions.projection_cache is not None
-    session = ctx.sessions.create("k6-reversed")
-    result = await ctx.agent_loop.run_turn(session, "Explain quantum computing simply")
-    assert result == "Default mock response"
+    result = await run_agent_turn(
+        ctx, "Explain quantum computing simply", session_id="k6-reversed"
+    )
+    session = result.session
+    assert result.text == "Default mock response"
     await ctx.sessionTitle.drain()
     titles = _provider_title_events(session)
     assert len(titles) == 1
@@ -230,11 +237,11 @@ async def test_child_harness_from_bundle_runs_a_turn(tmp_path: Path) -> None:
     child = create_harness(storage_dir=tmp_path / "child")
     child.use(_MockProviderComponent)
     await child.flush()
-    session = child.sessions.create("k6-child")
-    result = await child.agent_loop.run_turn(
-        session, "Explain quantum computing simply"
+    result = await run_agent_turn(
+        child, "Explain quantum computing simply", session_id="k6-child"
     )
-    assert result == "Default mock response"
+    session = result.session
+    assert result.text == "Default mock response"
     await child.sessionTitle.drain()
     titles = _provider_title_events(session)
     assert len(titles) == 1
@@ -298,7 +305,7 @@ async def test_check_bundle_entries_fails_before_flush_on_loop_path() -> None:
     with pytest.raises(RuntimeError, match="no bundle entries"):
         check_bundle_entries(ctx)
     await ctx.flush()
-    assert len(list(loader.entries())) == 34
+    assert len(list(loader.entries())) == 33
     check_bundle_entries(ctx)
 
 
@@ -314,10 +321,10 @@ def test_check_bundle_entries_sync_path_settles_at_load() -> None:
     loader = LoaderService(ctx, {"filename": _base_bundle_path()})
     loader.load(_base_bundle_path())
     entries = list(loader.entries())
-    assert len(entries) == 34
+    assert len(entries) == 33
     enabled = [entry for entry in entries if not entry.disabled]
     disabled = [entry for entry in entries if entry.disabled]
-    assert len(enabled) == 33
+    assert len(enabled) == 32
     assert len(disabled) == 1
     assert all(
         entry.fiber is not None and entry.fiber.state is FiberState.ACTIVE

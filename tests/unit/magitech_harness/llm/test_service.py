@@ -27,7 +27,12 @@ from magitech_harness.llm import (
     deep_freeze,
     resolve_retry_policy,
 )
-from magitech_harness.llm.service import LLMService, MockLLMProvider, NoProviderError
+from magitech_harness.llm.service import (
+    LLMService,
+    MockLlmAdapter,
+    MockLLMProvider,
+    NoProviderError,
+)
 from magitech_harness.llm.types import ModelResponse
 from magitech_harness.session.events import ToolCallData
 
@@ -437,6 +442,18 @@ async def test_llm_adapter_async_base_defaults() -> None:
     prepared = await adapter.prepare_call("p", "m")
     assert isinstance(prepared, PreparedAdapterCall)
     assert prepared.model == {"provider": "p", "id": "m", "name": "m"}
+
+
+@pytest.mark.asyncio
+async def test_mock_llm_adapter_lists_models_and_streams_default_text() -> None:
+    """The CLI offline adapter advertises its model and streams the fallback text."""
+    adapter = MockLlmAdapter()
+    assert await adapter.list_models("mock") == [
+        {"provider": "mock", "id": "mock", "name": "mock"}
+    ]
+    chunks = [chunk async for chunk in adapter.stream({})]
+    assert chunks[-1]["type"] == "finish"
+    assert any(c.get("text") == "Default mock response" for c in chunks)
 
 
 def test_register_adapter_validation_disposal_and_replace() -> None:
