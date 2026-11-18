@@ -1189,3 +1189,212 @@ async def test_cli_headless_subcommand_exit_codes_and_output(
             return default
 
     await _drain_and_flush(_MinCtx())  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_session_show_blank_id_fails_loud(tmp_path: Path, capsys) -> None:
+    """A blank session id is rejected cleanly, not with a raw path traceback."""
+    code = await main_async(["--storage", str(tmp_path), "session", "show", "   "])
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "session id must not be blank" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_component_list_reflects_evaluated_disabled_state(
+    tmp_path: Path, capsys
+) -> None:
+    """component list shows evaluated bool, not raw !!js expression truthiness."""
+    await main_async(["--storage", str(tmp_path), "component", "list"])
+    captured = capsys.readouterr().out
+    # On the current platform exactly one shell executor is disabled.
+    import sys as _sys
+
+    if _sys.platform == "win32":
+        assert "- bash-local [bundle row]" in captured and "disabled" in captured
+    else:
+        bash_line = next(
+            (
+                l
+                for l in captured.splitlines()
+                if l.strip().startswith("- bash-local [bundle row]")
+            ),
+            "",
+        )
+        pwsh_line = next(
+            (
+                l
+                for l in captured.splitlines()
+                if l.strip().startswith("- pwsh-local [bundle row]")
+            ),
+            "",
+        )
+        assert "mounted" in bash_line, bash_line
+        assert "disabled" in pwsh_line, pwsh_line
+
+
+@pytest.mark.asyncio
+async def test_cli_headless_script_drives_tool_loop(tmp_path: Path, capsys) -> None:
+    """--script drives a scripted tool-call turn through the installed CLI."""
+    import json as _json
+
+    script = tmp_path / "turns.json"
+    script.write_text(
+        _json.dumps(
+            {
+                "provider": "scripted",
+                "model": "script",
+                "turns": [
+                    [
+                        {
+                            "type": "tool-call-delta",
+                            "index": 0,
+                            "id": "c1",
+                            "name": "whatever",
+                            "argumentsDelta": "{}",
+                        },
+                        {"type": "finish", "reason": {"kind": "tool-calls"}},
+                    ],
+                    [
+                        {"type": "text-delta", "index": 0, "text": "FINAL TEXT"},
+                        {"type": "finish", "reason": {"kind": "stop"}},
+                    ],
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = await main_async(
+        [
+            "--storage",
+            str(tmp_path / "store"),
+            "headless",
+            "--script",
+            str(script),
+            "do it",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "FINAL TEXT" in captured.out
+    # Persisted session carries the tool-call block (tool itself unregistered
+    # yields an error result, but the loop structure is exercised).
+    log = next((tmp_path / "store").rglob("session.v4.jsonl"))
+    from magitech_harness.session.store import Session
+
+    session = Session.load(log)
+    contents = _json.dumps([e.payload for e in session.events])
+    assert "tool-call" in contents
+    assert "tool/result" in [e.type for e in session.events]
+
+
+@pytest.mark.asyncio
+async def test_cli_headless_script_bad_file(tmp_path: Path, capsys) -> None:
+    code = await main_async(
+        [
+            "--storage",
+            str(tmp_path),
+            "headless",
+            "--script",
+            str(tmp_path / "nope.json"),
+            "x",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "invalid script" in captured.err
+
+
+@pytest.mark.asyncio
+async def test_component_discover_and_install(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    records = [
+        {
+            "name": "foo-tool",
+            "version": "1.0.0",
+            "description": "does foo",
+            "target": "foo.component:apply",
+        }
+    ]
+    monkeypatch.setattr(
+        "magitech_harness.components.discovery.discover_installed_components",
+        lambda: records,
+    )
+    await main_async(["--storage", str(tmp_path), "component", "discover"])
+    out = capsys.readouterr().out
+    assert "Available components (1)" in out
+    assert "foo-tool (1.0.0)" in out
+
+    code = await main_async(
+        ["--storage", str(tmp_path), "component", "install", "foo-tool"]
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert '  - "foo.component:apply"' in out
+
+    code = await main_async(
+        ["--storage", str(tmp_path), "component", "install", "missing"]
+    )
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "no such component: missing" in err
+
+    # A record with no target is rejected cleanly.
+    monkeypatch.setattr(
+        "magitech_harness.components.discovery.discover_installed_components",
+        lambda: [{"name": "no-target"}],
+    )
+    code = await main_async(
+        ["--storage", str(tmp_path), "component", "install", "no-target"]
+    )
+    assert code == 1
+    assert "no mount target" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_cli_headless_script_with_existing_provider(
+    tmp_path: Path, capsys, monkeypatch
+) -> None:
+    """--script still registers its adapter when a legacy provider exists."""
+    import json as _json
+
+    old_create = create_harness
+    seen = {}
+
+    def create_with_provider(*args, **kwargs):
+        from magitech_harness.llm.service import MockLLMProvider
+
+        class _ProviderComponent:
+            from typing import ClassVar
+
+            inject: ClassVar[list[str]] = ["llm"]
+
+            def __init__(self, c):
+                c.llm.register_provider("mock", MockLLMProvider())
+
+        kwargs["prepare"] = lambda c: c.use(_ProviderComponent)
+        ctx = old_create(*args, **kwargs)
+        seen["ctx"] = ctx
+        return ctx
+
+    monkeypatch.setattr("magitech_harness.cli.create_harness", create_with_provider)
+    script = tmp_path / "t.json"
+    script.write_text(
+        _json.dumps(
+            {
+                "turns": [
+                    [
+                        {"type": "text-delta", "index": 0, "text": "OK"},
+                        {"type": "finish", "reason": {"kind": "stop"}},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = await main_async(
+        ["--storage", str(tmp_path), "headless", "--script", str(script), "x"]
+    )
+    assert code == 0
+    assert "OK" in capsys.readouterr().out

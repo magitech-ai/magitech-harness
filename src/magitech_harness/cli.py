@@ -481,6 +481,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Emit final outcome as JSON",
     )
+    headless_parser.add_argument(
+        "--script",
+        dest="script",
+        help=(
+            "JSON file of scripted LLM stream chunks to drive the turn "
+            "(overrides --model; offline tool-loop testing)"
+        ),
+    )
 
     # session subcommand
     session_parser = subparsers.add_parser(
@@ -497,6 +505,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     component_sub = component_parser.add_subparsers(dest="component_command")
     component_sub.add_parser("list", help="List installed/loaded components")
+    component_sub.add_parser("discover", help="List components from installed packages")
+    install_p = component_sub.add_parser(
+        "install", help="Print the profile row for a component"
+    )
+    install_p.add_argument("name", help="Component name to install")
 
     return parser
 
@@ -515,7 +528,24 @@ async def main_async(argv: list[str] | None = None) -> int:
     await ctx.flush()
     check_bundle_entries(ctx)
 
-    if not ctx.llm.providers and not ctx.llm.list_providers():
+    script_spec = None
+    if getattr(args, "script", None):
+        from magitech_harness.llm.scripted import ScriptedLlmAdapter, load_script
+
+        try:
+            script_spec = load_script(Path(args.script))
+        except (OSError, ValueError) as exc:
+            print(f"mth: invalid script: {exc}", file=sys.stderr)
+            return 1
+        # Title generation uses the legacy llm.call path, so keep a provider.
+        if not ctx.llm.providers:
+            from magitech_harness.llm.service import MockLLMProvider
+
+            ctx.llm.register_provider("mock", MockLLMProvider())
+        ctx.llm.register_adapter(
+            [script_spec.provider], ScriptedLlmAdapter(script_spec)
+        )
+    elif not ctx.llm.providers and not ctx.llm.list_providers():
         from magitech_harness.llm.service import MockLlmAdapter, MockLLMProvider
 
         ctx.llm.register_provider("mock", MockLLMProvider())
@@ -524,16 +554,22 @@ async def main_async(argv: list[str] | None = None) -> int:
     cmd = args.command
 
     if cmd == "headless":
+        effective_model = args.model
+        if script_spec is not None:
+            effective_model = f"{script_spec.provider}/{script_spec.model}"
         return await _run_headless(
             ctx,
             args.task,
-            model=args.model,
+            model=effective_model,
             session_id=args.session_id,
             json_mode=bool(args.json),
         )
 
     elif cmd == "session":
         if args.session_command == "show":
+            if not args.session_id or not args.session_id.strip():
+                print("mth: session id must not be blank", file=sys.stderr)
+                return 1
             sess = ctx.sessions.read(args.session_id)
             if sess:
                 print(f"Session '{sess.session_id}' ({len(sess.events)} events):")
@@ -549,6 +585,41 @@ async def main_async(argv: list[str] | None = None) -> int:
         return 0
 
     elif cmd == "component":
+        sub = args.component_command
+        if sub == "discover":
+            from magitech_harness.components.discovery import (
+                discover_installed_components,
+            )
+
+            available = discover_installed_components()
+            print(f"Available components ({len(available)}):")
+            for record in available:
+                version = record.get("version", "")
+                description = record.get("description", "")
+                suffix = f" ({version})" if version else ""
+                print(f"  - {record['name']}{suffix} — {description}")
+            return 0
+        if sub == "install":
+            from magitech_harness.components.discovery import (
+                discover_installed_components,
+            )
+
+            available = discover_installed_components()
+            match = next((r for r in available if r.get("name") == args.name), None)
+            if match is None:
+                print(f"mth: no such component: {args.name}", file=sys.stderr)
+                return 1
+            target = match.get("target")
+            if not target:
+                print(
+                    f"mth: component '{args.name}' has no mount target",
+                    file=sys.stderr,
+                )
+                return 1
+            print("Add this row to your profile (or pass it via --profile):")
+            print(f'  - "{target}"')
+            return 0
+
         components = ctx.components.mounted_components
         print(f"Loaded components ({len(components)}):")
         for manifest, _fiber in components.values():
@@ -559,7 +630,9 @@ async def main_async(argv: list[str] | None = None) -> int:
             print(f"Bundle service rows ({len(entries)}):")
             for entry in entries:
                 name = entry.options.get("name", "?")
-                disabled = bool(entry.options.get("disabled"))
+                # entry.disabled is the evaluated boolean; the raw option may
+                # be a JS expression node whose truthiness is always True.
+                disabled = entry.disabled
                 state = "disabled" if disabled else "mounted"
                 print(f"  - {entry.id} [bundle row] ({name}, {state})")
         return 0
