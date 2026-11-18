@@ -87,7 +87,8 @@ Hunt these in any doc; remove them before merge:
 - Subsystems: [`subsystems/`](subsystems/README.md)
 - Cookbook: [`cookbook/`](cookbook/README.md)
 - Catalogs: [`tool-catalog.md`](tool-catalog.md), [`config-catalog.md`](config-catalog.md), [`cli-help.md`](cli-help.md)
-- Conformance: [`conformance/acc-06.md`](conformance/acc-06.md)
+- Conformance: [`conformance/acc-06.md`](conformance/acc-06.md),
+  [`conformance/e2e-live-report.md`](conformance/e2e-live-report.md)
 - Benchmarks: [`../bench/README.md`](../bench/README.md) (outside `docs/`)
 
 Unresolved questions: none.
