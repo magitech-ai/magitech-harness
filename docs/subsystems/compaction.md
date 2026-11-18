@@ -49,9 +49,15 @@ preserved. A result at or below the threshold is left untouched.
 
 ## Configuration
 
-The compaction guard reads `max_tokens` (default `8000`) and `target_ratio`
-(default `0.5`, an event-count fraction). The pruner budgets are code defaults.
-These are Python-port choices; the reference resolves thresholds per model from
-a context window, which is not yet mirrored here.
+The compaction guard resolves token budgets from the model's context window
+(`resolveCompactSpec`): `thresholdRatio` defaults to `0.8`, `retainRatio` to
+`0.16`, and `headroomTokens` to `65_536`. Exact `(provider, model)` overrides
+are supported via `modelPolicies`. The context window comes from the adapter's
+resolved model info, then the durable `request/context` event, then a configured
+or fallback constant. `threshold_tokens = min(contextWindow × thresholdRatio,
+messageBudget − headroom)` and `retain_tokens = floor(messageBudget ×
+retainRatio)`. The cut keeps a verbatim tail of roughly `retain_tokens` before
+falling back to a pairing-safe boundary. The pruner budgets above are code
+defaults.
 
 Unresolved questions: none.

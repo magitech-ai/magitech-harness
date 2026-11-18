@@ -142,9 +142,9 @@ C4_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     (
         "FIND-15",
         "done",
-        "compaction surface replace + pruner marker",
+        "compaction surface replace, token budgets (0.8/0.16), and wired pruner",
         (),
-        "mth-plugins: tests/unit/mth_plugins/guards/test_compaction.py::test_compact_session_success; harness: unit/magitech_harness/compaction/test_service.py::test_compaction_service_registers_engines_and_pruners",
+        "mth-plugins: tests/unit/mth_plugins/guards/test_compaction.py::test_compact_session_with_token_spec, tests/unit/mth_plugins/guards/compaction/test_config.py::test_budget_formulas, tests/unit/mth_plugins/guards/test_compaction.py::test_component_registers_pruner_and_prunes_session; harness: unit/magitech_harness/compaction/test_service.py::test_compaction_service_registers_engines_and_pruners",
     ),
     (
         "FIND-16",

@@ -60,10 +60,22 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 server's `inputSchema` as the argument schema. They call `McpClient.call_tool`
 and are disposed when the server is removed.
 
+## Filesystem search
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `glob` | `pattern` (req), `path` | Finds files whose paths match a glob pattern under the workspace root, including hidden files, in modification-time order; caps results and reports the cap. A pattern with no slash matches the basename at any depth. |
+| `grep` | `pattern` (req), `path`, `include` | Searches file contents with a regex, returning matching lines with line numbers grouped by file; caps matches and reports the cap. `include` filters files by glob. |
+
+**[Python]** The reference drives ripgrep via subprocess; this port uses
+`pathlib` and Python `re` so the wheel stays self-contained and cross-platform.
+The observable contract (pattern/arguments, discovery, caps, markers) matches;
+ripgrep-specific regex extensions are not supported.
+
 ## Names that are not tools
 
 The following appear in approval allow-lists or subagent presets but are not
-registered tools in either repository: `list_files`, `find`, `grep`, `read_url`,
+registered tools in either repository: `list_files`, `find`, `read_url`,
 `search_web`. See [approval](subsystems/approval.md).
 
 Unresolved questions: none.
