@@ -110,14 +110,19 @@ names who accepted its reason.
 | 20 findings as live conformance cases | DONE | `test_c4_conformance.py` (FIND-01..20) |
 | ACC-06 bidirectional wire round-trip | DONE | `test_cross_tooling_roundtrip.py`, conformance ACC-06; see `docs/conformance/acc-06.md` |
 | Spill, session-query, telemetry, credentials, schedule (P7 landed early) | DONE | Conformance-covered; Phase 7 tail but landed and proven |
+| History scrub clean in tree AND history (§12 done-state) | PARTIAL | Tree is scrub-clean in all three repos (0 findings). Two 2026-11-07 commit messages in harness history remain: one port-claim phrase and one reference-kernel naming phrase. A partial force-push was judged risky **and** incomplete (16 remote branches, 14 open anima PRs, GitHub pull refs not rewritable); a complete rewrite needs the separate delete/recreate operation. **Malcom accepted (2026-11-18)** recording this as a PARTIAL to keep 1.0 moving rather than performing a destructive rewrite he was uneasy about. Rehearsal verified and preserved; full rewrite deferred to a separately-authorized operation. |
 
 ## Acceptance summary
 
 - In-scope MISSING: **none**.
 - In-scope DIVERGED: **none**.
 - PARTIAL rows: all carry reasons accepted by Malcom (ratified §8, §8 rulings,
-  or pinned conformance rows) — none accepted by an agent on his behalf.
-- Criterion 1 therefore holds at the rc.1 audit target.
+  pinned conformance rows, or his 2026-11-18 scrub decision) — none accepted
+  by an agent on his behalf.
+- Criterion 1 (the parity map) therefore holds at the rc.1 audit target.
+- §12 scrub done-state is **PARTIAL with Malcom's accepted reason** (above);
+  the two residual commit messages are the only known deviation from the
+  binary "clean in tree AND history" line.
 
 ## Post-1.0 appendix — rc.3 drift (NOT counted against 1.0)
 
