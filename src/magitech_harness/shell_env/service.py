@@ -16,6 +16,7 @@ from anima.core import _access_context
 from magitech_harness.subprocess.types import MAGITECH_ENV_PREFIX
 
 MAGITECH_HOME_ENV = "MAGITECH_HOME"
+MAGITECH_AGENTS_HOME_ENV = "MAGITECH_AGENTS_HOME"
 MAGITECH_SHELL_KEY = f"{MAGITECH_ENV_PREFIX}SHELL"
 MAGITECH_SESSION_ID_KEY = f"{MAGITECH_ENV_PREFIX}SESSION_ID"
 MAGITECH_PROFILE_KEY = f"{MAGITECH_ENV_PREFIX}PROFILE"
@@ -24,6 +25,7 @@ MAGITECH_PROFILE_DIR_KEY = f"{MAGITECH_ENV_PREFIX}PROFILE_DIR"
 RESERVED_SHELL_ENV_KEYS = frozenset(
     {
         MAGITECH_HOME_ENV,
+        MAGITECH_AGENTS_HOME_ENV,
         MAGITECH_SHELL_KEY,
         MAGITECH_SESSION_ID_KEY,
         MAGITECH_PROFILE_KEY,
@@ -79,6 +81,20 @@ def resolve_magitech_home(configured: str | None = None) -> str:
     return str((Path.home() / ".magitech").resolve())
 
 
+def resolve_magitech_agents_home(configured: str | None = None) -> str:
+    """Resolve explicit config, ``$MAGITECH_AGENTS_HOME``, or ``~/.agents``."""
+    raw = (
+        configured
+        if configured is not None
+        else os.environ.get(MAGITECH_AGENTS_HOME_ENV)
+    )
+    if raw is not None:
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("shell-env: agentsHome must be a non-empty string")
+        return str(Path(raw).expanduser().resolve())
+    return str((Path.home() / ".agents").resolve())
+
+
 def _extract_session_id(execution: Any) -> str | None:
     agent = (
         execution.get("agent")
@@ -109,7 +125,10 @@ class ShellEnvRegistry(Service):
         raw = config or {}
         if "magitechHome" in raw and not isinstance(raw["magitechHome"], str):
             raise ValueError("shell-env: magitechHome must be a string")
+        if "agentsHome" in raw and not isinstance(raw["agentsHome"], str):
+            raise ValueError("shell-env: agentsHome must be a string")
         self._magitech_home = resolve_magitech_home(raw.get("magitechHome"))
+        self._agents_home = resolve_magitech_agents_home(raw.get("agentsHome"))
         self._contributors: dict[str, _ContributorRecord] = {}
         self._key_owners: dict[str, str] = {}
 
@@ -174,6 +193,7 @@ class ShellEnvRegistry(Service):
         """Compute immutable sorted ``MAGITECH_*`` environment map for *execution*."""
         values: dict[str, str] = {
             MAGITECH_HOME_ENV: self._magitech_home,
+            MAGITECH_AGENTS_HOME_ENV: self._agents_home,
             MAGITECH_SHELL_KEY: "1",
         }
         session_id = _extract_session_id(execution)
@@ -234,6 +254,7 @@ def apply(ctx: Context, config: Mapping[str, Any] | None = None) -> ShellEnvRegi
 
 
 __all__ = [
+    "MAGITECH_AGENTS_HOME_ENV",
     "MAGITECH_HOME_ENV",
     "MAGITECH_PROFILE_DIR_KEY",
     "MAGITECH_PROFILE_KEY",
@@ -245,5 +266,6 @@ __all__ = [
     "ShellEnvVariable",
     "ShellEnvVariableInfo",
     "apply",
+    "resolve_magitech_agents_home",
     "resolve_magitech_home",
 ]

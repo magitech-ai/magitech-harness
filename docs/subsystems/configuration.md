@@ -12,9 +12,13 @@ plus an optional profile. Keep them separate.
 `ctx.layers` resolves files from lowest to highest precedence:
 
 1. **global** — `/etc/magitech` or `$MAGITECH_GLOBAL_DIR`
-2. **user** — `~/.agents/`
-3. **agent** — `~/.agents/agents/<name>/`
+2. **user** — `$MAGITECH_AGENTS_HOME` or `~/.agents/`
+3. **agent** — `<shared root>/agents/<name>/`
 4. **project** — `<project>/.agents/`
+
+The two homes are the harness home (`$MAGITECH_HOME`, default `~/.magitech`)
+and the shared agents root (`$MAGITECH_AGENTS_HOME`, default `~/.agents`). Both
+resolvers treat a blank env value as unset and expand a configured path.
 
 `find_first` searches highest to lowest; `find_all` returns base to highest. The
 project layer is used only when an explicit `project_path` is supplied — an
@@ -24,14 +28,12 @@ ambient `Path.cwd()` is never used as a project layer. See
 ## Bundle and profile composition
 
 `create_harness()` mounts the shipped base bundle and optionally overlays a
-`profile` argument. Overlay semantics (`profiles/merge.py`): a known row id
-overlays the base row's keys; an unknown id appends a row; duplicate ids,
-non-string ids, and rows without a resolvable `name` fail at boot. The
-`MAGITECH_SESSIONS_DIR` interpolation value is computed from the caller's
-`storage_dir` and supplied to the loader.
-
-**[Python]** The reference uses a `--patch` CLI chain; this runtime uses a
-shipped base bundle plus `--profile`. There is no `--patch` flag.
+`profile` argument, then any `patches` in order. Overlay semantics
+(`profiles/merge.py`): a known row id overlays the base row's keys; an unknown
+id appends a row; duplicate ids, non-string ids, and rows without a resolvable
+`name` fail at boot. Layers resolve as bundle → profile → each `--patch` in argv
+order; a later layer wins. The `MAGITECH_SESSIONS_DIR` interpolation value is
+computed from the caller's `storage_dir` and supplied to the loader.
 
 ## Where values live
 
@@ -46,9 +48,9 @@ shipped base bundle plus `--profile`. There is no `--patch` flag.
 - **Environment** supplies `MAGITECH_GLOBAL_DIR` (read directly) and
   `MAGITECH_SESSIONS_DIR` (interpolated by the loader). Provider credentials use
   the env var named by each provider's `apiKeyEnv`. `MAGITECH_HOME`,
-  `MAGITECH_SHELL`, `MAGITECH_SESSION_ID`, `MAGITECH_PROFILE`, and
-  `MAGITECH_PROFILE_DIR` are reserved overlay keys managed by the shell-env
-  registry.
+  `MAGITECH_AGENTS_HOME`, `MAGITECH_SHELL`, `MAGITECH_SESSION_ID`,
+  `MAGITECH_PROFILE`, and `MAGITECH_PROFILE_DIR` are reserved overlay keys
+  managed by the shell-env registry.
 
 Unknown configuration keys fail loud at the owning service; there is no global
 "ignore unknown keys" fallback.

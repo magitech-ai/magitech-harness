@@ -437,23 +437,10 @@ async def test_main_async_fails_loud_on_bad_bundle(tmp_path: Path, monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_main_async_run_command(tmp_path: Path, capsys) -> None:
-    """Verifies main_async with 'run' subcommand."""
-    argv = [
-        "--storage",
-        str(tmp_path),
-        "run",
-        "Calculate 2+2",
-    ]
-    await main_async(argv)
-    captured = capsys.readouterr().out
-    assert "Running prompt: 'Calculate 2+2'" in captured
-    assert "Assistant: Default mock response" in captured
-
-    # Test with empty storage
-    await main_async(["--storage", "", "run", "no storage run"])
-    captured_empty = capsys.readouterr().out
-    assert "Running prompt: 'no storage run'" in captured_empty
+async def test_main_async_run_subcommand_removed(tmp_path: Path) -> None:
+    """The verb-first 'run' subcommand is dropped per ratified CLI form (no alias)."""
+    with pytest.raises(SystemExit):
+        await main_async(["--storage", str(tmp_path), "run", "Calculate 2+2"])
 
 
 @pytest.mark.asyncio
@@ -580,6 +567,31 @@ async def test_main_async_profile_and_default_repl(tmp_path: Path, monkeypatch) 
     assert repl_started == [True]
 
 
+@pytest.mark.asyncio
+async def test_main_async_patch_overlay_applied(tmp_path: Path, monkeypatch) -> None:
+    """--patch overlays are applied after the profile through create_harness."""
+    patch_file = tmp_path / "patch.yaml"
+    patch_file.write_text(
+        "- id: fs\n  name: magitech_harness.fs.local:LocalFileSystem\n  config:\n    cwd: /patched\n",
+        encoding="utf-8",
+    )
+    captured = {}
+
+    real_create = create_harness
+
+    def spy_create(*args, **kwargs):
+        captured["patches"] = kwargs.get("patches")
+        return real_create(*args, **kwargs)
+
+    async def no_repl(ctx, model=None):
+        return None
+
+    monkeypatch.setattr("magitech_harness.cli.create_harness", spy_create)
+    monkeypatch.setattr("magitech_harness.cli.run_repl", no_repl)
+    await main_async(["--patch", str(patch_file)])
+    assert captured["patches"] == [str(patch_file)]
+
+
 def test_main_execution(monkeypatch) -> None:
     """Verifies main() wraps asyncio.run, and KeyboardInterrupt handling."""
     called = []
@@ -589,7 +601,7 @@ def test_main_execution(monkeypatch) -> None:
         called.append(True)
 
     monkeypatch.setattr("asyncio.run", mock_run)
-    monkeypatch.setattr(sys, "argv", ["mth", "run", "hi"])
+    monkeypatch.setattr(sys, "argv", ["mth", "headless", "hi"])
     main()
     assert called == [True]
 
@@ -732,7 +744,7 @@ async def test_main_async_drains_titles_before_flush(
         return ctx
 
     monkeypatch.setattr("magitech_harness.cli.create_harness", spy_create)
-    await main_async(["--storage", str(tmp_path), "run", "hello world"])
+    await main_async(["--storage", str(tmp_path), "headless", "hello world"])
     assert "title_drain" in order
     assert "sessions_flush" in order
     assert order.index("title_drain") < order.index("sessions_flush")

@@ -75,7 +75,8 @@ the loader supplies the value.
 |---|---|---|
 | `MAGITECH_SESSIONS_DIR` | loader interpolation | Session, persistence, and projection-cache roots; unset → memory-only |
 | `MAGITECH_GLOBAL_DIR` | `layers.py` | Overrides `/etc/magitech` as the global layer |
-| `MAGITECH_HOME`, `MAGITECH_SHELL`, `MAGITECH_SESSION_ID`, `MAGITECH_PROFILE`, `MAGITECH_PROFILE_DIR` | shell-env registry | Reserved overlay keys for child processes |
+| `MAGITECH_AGENTS_HOME` | `layers.py` | Overrides `~/.agents` as the shared agents root |
+| `MAGITECH_HOME`, `MAGITECH_AGENTS_HOME`, `MAGITECH_SHELL`, `MAGITECH_SESSION_ID`, `MAGITECH_PROFILE`, `MAGITECH_PROFILE_DIR` | shell-env registry | Reserved overlay keys for child processes |
 | provider `apiKeyEnv` names | provider substrate | Credential env var; missing → `MISSING_CREDENTIAL` |
 
 Unresolved questions: none.

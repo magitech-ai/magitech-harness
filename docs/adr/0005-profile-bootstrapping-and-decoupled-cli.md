@@ -32,10 +32,13 @@ deliberately during the all-plugin kernel rework:
 1. `create_harness` loads the default bundle rows and settles them.
 2. The boot audit (`check_bundle_entries`) fails loud on any row that
    did not activate.
-3. A user `--profile` loads after the bundle rows.
+3. A user `--profile` loads after the bundle rows, then any `--patch`
+   overlays in argv order (bundle → profile → patches).
 4. When no provider is registered, the offline mock provider registers
    as the fallback.
-5. Dispatch runs (`run`, `session`, `component`, or the REPL).
+5. Dispatch runs (`headless`, `session`, `component`, or the REPL). The
+   verb-first `run` form was later dropped per the ratified CLI decision;
+   `headless` is the single one-shot command.
 
 The bootstrapper shape in the Decision is set aside, not silently
 replaced: this amendment records that the `main_async` sequence is the

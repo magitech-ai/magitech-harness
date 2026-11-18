@@ -252,17 +252,16 @@ async def test_child_harness_from_bundle_runs_a_turn(tmp_path: Path) -> None:
 async def test_cli_commands_end_to_end_on_row_boot(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The CLI drives run, session list/show, component list, and repl.
+    """The CLI drives headless, session list/show, component list, and repl.
 
-    One storage directory, four commands, one boot shape each: ``run``
+    One storage directory, four commands, one boot shape each: ``headless``
     records the turn, ``session list`` names it, ``session show``
     prints it, ``component list`` reports the empty component set, and
     the repl lists the stored session before exiting.
     """
-    await main_async(["--storage", str(tmp_path), "run", "Calculate 2+2"])
-    run_out = capsys.readouterr().out
-    assert "Running prompt: 'Calculate 2+2'" in run_out
-    assert "Assistant: Default mock response" in run_out
+    await main_async(["--storage", str(tmp_path), "headless", "Calculate 2+2"])
+    headless_out = capsys.readouterr().out
+    assert "Default mock response" in headless_out
 
     await main_async(["--storage", str(tmp_path), "session", "list"])
     list_out = capsys.readouterr().out

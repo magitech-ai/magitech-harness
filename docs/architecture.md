@@ -36,7 +36,8 @@ A profile is a declarative bundle of component rows. `create_harness()`
    [`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml).
 4. Run an optional `prepare(ctx)` hook.
 5. Load the base rows; if a `profile` argument was supplied, merge its rows over
-   the base rows with `profiles/merge.py`.
+   the base rows with `profiles/merge.py`, then merge each `patches` entry in
+   order.
 6. `flush()` the context so mounted services and components initialize.
 
 Merge semantics: a known row id overlays the base row's keys in place; an
@@ -45,9 +46,9 @@ resolvable `name` fail at boot — there is no silent fallback. See
 [adr/0005](adr/0005-profile-bootstrapping-and-decoupled-cli.md) and the
 [config catalog](config-catalog.md).
 
-**[Python]** The reference constructs profiles through a CLI `--patch` chain.
-This runtime uses a shipped base bundle plus an optional `--profile` overlay;
-there is no `--patch` flag.
+**[Python]** The reference uses a CLI `--patch` chain. This runtime resolves
+layers as shipped base bundle → `--profile` → each `--patch` in argv order, all
+through the same id-keyed row merge.
 
 ## Composition of the default bundle
 

@@ -78,7 +78,7 @@ async def _create_cli_agent(
 ) -> tuple[Any, Session]:
     """Create an owned agent through the unified (Phase 3) driver.
 
-    All CLI paths use this helper so ``run``, ``repl``, and ``headless`` share
+    All CLI paths use this helper so ``repl`` and ``headless`` share
     one driver, one event namespace, and one plugin surface.
     """
     provider, model_name = _resolve_headless_route(ctx, model)
@@ -335,8 +335,8 @@ async def run_repl(
     """Run the interactive REPL on the unified (Phase 3) agent driver.
 
     Streaming and tool activity are rendered from the driver's event bus
-    (``agent/assistant-stream`` and ``session/event``) so the REPL, ``run``,
-    and ``headless`` all consume the same event namespace and plugin surface.
+    (``agent/assistant-stream`` and ``session/event``) so the REPL and
+    ``headless`` consume the same event namespace and plugin surface.
     """
     agent, current_session = await _create_cli_agent(ctx, model=model)
     dispatcher = ReplDispatcher(ctx, current_session, model=model, out=out_fn)
@@ -453,15 +453,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--model",
         help="Model slug to use (e.g. 'openrouter/anthropic/claude-3.5-sonnet')",
     )
+    parser.add_argument(
+        "--patch",
+        action="append",
+        default=[],
+        dest="patch",
+        help="Extra patch-list overlay applied after the profile (repeatable)",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
     # repl subcommand
     subparsers.add_parser("repl", help="Start the interactive REPL shell")
-
-    # run subcommand
-    run_parser = subparsers.add_parser("run", help="Run a one-shot prompt")
-    run_parser.add_argument("prompt", help="Prompt to execute")
 
     # headless subcommand
     headless_parser = subparsers.add_parser(
@@ -504,7 +507,11 @@ async def main_async(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     storage_path = Path(args.storage) if args.storage and args.storage.strip() else None
-    ctx = create_harness(storage_dir=storage_path, profile=args.profile)
+    ctx = create_harness(
+        storage_dir=storage_path,
+        profile=args.profile,
+        patches=args.patch or None,
+    )
     await ctx.flush()
     check_bundle_entries(ctx)
 
@@ -515,26 +522,6 @@ async def main_async(argv: list[str] | None = None) -> int:
         ctx.llm.register_adapter(["mock"], MockLlmAdapter())
 
     cmd = args.command
-
-    if cmd == "run":
-        print(f"\n🚀 Running prompt: '{args.prompt}'")
-        agent, session = await _create_cli_agent(ctx, model=args.model)
-        first_seq = len(session.events)
-        agent.followup(
-            create_user_message(
-                content=[{"type": "text", "text": args.prompt}],
-                source={"kind": "user"},
-            )
-        )
-        await agent.when_idle()
-        await _drain_and_flush(ctx)
-        outcome = summarize_headless_outcome(session, first_seq)
-        print(f"\n🤖 Assistant: {outcome.text}")
-        print(f"📝 Session Events Recorded: {len(session.events)}")
-        location = ctx.sessions.location(session.id)
-        if location is not None:
-            print(f"💾 Persisted to: {location}")
-        return 0
 
     if cmd == "headless":
         return await _run_headless(

@@ -10,6 +10,7 @@ import pytest
 from anima import Context
 
 from magitech_harness.shell_env import (
+    MAGITECH_AGENTS_HOME_ENV,
     MAGITECH_HOME_ENV,
     MAGITECH_PROFILE_DIR_KEY,
     MAGITECH_PROFILE_KEY,
@@ -17,6 +18,7 @@ from magitech_harness.shell_env import (
     MAGITECH_SHELL_KEY,
     ShellEnvRegistry,
     apply,
+    resolve_magitech_agents_home,
     resolve_magitech_home,
 )
 
@@ -48,12 +50,32 @@ def test_resolve_magitech_home_precedence_and_validation(
         resolve_magitech_home("   ")
 
 
+def test_resolve_magitech_agents_home_precedence_and_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    explicit = tmp_path / "explicit-agents"
+    assert resolve_magitech_agents_home(str(explicit)) == str(explicit.resolve())
+
+    env_dir = tmp_path / "env_agents"
+    monkeypatch.setenv(MAGITECH_AGENTS_HOME_ENV, str(env_dir))
+    assert resolve_magitech_agents_home() == str(env_dir.resolve())
+
+    monkeypatch.delenv(MAGITECH_AGENTS_HOME_ENV, raising=False)
+    assert resolve_magitech_agents_home() == str((Path.home() / ".agents").resolve())
+
+    with pytest.raises(ValueError, match="non-empty string"):
+        resolve_magitech_agents_home("   ")
+
+
 def test_shell_env_registry_registration_conflicts_and_collect(
     tmp_path: Path,
 ) -> None:
     root = Context()
     with pytest.raises(ValueError, match="must be a string"):
         ShellEnvRegistry(root, {"magitechHome": 123})
+
+    with pytest.raises(ValueError, match="agentsHome must be a string"):
+        ShellEnvRegistry(Context(), {"agentsHome": 123})
 
     root2 = Context()
     reg = apply(root2, {"magitechHome": str(tmp_path / "h")})
@@ -113,6 +135,7 @@ def test_shell_env_registry_registration_conflicts_and_collect(
     assert isinstance(base_snap, type(reg.collect()))
     assert dict(base_snap) == {
         "MAGITECH_A": "va",
+        "MAGITECH_AGENTS_HOME": str((Path.home() / ".agents").resolve()),
         "MAGITECH_HOME": str((tmp_path / "h").resolve()),
         "MAGITECH_SHELL": "1",
         "MAGITECH_Z": "vz",

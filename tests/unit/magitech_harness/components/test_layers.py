@@ -41,6 +41,23 @@ def test_layer_resolution_global_dir_env_override(tmp_path: Path) -> None:
         assert service.get_global_dir() == custom_global
 
 
+def test_layer_resolution_agents_home_env_override(tmp_path: Path) -> None:
+    """MAGITECH_AGENTS_HOME overrides the shared root; blank is treated as unset."""
+    ctx = Context()
+    service = LayerResolutionService(ctx)
+    custom_root = tmp_path / "shared_agents"
+
+    with patch.dict(os.environ, {"MAGITECH_AGENTS_HOME": str(custom_root)}):
+        assert service.get_user_dir() == custom_root.resolve()
+        assert (
+            service.get_agent_dir("reviewer")
+            == custom_root.resolve() / "agents" / "reviewer"
+        )
+
+    with patch.dict(os.environ, {"MAGITECH_AGENTS_HOME": "  "}):
+        assert service.get_user_dir() == Path.home() / ".agents"
+
+
 def test_layer_resolution_get_layers_tiers(tmp_path: Path) -> None:
     """Verifies get_layers returns appropriate ConfigLayer tiers in base-to-highest order."""
     ctx = Context()

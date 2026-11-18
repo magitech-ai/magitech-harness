@@ -230,3 +230,50 @@ def test_profile_components_key_must_be_list() -> None:
     """A components-document profile with a non-list components key fails loud."""
     with pytest.raises(ValueError, match="'components' must be a list"):
         create_harness(profile={"components": "nope"})
+
+
+async def test_patch_overlays_apply_after_profile_in_order() -> None:
+    """Extra patch overlays resolve after the profile, in argv order."""
+    # Profile sets cwd to A; first patch overrides to B; second patch to C.
+    profile = [
+        {
+            "id": "fs",
+            "name": "magitech_harness.fs.local:LocalFileSystem",
+            "config": {"cwd": "/layer-a"},
+        }
+    ]
+    patch_b = [
+        {
+            "id": "fs",
+            "name": "magitech_harness.fs.local:LocalFileSystem",
+            "config": {"cwd": "/layer-b"},
+        }
+    ]
+    patch_c = [
+        {
+            "id": "fs",
+            "name": "magitech_harness.fs.local:LocalFileSystem",
+            "config": {"cwd": "/layer-c"},
+        }
+    ]
+    ctx = create_harness(profile=profile, patches=[patch_b, patch_c])
+    await ctx.flush()
+    fs = ctx.get("fs", None, strict=False)
+    assert isinstance(fs, LocalFileSystem)
+    target = await fs.resolve("file.txt")
+    assert "layer-c" in Path(target["targetKey"]).parts
+
+
+async def test_patches_empty_is_noop() -> None:
+    """An empty patches list behaves as no overlays."""
+    ctx = create_harness(patches=[])
+    await ctx.flush()
+    assert ctx.get("fs", None, strict=False) is not None
+
+
+def test_patch_path_document_must_be_list(tmp_path: Path) -> None:
+    """A patch file whose document is not a row list fails loud."""
+    patch_file = tmp_path / "bad-patch.yaml"
+    patch_file.write_text("just a string\n", encoding="utf-8")
+    with pytest.raises(TypeError, match="must be a list"):
+        create_harness(patches=[str(patch_file)])

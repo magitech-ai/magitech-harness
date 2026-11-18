@@ -24,7 +24,7 @@ Without a configured provider the runtime has no model to call; the CLI wires a
 ## Run and inspect
 
 ```sh
-uv run mth --storage .sessions run "Hello"
+uv run mth --storage .sessions headless "Hello"
 uv run mth --storage .sessions session list
 uv run mth --storage .sessions session show <id>
 ```

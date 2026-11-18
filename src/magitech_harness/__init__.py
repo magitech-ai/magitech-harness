@@ -6,7 +6,7 @@ __version__ = "0.2.0"
 
 import asyncio
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +132,7 @@ def create_harness(
     *,
     profile: Path | str | list[Any] | dict[str, Any] | None = None,
     prepare: Callable[[Context], None] | None = None,
+    patches: Sequence[Path | str | list[Any] | dict[str, Any]] | None = None,
 ) -> Context:
     """Factory creating a standard Context populated with core Harness services.
 
@@ -154,6 +155,8 @@ def create_harness(
 
     Args:
         storage_dir: Optional base directory to persist session JSONL files.
+        profile: Optional profile overlay applied after the base bundle.
+        patches: Extra overlay sources applied after the profile, in order.
         prepare: Optional host setup called with the context after the
             loader installs and before the bundle loads, so before any
             row activates.
@@ -188,6 +191,10 @@ def create_harness(
         base_rows = load_yaml(base_stream)
     if profile is not None:
         base_rows = merge_bundle_rows(base_rows, profile_rows_from_source(profile))
+    # Extra patch overlays apply after the profile, in argv order: the
+    # default bundle -> profile -> --patch layers resolve deterministically.
+    for patch in patches or ():
+        base_rows = merge_bundle_rows(base_rows, profile_rows_from_source(patch))
     loader.load(base_rows, env=env)
     _settle_default_bundle(ctx, loader)
 
