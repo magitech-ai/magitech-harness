@@ -88,5 +88,6 @@ Hunt these in any doc; remove them before merge:
 - Cookbook: [`cookbook/`](cookbook/README.md)
 - Catalogs: [`tool-catalog.md`](tool-catalog.md), [`config-catalog.md`](config-catalog.md), [`cli-help.md`](cli-help.md)
 - Conformance: [`conformance/acc-06.md`](conformance/acc-06.md)
+- Benchmarks: [`../bench/README.md`](../bench/README.md) (outside `docs/`)
 
 Unresolved questions: none.
