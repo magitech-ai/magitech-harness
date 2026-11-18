@@ -39,7 +39,14 @@ class LayerResolutionService(Service):
         return self.DEFAULT_GLOBAL_DIR
 
     def get_user_dir(self) -> Path:
-        """Returns the user configuration directory path (~/.agents)."""
+        """Shared agents root: ``$MAGITECH_AGENTS_HOME`` else ``~/.agents``.
+
+        A blank env value is treated as unset, matching the harness-home
+        resolver; an explicit value is expanded and resolved.
+        """
+        env_val = os.environ.get("MAGITECH_AGENTS_HOME")
+        if env_val and env_val.strip():
+            return Path(env_val).expanduser().resolve()
         return Path.home() / ".agents"
 
     def get_agent_dir(self, agent_name: str | None = None) -> Path | None:

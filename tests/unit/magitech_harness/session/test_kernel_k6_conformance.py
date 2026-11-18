@@ -189,10 +189,10 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     (
         "K6-CLI",
         "done",
-        "CLI run / repl / session list / session show / component list driven end to end on the row boot",
+        "CLI headless / repl / session list / session show / component list driven end to end on the row boot; verb-first run dropped",
         (
             "unit/magitech_harness/test_kernel_k6.py::test_cli_commands_end_to_end_on_row_boot",
-            "unit/magitech_harness/test_cli.py::test_main_async_run_command",
+            "unit/magitech_harness/test_cli.py::test_main_async_run_subcommand_removed",
             "unit/magitech_harness/test_cli.py::test_main_async_session_commands",
             "unit/magitech_harness/test_cli.py::test_main_async_component_command",
         ),

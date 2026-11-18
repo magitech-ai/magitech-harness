@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from magitech_harness.shell_env.service import (
+    MAGITECH_AGENTS_HOME_ENV,
     MAGITECH_HOME_ENV,
     MAGITECH_PROFILE_DIR_KEY,
     MAGITECH_PROFILE_KEY,
@@ -14,10 +15,12 @@ from magitech_harness.shell_env.service import (
     ShellEnvVariable,
     ShellEnvVariableInfo,
     apply,
+    resolve_magitech_agents_home,
     resolve_magitech_home,
 )
 
 __all__ = [
+    "MAGITECH_AGENTS_HOME_ENV",
     "MAGITECH_HOME_ENV",
     "MAGITECH_PROFILE_DIR_KEY",
     "MAGITECH_PROFILE_KEY",
@@ -29,5 +32,6 @@ __all__ = [
     "ShellEnvVariable",
     "ShellEnvVariableInfo",
     "apply",
+    "resolve_magitech_agents_home",
     "resolve_magitech_home",
 ]

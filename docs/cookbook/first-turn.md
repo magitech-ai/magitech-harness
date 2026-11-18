@@ -42,7 +42,7 @@
 4. Alternatively, use the CLI for an offline smoke test with the mock provider:
 
    ```sh
-   uv run mth --storage .sessions run "What is the capital of France?"
+   uv run mth --storage .sessions headless "What is the capital of France?"
    ```
 
 ## Verify
