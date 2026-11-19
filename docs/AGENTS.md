@@ -32,7 +32,7 @@ with links to their owner.
 | `docs/upgrade-guide/<version>/` | Per-release externally perceptible breaking changes | Unreleased plans |
 
 **[Python]** The reference generates its catalogs from TypeScript source with
-`cordis-surface` regions and freshness gates. We do not port that generator; our
+generated projections and freshness gates. Our
 catalogs are maintained by hand from source and are checked against the code in
 the docs review. Each catalog page states its source of truth and the check used.
 

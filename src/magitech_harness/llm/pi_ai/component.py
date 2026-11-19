@@ -102,7 +102,7 @@ def apply(
     component's fiber, the directory entries and adapter routes are
     atomically re-resolved from the fiber's live config and re-registered
     only when the facts actually changed (atomic replace, never
-    dispose-then-register, matching the reference implementation). A bare
+    dispose-then-register, matching the documented contract). A bare
     mount with zero routes stays dormant (directory only).
 
     Args:

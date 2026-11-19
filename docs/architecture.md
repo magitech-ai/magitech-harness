@@ -20,7 +20,7 @@ event bus (observers, waterfalls, scoped emit), the effect/disposer registry,
 and fiber-local context. Sessions are the durable substrate; the kernel is not a
 persistence layer.
 
-**[Python]** The reference runtime is built on Cordis; the Python port builds on
+**[Python]** The Python runtime builds on the Anima micro-kernel; see
 `anima`. The seam vocabulary (mount, emit, waterfall, dispose) is equivalent;
 the package name is not. See [adr/0001](adr/0001-event-sourced-sessions-with-compaction-seam.md).
 

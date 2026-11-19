@@ -21,7 +21,7 @@ and records the result rather than leaving it implicit.
 Environment: harness at `main` after C0–C3; reference pinned at
 `fcc0ad462172522aaf5c93a7b2e01f6b9f0b0159`; Python 3.12 / uv; pnpm 12.21.0 and
 node v26.13.1 available (a `packageManager` pin of 11.28.5 is not installed and
-`corepack` is absent, so a from-source build of the reference tooling is not a
+`corepack` is absent, so a from-source build of the other tooling is not a
 reproducible gate here).
 
 | Check | Command / method | Result |
@@ -40,7 +40,7 @@ wire-format level.
 ## Not covered
 
 A live `harness → reference runtime → harness` run against a built install of
-the reference tooling is not reproducible in this environment (no matching
+a built-install run is not reproducible in this environment (no matching
 pnpm, no corepack, no built wheel). It was already retired in-repo. This record
 does not claim it; it records the wire-format and recorded-fixture evidence that
 is runnable and green. The fresh parity-map re-audit (C6) treats the reference
