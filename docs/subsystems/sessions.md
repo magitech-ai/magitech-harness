@@ -23,7 +23,7 @@ Core types include the turn and step boundaries (`turn/start`, `turn/end`,
 `compaction/prune`, `compaction/end`, `compaction/summary`), jobs, model
 selection, permission presets, sandbox mode, session title, todo, and more.
 
-**[Python]** `read` retired event type `session/compaction` is deliberately not
+**[Python]** The retired event type `session/compaction` is deliberately not
 a known type; new summaries are written as `compaction/summary`.
 
 ## Surface types and projection

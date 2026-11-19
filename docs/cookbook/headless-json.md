@@ -13,8 +13,8 @@
    uv run mth --storage .sessions headless "Summarize the repository" --json
    ```
 
-2. Capture the output as newline-delimited JSON if a downstream tool consumes
-   it:
+2. Redirect the single JSON object to a file if a downstream tool consumes it
+   (the output is one object, not a JSONL stream):
 
    ```sh
    uv run mth headless "Summarize the repository" --json > result.jsonl

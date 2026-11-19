@@ -13,6 +13,8 @@ We enforce the principle "Everything is a Component":
 1. `magitech-harness` contains zero built-in domain tools and zero built-in model providers.
 2. Services such as `LocalShellService` (`ctx.shell`) act strictly as internal execution infrastructure for components, and never register themselves as tools onto `ctx.tools`.
 3. All domain tools (`fs-tool`, `bash-tool`), guardrails (`truncation-guard`, `compaction-guard`), and model providers (`openrouter-provider`, `pollinations-provider`) reside exclusively in the `mth-plugins` marketplace repository.
+
+**Current guard ownership (see the [guard-ownership table](../architecture.md#guard-ownership)):** the approval, repeat-reminder, and timeout guards are native rows in `profiles/base.yaml`; `truncation-guard`, `compaction-guard`, and `workspace-trust-gate` remain marketplace components.
 4. The core harness defines only the service protocols (`LLMProvider`, `ToolDefinition`, `ToolService`, `LLMService`).
 
 ## Consequences

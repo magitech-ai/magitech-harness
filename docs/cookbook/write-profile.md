@@ -51,6 +51,7 @@ shows the effective rows.
 fail at boot; there is no silent fallback. Unknown config keys fail at the owning
 service. See [configuration](../subsystems/configuration.md).
 
-**[Python]** Layers resolve as shipped bundle → `--profile` → each `--patch`
-in argv order. `--patch` is repeatable and applied after the profile; overlay
-flags precede the subcommand (for example `mth --patch p.yaml headless "task"`).
+**[Python]** The composition overlay chain is shipped bundle → `--profile` →
+each `--patch` in argv order; see [configuration](../subsystems/configuration.md#bundle-and-profile-composition-overlay-chain).
+`--patch` is repeatable and applied after the profile; overlay flags precede the
+subcommand (for example `mth --patch p.yaml headless "task"`).

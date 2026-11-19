@@ -4,7 +4,7 @@
 
 The approval subsystem decides whether a tool call may proceed and records an
 audit pair for every decision. The default bundled policy is `ask`; the guard
-is mounted as `approval-guard` in the base bundle.
+is the native `approval-guard` row in the base bundle (see [Guard ownership](../architecture.md#guard-ownership)).
 
 ## Policy
 
@@ -34,7 +34,8 @@ workspace trust gate (adr/0011); there is no Electron desktop approval UI.
 
 ## Trust and workspace gates
 
-Workspace trust is handled by a separate gate in `mth-plugins` (`guards/trust`),
+Workspace trust is handled by a separate marketplace gate in `mth-plugins`
+(`guards/trust`, opt-in, not mounted by the default bundle — see [Guard ownership](../architecture.md#guard-ownership)),
 backed by a JSON trust store. Trust and approval are distinct: trust decides
 whether a workspace is accepted; approval decides whether a specific call
 proceeds.

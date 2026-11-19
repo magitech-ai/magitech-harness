@@ -1,4 +1,8 @@
 # End-to-end live test report — installed wheel (2026-11-18)
+> **Status:** point-in-time record of the 2026-11-18 run against 0.2.0 wheels;
+> current shipped versions are 0.3.0 with `anima>=0.3,<0.4`. The two FAILs
+> below were fixed and re-verified (see the follow-up section and
+> [`release-notes/v0.3.0.md`](../release-notes/v0.3.0.md)).
 
 Validation of the **installed wheels**, driven as an end-user would — CLI
 subprocesses and the installed Python API, with no sibling source checkout on
@@ -25,8 +29,8 @@ installed-package agent turn and seams; plugin catalog discovery.
 FAIL 1 — clean install from the wheel fails dependency resolution: the harness
 wheel declares `anima>=0.1,<0.2` while the anima wheel is 0.2.0, so a plain
 `pip install magitech_harness` reports "no solution". The rest of the suite
-ran with `--no-deps` plus explicit runtime dependencies. This is the version-pin
-fix addressed by the 1.0 release.
+ran with `--no-deps` plus explicit runtime dependencies. This was the version-pin
+fix addressed by the 0.3.0 release (see [`release-notes/v0.3.0.md`](../release-notes/v0.3.0.md)).
 
 FAIL 2 — the marketplace `index.json` was absent from the installed plugin
 wheel, so `mth_plugins.index.load_index()` failed. Runtime component discovery

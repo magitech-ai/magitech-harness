@@ -23,11 +23,13 @@ marketplace (`approval-guard`, `compaction-guard`, `truncation-guard`) plus
    (post-execute) → compaction-guard (post-turn). Each guard may deny; denial
    short-circuits subsequent guards.
 3. **Audit Events**: Each guard emits its decision via `ctx.emit` on the
-   corresponding event (`approval/asked`, `approval/decided`, `tools/repeat-reminder`,
+   corresponding event (`approval/asked`, `approval/decided`, `repeat-tool-reminder`,
    `compaction/start`, `compaction/end`). Denials are always audited.
 4. **Fail-Closed Default**: Absence of a guard or service (e.g. no
    `ctx.approvals`) defaults to deny for mutating tools; safe read tools
    (read_file, grep, etc.) bypass approval but still respect the trust gate.
+
+**Current guard ownership:** approval, repeat-reminder, and timeout guards are now native base-bundle rows; see the [guard-ownership table](../architecture.md#guard-ownership). `truncation-guard`, `compaction-guard`, and `workspace-trust-gate` remain marketplace components.
 
 ## Consequences
 - **Positive**: A single, well-ordered guard chain prevents policy conflicts

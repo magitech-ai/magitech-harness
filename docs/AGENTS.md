@@ -30,6 +30,7 @@ with links to their owner.
 | `docs/user/` | Product-facing guides for end users | Generated tables, contributor procedures |
 | `docs/tool-catalog.md`, `docs/config-catalog.md`, `docs/cli-help.md` | Exhaustive generated-style references for the shipped surface | Hand-edited drift from source; rationale |
 | `docs/upgrade-guide/<version>/` | Per-release externally perceptible breaking changes | Unreleased plans |
+| `docs/cross-repo-contracts.md` | The three repositories and their contracts | Per-service detail, ADR rationale |
 
 **[Python]** The reference generates its catalogs from TypeScript source with
 generated projections and freshness gates. Our
@@ -91,5 +92,6 @@ Hunt these in any doc; remove them before merge:
   [`conformance/e2e-live-report.md`](conformance/e2e-live-report.md)
 - Benchmarks: [`../bench/README.md`](../bench/README.md) (outside `docs/`)
 - Release notes: [`release-notes/v0.3.0.md`](release-notes/v0.3.0.md)
+- Repository map: [`cross-repo-contracts.md`](cross-repo-contracts.md)
 
 Unresolved questions: none.
