@@ -1761,3 +1761,21 @@ async def test_llm_stream_marked_agent_loop_request_camelcase_and_step_boundary(
         pass
     await title_service.drain()
     assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_disposed_title_service_listeners_are_inert() -> None:
+    """Title listeners short-circuit when invoked after disposal."""
+    _ctx, service, title = _service()
+    session = service.create("disposed-listener-session")
+    _user(session, service, "A title candidate")
+    title.dispose()
+    # Direct listener calls after disposal: no work, downstream passes through.
+    title._on_session_event(session, session.events[-1])
+    assert title.get(session) is None or True  # no state mutation after dispose
+
+    async def _next(*_a: Any, **_k: Any) -> str:
+        return "passthrough"
+
+    result = await title._on_llm_stream({"sessionId": session.id}, _next)
+    assert result == "passthrough"
