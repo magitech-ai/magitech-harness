@@ -15,7 +15,13 @@
 
 ## Shared Development Guidance
 
-Follow the shared development guidance in [agents-home AGENTS](../agents-home/AGENTS.md).
+Shared standards, workflow and quality gates:
+[agents-home AGENTS](../agents-home/AGENTS.md) → `docs/ENGINEERING.md`,
+`docs/WORKFLOWS.md`, `CODING_STANDARDS.md`, and `scripts/check_all.py`.
+
+### Local checks
+Run `python3 ../agents-home/scripts/check_all.py --fast` before committing;
+CI runs the full gate.
 
 ## Harness-Specific References
 
@@ -28,5 +34,3 @@ Canonical five-role triage vocabulary. See `docs/agents/triage-labels.md`.
 ### Domain docs
 Single-context layout (`CONTEXT.md` + `docs/adr/`). See `docs/agents/domain.md`.
 
-### Review standards
-Shared reviewer rules (cross-platform tests, warning-free mocks, guard contracts): `../agents-home/CODING_STANDARDS.md`.
