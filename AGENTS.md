@@ -27,3 +27,6 @@ Canonical five-role triage vocabulary. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 Single-context layout (`CONTEXT.md` + `docs/adr/`). See `docs/agents/domain.md`.
+
+### Review standards
+Shared reviewer rules (cross-platform tests, warning-free mocks, guard contracts): `../agents-home/CODING_STANDARDS.md`.
