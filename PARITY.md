@@ -34,7 +34,7 @@ names who accepted its reason.
 | Item | Verdict | Evidence / accepted reason |
 |---|---|---|
 | Anima event waterfalls, scoped emit/filter, effect/disposer | DONE | `anima/events.py`, `anima/core.py`; conformance `test_kernel_k6` |
-| Parallel dispatch raises first error, not aggregate | PARTIAL | PIN-01; accepted by Malcom via ratified conformance map (anima PR #44 deferred) |
+| Parallel dispatch aggregates failures (one → original error, ≥2 → `ExceptionGroup`) | DONE | PIN-01 re-ratified 2026-11-19 at Malcom's decision: anima now uses all-settled semantics with aggregation; conformance probe added in `anima/tests/integration/test_phase1_acceptance.py` |
 | `Context.provide` notifies at registration | PARTIAL | PIN-02; accepted by Malcom via ratified conformance map |
 | Four-tier config layers + two homes | DONE | `components/layers.py`, `$MAGITECH_HOME` + `$MAGITECH_AGENTS_HOME` (`shell_env`); C6 fix PR #58 |
 | Bundle → profile → `--patch` layer order | DONE | `create_harness(patches=)`, `profiles/merge.py`, CLI `--patch`; PR #58 |
@@ -120,6 +120,10 @@ names who accepted its reason.
   pinned conformance rows, or his 2026-11-18 scrub decision) — none accepted
   by an agent on his behalf.
 - Criterion 1 (the parity map) therefore holds at the rc.1 audit target.
+- Re-ratification 2026-11-19: PIN-01 moved from PARTIAL to DONE at Malcom's
+  decision after anima adopted failure aggregation (all-settled semantics,
+  `ExceptionGroup` for ≥2 failures); the acceptance test and both parity maps
+  were updated in the same refinement program.
 - §12 scrub done-state is **PARTIAL with Malcom's accepted reason** (above);
   the two residual commit messages are the only known deviation from the
   binary "clean in tree AND history" line.

@@ -611,7 +611,12 @@ async def test_cancellation_real_sleep_and_disposal() -> None:
 
 
 async def test_stale_callback_after_disposal_and_sleep_draining() -> None:
-    """Disposing the plugin drains waits and prevents captured callbacks from running."""
+    """Disposing the plugin drains waits; a disposed retry listener is skipped.
+
+    With the event bus's removal contract, a listener disposed mid-dispatch is
+    skipped at its turn (not invoked), so the waterfall continues to the next
+    live listener. The retry callback must not run; downstream is reached.
+    """
     ctx, registry, session = _setup_context()
     disposed_sleep_called = asyncio.Event()
 
@@ -679,7 +684,8 @@ async def test_stale_callback_after_disposal_and_sleep_draining() -> None:
     await fiber2.dispose()
     release_gate.set()
     assert await stale_task is None
-    assert downstream_calls == 0
+    # The disposed retry listener is skipped (no retry); downstream proceeds.
+    assert downstream_calls == 1
 
     dispose_capture()
     dispose_downstream()
@@ -846,3 +852,26 @@ async def test_jsonl_persistence_roundtrip_and_loader_swapped_rows(
     h2.dispose()
     reg2.dispose()
     await ctx2.fiber.dispose()
+
+
+@pytest.mark.asyncio
+async def test_disposed_retry_listener_returns_none_directly() -> None:
+    """A retry listener invoked after its lifetime aborts short-circuits to None."""
+    ctx, _registry, session = _setup_context()
+    plugin = _mount_retry(ctx, internals={"random": lambda: 0.5})
+    await plugin
+    listeners = ctx.events._listeners.get("agent/request-error", [])
+    retry_listener = next(
+        listener
+        for listener in listeners
+        if listener.callback.__name__ == "_on_request_error"
+    )
+    await plugin.dispose()
+    payload = {
+        "session": session,
+        "provider": "p",
+        "model": "m",
+        "failure": {"message": "boom"},
+    }
+    result = await retry_listener.callback(payload, lambda *_a, **_k: None)
+    assert result is None
