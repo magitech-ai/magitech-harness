@@ -62,7 +62,6 @@ _PRESSURE_VIEW_KEYS = frozenset({"pressureTokens", "projectedTokens", "contextWi
 _CLAIM_KEYS = frozenset({"start", "end", "tokens"})
 _BREAKDOWN_CLAIM_KEYS = frozenset({"start", "end", "tokens", "systemSeqs"})
 _BREAKDOWN_KEYS = frozenset({"systemTokens", "toolsTokens", "messageTokens"})
-_BREAKDOWN_STATE_KEYS = frozenset({"systems", "surfaceTokens", "claim", "breakdown"})
 _SYSTEM_NODE_KEYS = frozenset({"seq", "tokens"})
 
 

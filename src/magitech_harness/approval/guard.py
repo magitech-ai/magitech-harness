@@ -17,10 +17,7 @@ from anima import Context, EventMode
 READ_ONLY_TOOLS = frozenset(
     {
         "read_file",
-        "list_files",
-        "find",
         "grep",
-        "read_url",
         "lsp_definition",
         "lsp_references",
     }
