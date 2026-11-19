@@ -11,7 +11,7 @@ The CLI surface changed in four externally perceptible ways:
 
 - The verb-first `mth run` subcommand is gone. `mth headless "task"` is the
   single one-shot command; no alias is kept.
-- Config overlays now layer as shipped bundle → `--profile` → each `--patch`
+- Config overlays now resolve in composition-overlay order: shipped bundle → `--profile` → each `--patch`
   in argv order. `--patch PATH` is repeatable and overrides the same row ids.
 - `mth headless --script FILE` drives an offline, scripted LLM turn. The file is
   a JSON object with `turns`, each a list of raw stream chunks, and optional
@@ -30,7 +30,7 @@ The CLI surface changed in four externally perceptible ways:
    or a JSON object with `--json`, and returns exit 1 for a non-completed turn.
 2. If you used a custom profile, nothing changes. If you previously patched
    component rows by hand, move them into a `--patch FILE` file and pass it
-   after `--profile`; the last layer wins for a repeated row id.
+   after `--profile`; the last overlay wins for a repeated row id.
 3. To drive a scripted tool loop, write a `turns.json` file and run
    `mth headless --script turns.json "task"`. A script that ends before the
    loop settles fails loud rather than hanging.

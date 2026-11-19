@@ -4,7 +4,8 @@ This document is an ordered map of the runtime. It names the composition
 boundary, the kernel, the turn loop, the capability seams, and the extension
 points. It does not define types or per-service detail: see
 [subsystems/](subsystems/README.md) for a subsystem's surface, semantics, and
-examples, and the [catalogs](tool-catalog.md) for the shipped surface.
+examples, and the [catalogs](tool-catalog.md) for the shipped surface. For the
+three-repository boundary and contracts, see [cross-repo contracts](cross-repo-contracts.md).
 
 Source of truth: the mounted rows in
 [`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml), the
@@ -15,7 +16,7 @@ decision records in [adr/](adr/).
 
 The harness is built on the `anima` micro-kernel. A `Context` is the root
 object; services are mounted on it as rows and addressed as attributes such as
-`ctx.sessions`, `ctx.tools`, `ctx.llm`, and `ctx.agent_loop`. Anima supplies the
+`ctx.sessions`, `ctx.tools`, `ctx.llm`, and `ctx.agents` / `ctx.agentLoop`. Anima supplies the
 event bus (observers, waterfalls, scoped emit), the effect/disposer registry,
 and fiber-local context. Sessions are the durable substrate; the kernel is not a
 persistence layer.
@@ -47,8 +48,10 @@ resolvable `name` fail at boot — there is no silent fallback. See
 [config catalog](config-catalog.md).
 
 **[Python]** The reference uses a CLI `--patch` chain. This runtime resolves
-layers as shipped base bundle → `--profile` → each `--patch` in argv order, all
-through the same id-keyed row merge.
+composition overlays as shipped base bundle → `--profile` → each `--patch` in
+argv order, all through the same id-keyed row merge. "Overlay" here is distinct
+from the four-tier config layers resolved by `ctx.layers` and from the prompt
+scaffolding layers of [adr/0007](adr/0007-two-layer-invariant-prompt-scaffolding.md).
 
 ## Composition of the default bundle
 
@@ -67,15 +70,38 @@ The default bundle mounts, in dependency order:
 | Background jobs | `ctx.jobs` | [jobs](subsystems/jobs.md) |
 | Working directory | `ctx.workingDirectory` | [sessions](subsystems/sessions.md) |
 | Approval policy | `ctx.approval` | [approval](subsystems/approval.md) |
-| Layer and component registry | `ctx.layers`, `ctx.components` | [configuration](subsystems/configuration.md) |
+| Config-layer and component registry | `ctx.layers`, `ctx.components` | [configuration](subsystems/configuration.md) |
 | Session log, persistence, projections | `ctx.sessions` | [sessions](subsystems/sessions.md) |
 | Retry and token metering | mounted plugins | [llm](subsystems/llm.md) |
-| Agent registry and loop | `ctx.agent_loop` | [agent-loop](subsystems/agent-loop.md) |
-| Repeat/timeout guards | mounted plugins | [tools](subsystems/tools.md) |
+| Agent registry and loop | `ctx.agents`, `ctx.agentLoop` | [agent-loop](subsystems/agent-loop.md) |
+| Repeat/timeout guards | native rows in `base.yaml` | [tools](subsystems/tools.md) |
 
 The harness owns no built-in domain tools or providers; those live in
 `mth-plugins`. See [adr/0002](adr/0002-zero-builtin-domain-tools-and-providers.md)
 and [adr/0012](adr/0012-tier-1-provider-substrate-in-harness.md).
+
+## Guard ownership
+
+This is the single source of truth for which implementation owns each guard.
+"Native" means a row in [`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml)
+shipped by this repository; "marketplace" means an opt-in `mth-plugins`
+component, not mounted by the default bundle.
+
+| Guard | Canonical implementation | Default-mounted | Home |
+|---|---|---|---|
+| Approval | Native `approval` service + `approval-guard` row (`magitech_harness.approval.guard:apply`) | Yes (`policy: ask`) | [approval](subsystems/approval.md) |
+| Repeat reminder | Native `repeat-tool-reminder-guard` row (`magitech_harness.tools.repeat_guard:apply`, `thresholds: [3, 5, 8]`) | Yes | [tools](subsystems/tools.md) |
+| Timeout | Native `timeout-policy-guard` row (`magitech_harness.tools.timeout_guard:apply`) | Yes | [tools](subsystems/tools.md), [context](subsystems/context.md) |
+| Checkpoint | Native `session-checkpoint-policy` row (`magitech_harness.session.checkpoint_policy:apply`) | Yes | [sessions](subsystems/sessions.md) |
+| Workspace trust | Marketplace `guards/trust` (`workspace-trust-gate`) | No | [approval](subsystems/approval.md#trust-and-workspace-gates) |
+| Compaction | Marketplace `guards/compaction` (`compaction-guard`); native `ctx.compaction` service is mounted separately | Guard: no; service: yes | [compaction](subsystems/compaction.md) |
+| Output truncation | Marketplace `guards/truncation` (`truncation-guard`) | No | [shell and subprocess](subsystems/shell-and-subprocess.md) |
+
+The `mth-plugins` catalog also lists `approval-guard`, `repeat-tool-reminder`,
+and `timeout-policy`. Those are non-canonical duplicates of the native rows
+above; do not mount them in place of the native rows. ADR 0002, ADR 0009, and
+ADR 0011 record the original placement decision; this table records current
+ownership.
 
 ## The turn loop
 

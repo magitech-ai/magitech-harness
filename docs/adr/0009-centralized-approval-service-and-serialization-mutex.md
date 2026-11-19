@@ -25,6 +25,8 @@ In agentic architectures with concurrent subagents, background tasks, or multi-s
 4. **Waterfall Decoupling**:
    `request_approval` routes through `ctx.waterfall("approval/request", req, default_handler=...)`, allowing policy guard components (e.g. `approval-guard`) to audit, auto-approve, or prompt the user.
 
+**Current ownership:** `approval-guard` is now a native base-bundle row; see the [guard-ownership table](../architecture.md#guard-ownership). The service contract above is unchanged.
+
 ## Consequences
 - **Positive**: Prevents terminal I/O collisions across concurrent subagents and background tasks.
 - **Positive**: Strict payload hashing prevents verdict confusion attacks across disparate tool arguments.

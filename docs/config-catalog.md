@@ -5,7 +5,8 @@ each is set. Source of truth: the mounted rows in
 [`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml) and each
 service's config reader. This page is maintained by hand from source; the docs
 review checks it against the code. For the resolution mechanisms, see
-[configuration](subsystems/configuration.md).
+[configuration](subsystems/configuration.md). Guard rows are native unless
+marked `(plugin)`; see [Guard ownership](architecture.md#guard-ownership).
 
 Conventions: **YAML** means a value in `base.yaml`; **code** means a component
 or service default with no YAML key. "Required" means the service raises

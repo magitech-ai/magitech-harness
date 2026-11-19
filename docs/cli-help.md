@@ -1,7 +1,7 @@
 # CLI help
 
 Source of truth: `build_parser()` in `src/magitech_harness/cli.py`. The launcher
-is invoked as `mth` (also available as `mth` via the package entry point). This
+is invoked as `mth` (also available as `magitech` and `magitech-harness` via the package entry points). This
 page is maintained by hand from the parser; the docs review checks it against
 `build_parser()`.
 
@@ -14,10 +14,12 @@ page is maintained by hand from the parser; the docs review checks it against
 | `--patch PATH` | Extra patch-list overlay applied after the profile (repeatable) |
 | `--model SLUG` | Model slug, e.g. `openrouter/anthropic/claude-3.5-sonnet` |
 
-Component rows resolve in layer order: the shipped bundle, then `--profile`,
-then each `--patch` in argv order. A later layer overrides an earlier row with
+Component rows resolve in overlay order: the shipped bundle, then `--profile`,
+then each `--patch` in argv order. A later overlay overrides an earlier row with
 the same id; a missing or malformed overlay file fails at boot. The overlay
 flags precede the subcommand (for example `mth --patch p.yaml headless "task"`).
+See [configuration](subsystems/configuration.md#bundle-and-profile-composition-overlay-chain)
+for the owned description; this is not the four-tier `ctx.layers` resolution.
 
 When no subcommand is given, the launcher starts the interactive REPL. With a
 subcommand, it runs that command and exits.

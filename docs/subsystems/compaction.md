@@ -4,8 +4,10 @@
 (`component.py`, `compaction.py`, `pruner.py`).
 
 Compaction folds historical session events before a balanced cut point into a
-checkpoint summary and exposes a separate tool-result pruner. It is registered
-as a guard in `mth-plugins` and uses the compaction service seam in the harness.
+checkpoint summary and exposes a separate tool-result pruner. The guard and
+pruner components are marketplace (`mth-plugins`) modules; the `ctx.compaction`
+service they use is native and mounted in the base bundle. See
+[Guard ownership](../architecture.md#guard-ownership).
 
 ## Cut point selection
 

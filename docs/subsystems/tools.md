@@ -59,12 +59,13 @@ deliver a sourced `repeat-tool-reminder` notice at consecutive-call thresholds
 
 ## Mounted guards
 
-- **Approval guard** — asks for tools requiring approval; see [approval](approval.md).
-- **Timeout policy** — scoped-deadline `TOOL_TIMEOUT`; enabled per tool from its
-  `timeoutMs`.
-- **Repeat reminder** — advisory nudge out of identical call loops (mounted
-  guard in `tools/repeat_guard.py`).
-- **Checkpoint policy** — flushes the session before a top-level body.
+The default bundle mounts the approval, timeout, repeat-reminder, and
+checkpoint guards as native rows. Ownership of every guard, including the
+opt-in marketplace guards, is in [Guard ownership](../architecture.md#guard-ownership).
+Behavior: timeout is a scoped-deadline `TOOL_TIMEOUT` enabled per tool from its
+`timeoutMs`; the repeat reminder is an advisory nudge out of identical call
+loops (`tools/repeat_guard.py`); checkpoint flushes the session before a
+top-level body.
 
 ## Example: registering a tool
 

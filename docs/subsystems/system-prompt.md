@@ -24,7 +24,8 @@ Configuration keys (component config, default in parentheses): `toolOrder` /
 
 Sections are deterministic and order-stable so prompt caching remains valid. The
 identity section is invariant across a run; per-step runtime context is appended
-as the changing layer. Tool guidance is registered by tool components (for
+as the changing prompt-scaffolding layer (ADR 0007 Layer 2). Tool guidance is
+registered by tool components (for
 example `tool:bash` tells the model to prefer the file tools for file access).
 The resulting content appears as the `system/message` surface event.
 

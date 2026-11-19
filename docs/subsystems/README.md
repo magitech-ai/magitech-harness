@@ -12,7 +12,7 @@ package; see each page's **Source** line.
 
 ## Kernel and composition
 
-- [configuration](configuration.md) — layer resolution, profile merge, config keys.
+- [configuration](configuration.md) — config-layer resolution, composition overlays, config keys.
 - [system-prompt](system-prompt.md) — invariant scaffolding, section registration.
 - [agent-loop](agent-loop.md) — turn/step state machine, request and stream waterfalls.
 

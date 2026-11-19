@@ -9,8 +9,8 @@ the pinned reference checkout at validation time and only counts are recorded.
 
 The original Phase 2 row was a `not-done` **manual** gate: "a session written
 here opens in the other tooling and vice versa", requiring a built install of
-the other tooling. That gate was retired in commit `3bcce96`, which replaced it
-with an in-process bidirectional wire-format test and marked the row `done`.
+the other tooling. That gate was retired when an in-process bidirectional
+wire-format test replaced it and marked the row `done`.
 The literal built-install run was never automated in CI.
 
 Per the Phase 8 plan, C4 re-runs the gate against recorded fixtures as oracles

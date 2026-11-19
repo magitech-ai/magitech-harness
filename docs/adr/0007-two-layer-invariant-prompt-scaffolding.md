@@ -10,6 +10,8 @@ In complex agent environments, prompt templates often conflate static behavioral
 ## Decision
 
 We establish the **Two-Layer Invariant Scaffolding Pattern** anchored by `SystemPromptService` (`ctx.system_prompt`):
+
+These are prompt-scaffolding layers, distinct from the four-tier config-layer resolution (ADR 0010) and the composition overlay chain; they share only the word "layer".
 1. **Layer 1 (Persona & Static Guidelines)**: Defined in plain markdown files (e.g. `SYSTEM.md`, `GUIDELINES.md`) or caller configuration. Layer 1 focuses strictly on domain persona, conversational style, and role invariants, remaining completely free of hardcoded tool catalogs or runtime environment details.
 2. **Layer 2 (Dynamic Invariant Scaffolding)**: Rendered dynamically at prompt compile time by `ctx.system_prompt.build()`:
    - `Active Tools`: Rendered automatically from the currently registered tools in `ctx.tools.list_tools()`.
