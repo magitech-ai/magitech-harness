@@ -13,7 +13,7 @@ We enforce zero-tolerance quality gates across all codebase layers:
 1. **100% Statement and Branch Coverage**: All unit and integration test runs enforce `--cov-fail-under=100`. Tests in `tests/unit/` mirror `src/` 1:1, flat named, and hermetic.
 2. **Strict Static Typing**: The codebase enforces strict `mypy` with `disallow_untyped_defs = true`, `warn_return_any = true`, and `warn_unused_configs = true`. Every package exports a `py.typed` marker.
 3. **Google Python Style & Ruff**: All code adheres to the Google Python Style Guide, gated by `ruff check` and `ruff format --check` at line length 88.
-4. **Zero Ancestral Mentions Rule**: Complete prohibition against naming ancestral or upstream projects/brands anywhere in code, tests, docstrings, commits, or documentation.
+4. **Zero Ancestral Mentions Rule**: Complete prohibition against naming outside projects or brands anywhere in code, tests, docstrings, commits, or documentation.
 
 ## Consequences
 

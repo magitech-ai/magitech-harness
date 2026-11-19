@@ -1,10 +1,10 @@
-"""Cordis-free storage mechanics for the local spill backend.
+"""Kernel-independent storage mechanics for the local spill backend.
 
 Private session-scoped directory selection, safe-name derivation, path-traversal
 protection, and the exclusive owner-only write. No anima or harness imports --
 this module is pure Python standard library so it can be tested in isolation.
 
-Reference: ``packages/spill/spill-local/src/store.ts`` in the parity monorepo.
+Local filesystem store for spilled text.
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@ retrieval/search API. Implementations subclass :class:`SpillStore` and register
 as ``ctx.spillStore`` (one implementation per context; loading a second
 fails loud).
 
-Reference: ``packages/spill/spill`` in the parity monorepo.
+Abstract spill store service and local backend.
 """
 
 from __future__ import annotations

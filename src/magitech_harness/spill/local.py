@@ -7,7 +7,7 @@ path locator plus local read/grep retrieval guidance.
 After activation it runs one best-effort startup cleanup sweep that reclaims
 spill files older than ``cleanupPeriodDays``.
 
-Reference: ``packages/spill/spill-local`` in the parity monorepo.
+Local filesystem spill backend.
 """
 
 from __future__ import annotations

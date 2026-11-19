@@ -1,6 +1,6 @@
 """OpenTelemetry instrumentation engine.
 
-Creates independent OTLP reporting channels through the shared Cordis OTel
+Creates independent OTLP reporting channels through the shared OTel
 service. Each channel has its own exporter, resource, instrumentation scope,
 and queue. Mounting alone creates no transport or identity and sends nothing.
 Business consumers own authorization, redaction, field selection, and their

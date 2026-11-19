@@ -14,7 +14,7 @@ env var (`apiKeyEnv`) are provider-owned. The `llm-retry` mount no longer accept
 a `retryPolicy` key. See [llm](../../../subsystems/llm.md).
 
 The runtime also adopted strict identity naming: code and documentation use
-Magitech names only; upstream project and brand names do not appear in the
+Magitech names only; outside project and brand names do not appear in the
 shipped surface.
 
 ## Migration
