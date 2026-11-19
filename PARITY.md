@@ -24,8 +24,8 @@ names who accepted its reason.
   was built and conformance-recorded against. Malcom decided (2026-11-18) to
   freeze the 1.0 audit here; rc.3 (`39163dd3…`) drift is listed in the
   post-1.0 appendix, not counted against 1.0.
-- **Python repos:** anima `0.2.0` @ `02f728e`, magitech-harness `0.2.0` @ C6-fix
-  merge, mth-plugins `0.2.0` @ C6-fix merge. All clean on `main`.
+- **Python repos:** anima `0.3.0` @ release bump, magitech-harness `0.3.0` @ C6-fix
+  merge, mth-plugins `0.3.0` @ release bump merge. All clean on `main`.
 - **Suites (100% statement + branch coverage):** anima 1228, harness 2285,
   plugins 402. CI green on all 6 legs per repo at every Phase 8 merge.
 

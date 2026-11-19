@@ -90,5 +90,6 @@ Hunt these in any doc; remove them before merge:
 - Conformance: [`conformance/acc-06.md`](conformance/acc-06.md),
   [`conformance/e2e-live-report.md`](conformance/e2e-live-report.md)
 - Benchmarks: [`../bench/README.md`](../bench/README.md) (outside `docs/`)
+- Release notes: [`release-notes/v0.3.0.md`](release-notes/v0.3.0.md)
 
 Unresolved questions: none.

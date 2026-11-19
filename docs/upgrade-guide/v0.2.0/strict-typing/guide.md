@@ -8,8 +8,9 @@ description: py.typed marker and strict mypy become part of the quality gate.
 ## Change
 
 The package now ships a `py.typed` marker and is checked with strict mypy
-(`disallow_untyped_defs`, `warn_return_any`, `warn_unused_configs`). The runtime
-is pinned to `anima>=0.1,<0.2`. See
+(`disallow_untyped_defs`, `warn_return_any`, `warn_unused_configs`). At that
+release the runtime was pinned to `anima>=0.1,<0.2`; the 0.3.0 release moved
+this to `anima>=0.3,<0.4`. See
 [adr/0004](../../../adr/0004-strict-quality-gates-100-coverage-and-mypy.md).
 
 ## Migration

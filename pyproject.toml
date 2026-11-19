@@ -1,11 +1,11 @@
 [project]
 name = "magitech-harness"
-version = "0.2.0"
+version = "0.3.0"
 description = "Magitech Harness: Composable Agent Runtime by Magitech"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anima>=0.1,<0.2",
+    "anima>=0.3,<0.4",
     "httpx>=0.27.0",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
