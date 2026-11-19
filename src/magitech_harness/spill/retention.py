@@ -20,11 +20,6 @@ class RetentionResult(TypedDict):
     omittedImages: int
 
 
-def _text_tokens(text: str) -> int:
-    """Estimate tokens for plain text (4 chars ~ 1 token)."""
-    return max(1, (len(text.encode("utf-8")) + 3) // 4)  # pragma: no cover
-
-
 def retain_content(
     content: list[dict[str, Any]],
     max_tokens: int,

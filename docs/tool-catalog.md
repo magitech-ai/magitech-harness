@@ -72,10 +72,4 @@ and are disposed when the server is removed.
 The observable contract (pattern/arguments, discovery, caps, markers) matches;
 ripgrep-specific regex extensions are not supported.
 
-## Names that are not tools
-
-The following appear in approval allow-lists or subagent presets but are not
-registered tools in either repository: `list_files`, `find`, `read_url`,
-`search_web`. See [approval](subsystems/approval.md).
-
 Unresolved questions: none.
