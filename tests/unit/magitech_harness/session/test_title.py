@@ -1771,8 +1771,10 @@ async def test_disposed_title_service_listeners_are_inert() -> None:
     _user(session, service, "A title candidate")
     title.dispose()
     # Direct listener calls after disposal: no work, downstream passes through.
+    before = title.get(session)
     title._on_session_event(session, session.events[-1])
-    assert title.get(session) is None or True  # no state mutation after dispose
+    # A disposed title service must not mutate title state from a session event.
+    assert title.get(session) == before
 
     async def _next(*_a: Any, **_k: Any) -> str:
         return "passthrough"

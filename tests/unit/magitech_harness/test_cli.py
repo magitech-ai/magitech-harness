@@ -526,7 +526,9 @@ async def test_main_async_component_command(
     monkeypatch.setattr("magitech_harness.cli.create_harness", mock_create_no_loader)
 
     # The boot audit requires a loader; skip it for this loader-less probe.
-    async def noop_check(_ctx: Context) -> None:
+    # check_bundle_entries is synchronous — patch with a sync stub so no
+    # coroutine is created and silently left unawaited.
+    def noop_check(_ctx: Context) -> None:
         return None
 
     monkeypatch.setattr("magitech_harness.cli.check_bundle_entries", noop_check)
