@@ -27,6 +27,7 @@ from magitech_harness.tools.contracts import (
 from magitech_harness.tools.native_executor import apply as apply_native_executor
 from magitech_harness.tools.pipeline import (
     ToolExecutionPipeline,
+    _is_unclassified_cancellation,
     execute_tool_batch,
     fuse_tool_signals,
     parse_arguments,
@@ -2580,3 +2581,99 @@ async def test_pipeline_remaining_edge_branches() -> None:
             pipeline,
         )
     assert "prepare result" in str(exc_info.value.__cause__)
+
+
+def test_unclassified_cancellation_helper() -> None:
+    """An unlabeled AbortError-named throw or the signal reason is a cancellation."""
+    from magitech_harness.agent.cancellation import AbortController
+    from magitech_harness.llm.adapter_failure import LlmError
+
+    controller = AbortController()
+    signal = controller.signal
+
+    class AbortError(Exception):
+        pass
+
+    # Already-classified harness error is never reclassified.
+    assert _is_unclassified_cancellation(LlmError("x", "SERVER"), signal) is False
+    # Plain error before abort is not a cancellation.
+    assert _is_unclassified_cancellation(AbortError("x"), signal) is False
+    controller.abort(AbortError("stop"))
+    # After abort: AbortError-named throw and the signal reason are cancellations.
+    assert _is_unclassified_cancellation(AbortError("x"), signal) is True
+    assert _is_unclassified_cancellation(signal.reason, signal) is True
+    # A different plain error after abort is still unclassified (not AbortError).
+    assert _is_unclassified_cancellation(ValueError("x"), signal) is False
+    # No signal: never a cancellation.
+    assert _is_unclassified_cancellation(AbortError("x"), None) is False
+
+
+@pytest.mark.asyncio
+async def test_tool_body_abort_error_named_throw_labeled_after_cancellation() -> None:
+    """A plain AbortError-named throw after caller cancel is labeled ABORTED."""
+    from magitech_harness.agent.cancellation import AbortController
+
+    class AbortError(Exception):
+        pass
+
+    def _boom(args, run_ctx):
+        controller.abort(AbortError("caller went away"))
+        raise AbortError("tool was cancelled")
+
+    ctx = await _setup()
+    tool = _echo_tool("boom", execute=_boom)
+    ctx.tools.register(tool)
+    controller = AbortController()
+    batch = await ctx.tools.execute(
+        {
+            "calls": [
+                {
+                    "type": "tool-call",
+                    "id": "ab1",
+                    "name": "boom",
+                    "arguments": '{"text": "x"}',
+                }
+            ],
+            "signal": controller.signal,
+        }
+    )
+    result = batch["results"][0]["result"]
+    assert result["isError"] is True
+    assert result["error"]["info"] == {"name": "AbortError", "code": "ABORTED"}
+
+
+@pytest.mark.asyncio
+async def test_wrapper_abort_error_named_throw_labeled_before_dispatch() -> None:
+    """A wrapper throwing an unlabeled cancellation before the body is labeled."""
+    from magitech_harness.agent.cancellation import AbortController
+
+    class AbortError(Exception):
+        pass
+
+    async def _wrapper(exec_view, next_fn):
+        controller.abort(AbortError("caller went away"))
+        raise AbortError("cancelled before dispatch")
+
+    ctx = await _setup()
+    ctx.tools.register(_echo_tool("echo"))
+    ctx.on("tools/execute", _wrapper)
+    controller = AbortController()
+    batch = await ctx.tools.execute(
+        {
+            "calls": [
+                {
+                    "type": "tool-call",
+                    "id": "ab2",
+                    "name": "echo",
+                    "arguments": '{"text": "x"}',
+                }
+            ],
+            "signal": controller.signal,
+        }
+    )
+    result = batch["results"][0]["result"]
+    assert result["isError"] is True
+    assert result["error"]["info"] == {
+        "name": "AbortError",
+        "code": "ABORTED_BEFORE_DISPATCH",
+    }

@@ -774,6 +774,10 @@ class AgentLoop(Service):
         loop_ctx = self._runtime_ctx
 
         abort = AbortController()
+        # A distinct lifetime signal: a wake arriving after the agent is fully
+        # disposed must not start a new driver. It is aborted only at the very
+        # end of teardown, so wakes needed to settle the machine still work.
+        lifetime = AbortController()
         unsub_caller = (
             signal.on_abort(
                 lambda: abort.abort(
@@ -839,6 +843,8 @@ class AgentLoop(Service):
                     detach_session()
             finally:
                 untrack()
+            # The lifetime is over: block any late wake from starting a driver.
+            lifetime.abort(RuntimeError(f'agent "{agent_id}" lifecycle disposed'))
             _throw_collected_failures(failures, f'agent "{agent_id}" disposal failed')
 
         async def _teardown() -> None:
@@ -881,6 +887,7 @@ class AgentLoop(Service):
                     session,
                     projections,
                     last_turn,
+                    lifetime_signal=lifetime.signal,
                 )
                 machine = created
 

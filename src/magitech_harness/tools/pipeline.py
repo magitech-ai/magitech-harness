@@ -165,8 +165,27 @@ def _error_info(error: Any) -> ToolErrorInfo | None:
     return None
 
 
-def _tool_error_result(error: Any) -> ToolExecutionFailure:
-    info = _error_info(error)
+def _is_unclassified_cancellation(error: Any, signal: Any) -> bool:
+    """True when a thrown error is an unlabeled cancellation.
+
+    A tool body (or wrapper) may throw a plain ``AbortError``-named error or
+    the signal's own reason after cancellation. Such a failure is a
+    cancellation, not a generic tool error, and must be labeled with the
+    canonical abort code rather than logged as ``UNKNOWN``.
+    """
+    if _error_info(error) is not None:
+        return False  # already classified by a harness error
+    if signal is not None and getattr(signal, "is_aborted", False):
+        if error is getattr(signal, "reason", None):
+            return True
+        return type(error).__name__ == "AbortError"
+    return False
+
+
+def _tool_error_result(
+    error: Any, *, info_override: ToolErrorInfo | None = None
+) -> ToolExecutionFailure:
+    info = info_override if info_override is not None else _error_info(error)
     message = tool_error_message(error)
     failure: ToolFailure = {"message": message}
     if info is not None:
@@ -661,6 +680,15 @@ class ToolExecutionPipeline:
                 return build_aborted_result(before_dispatch=False, prior=result)
             return result
         except Exception as exc:  # noqa: BLE001 - contain tool execution failures
+            if _is_unclassified_cancellation(exc, state.caller_signal):
+                code = (
+                    TOOL_ABORTED_BEFORE_DISPATCH
+                    if not state.body_invoked
+                    else TOOL_ABORTED
+                )
+                return _tool_error_result(
+                    exc, info_override={"name": "AbortError", "code": code}
+                )
             return _tool_error_result(exc)
         finally:
             _dispose()
@@ -704,7 +732,24 @@ class ToolExecutionPipeline:
                 }
             return {"kind": "post-result", "result": result_with_deferred}
         except Exception as exc:  # noqa: BLE001 - wrapper/normalization errors finalize
-            return {"kind": "final-result", "result": _tool_error_result(exc)}
+            # A wrapper throwing an unlabeled cancellation after the caller
+            # aborted is a cancellation, not a generic tool error.
+            try:
+                state = self._require_state(exec_view)
+                if _is_unclassified_cancellation(exc, state.caller_signal):
+                    code = (
+                        TOOL_ABORTED_BEFORE_DISPATCH
+                        if not state.body_invoked
+                        else TOOL_ABORTED
+                    )
+                    result = _tool_error_result(
+                        exc, info_override={"name": "AbortError", "code": code}
+                    )
+                else:
+                    result = _tool_error_result(exc)
+            except RuntimeError:  # state already finalized
+                result = _tool_error_result(exc)
+            return {"kind": "final-result", "result": result}
 
     def _create_success_result(
         self,

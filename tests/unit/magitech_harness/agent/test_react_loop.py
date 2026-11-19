@@ -1184,3 +1184,76 @@ async def test_react_loop_recovery_batch_errors_and_multi_turn_cancel(
         )
         for ev in agent.session.events
     )
+
+
+@pytest.mark.asyncio
+async def test_cancel_still_aborts_when_inbox_clear_raises() -> None:
+    """A queue-persistence failure must not prevent cancellation (hardening)."""
+
+    gate = asyncio.Event()
+
+    async def handler(options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+        await gate.wait()  # keep the turn phase live until cancel
+        yield {"type": "finish", "reason": {"kind": "stop"}}
+
+    ctx, _adapter, model_h, inbox_h = await _mount_runtime(handler)
+    session = ctx.sessions.create("rl-cancel-hardening")
+    agent = ReactLoopAgent(
+        ctx,
+        "rl-cancel-hardening",
+        {"provider": "stub", "model": "stub-model"},
+        session,
+        {
+            "modelSelection": model_h.reader_for(session),
+            "inbox": inbox_h.reader_for(session),
+        },
+        0,
+    )
+    # Start a turn so a live phase exists, then make clearing fail.
+    agent.followup(
+        create_user_message(
+            content=[{"type": "text", "text": "go"}], source={"kind": "user"}
+        )
+    )
+    await asyncio.sleep(0)
+
+    def _boom() -> None:
+        raise RuntimeError("persistence unavailable")
+
+    agent.inbox.clear = _boom  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="persistence"):
+        agent.cancel({"kind": "user"})
+    # The phase abort still fired despite the clear failure.
+    assert agent._phase.abort.signal.is_aborted
+    gate.set()
+    await agent.when_idle()
+
+
+@pytest.mark.asyncio
+async def test_wake_driver_ignored_after_lifetime_abort() -> None:
+    """A wake after the lifetime signal aborts must not start a driver (hardening)."""
+    from magitech_harness.agent.cancellation import AbortController
+
+    async def handler(options: GenerateOptions) -> AsyncIterator[StreamChunk]:
+        yield {"type": "finish", "reason": {"kind": "stop"}}
+
+    ctx, _adapter, model_h, inbox_h = await _mount_runtime(handler)
+    session = ctx.sessions.create("rl-lifetime")
+    lifetime = AbortController()
+    agent = ReactLoopAgent(
+        ctx,
+        "rl-lifetime",
+        {"provider": "stub", "model": "stub-model"},
+        session,
+        {
+            "modelSelection": model_h.reader_for(session),
+            "inbox": inbox_h.reader_for(session),
+        },
+        0,
+        lifetime_signal=lifetime.signal,
+    )
+    lifetime.abort(RuntimeError("lifetime ended"))
+    # A wake after lifetime abort is a no-op: no activity task is created.
+    agent._wake_driver()
+    assert agent._activity_done is None
+    await agent.when_idle()
