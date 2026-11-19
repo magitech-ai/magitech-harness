@@ -178,8 +178,10 @@ class ReactLoopAgent:
         session: Session,
         projections: Mapping[str, Callable[[], Any]],
         last_turn: int,
+        lifetime_signal: AbortSignal | None = None,
     ) -> None:
         self._loop_ctx = loop_ctx
+        self._lifetime_signal = lifetime_signal
         self.id = agent_id
         self.options: AgentOptions = cast(AgentOptions, dict(options))
         self.session = session
@@ -251,12 +253,15 @@ class ReactLoopAgent:
     ) -> None:
         """Abort the active phase and optionally clear pending inbox work."""
         keep_inbox = bool(options.get("keepInbox")) if options is not None else False
-        if not keep_inbox:
-            self.inbox.clear()
+        try:
+            if not keep_inbox:
+                self.inbox.clear()
+        finally:
+            # A queue-persistence failure must not prevent cancellation of
+            # work that was already admitted.
             if self._phase.kind != "idle":
                 self._phase.wake_requested = False
-        if self._phase.kind != "idle":
-            self._phase.abort.abort(dict(cause))
+                self._phase.abort.abort(dict(cause))
 
     async def run_maintenance[T](
         self, task: Callable[[AbortSignal], Awaitable[T]]
@@ -289,6 +294,10 @@ class ReactLoopAgent:
     runMaintenance = run_maintenance
 
     def _wake_driver(self, wake_after_abort: bool = False) -> None:
+        # A wake arriving after the agent's lifetime ended must not start a
+        # new driver during teardown.
+        if self._lifetime_signal is not None and self._lifetime_signal.is_aborted:
+            return
         if self._phase.kind != "idle":
             reason = _aborted_cancel_cause(self._phase.abort.signal)
             if (reason is None or reason["kind"] != "disposed") and (
