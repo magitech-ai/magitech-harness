@@ -376,7 +376,7 @@ async def test_row_mounted_components_settle_on_root_flush(
     comp_dir = tmp_path / "k5_probe"
     comp_dir.mkdir()
     (comp_dir / "component.py").write_text(
-        "from magitech_harness.tools.definition import define_tool\n"
+        "from magitech_harness.tools.schema import define_tool\n"
         "def apply(ctx):\n"
         "    ctx.tools.register(define_tool(\n"
         "        name='k5_probe_add', description='probe',\n"

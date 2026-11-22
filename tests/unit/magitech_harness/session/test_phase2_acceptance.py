@@ -34,7 +34,7 @@ from magitech_harness.session.messages import (
 from magitech_harness.session.persistence_jsonl import JsonlSessionPersistence
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session
-from magitech_harness.tools.definition import define_tool
+from magitech_harness.tools.schema import define_tool
 
 
 class _MockProviderComponent:

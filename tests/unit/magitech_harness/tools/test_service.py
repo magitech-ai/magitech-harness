@@ -20,9 +20,9 @@ from magitech_harness.tools.contracts import (
     ToolDefinition,
     ToolExecutorUnavailableError,
 )
-from magitech_harness.tools.definition import define_tool as legacy_define_tool
 from magitech_harness.tools.native_executor import apply as apply_native_executor
 from magitech_harness.tools.schema import define_tool
+from magitech_harness.tools.schema import define_tool as legacy_define_tool
 from magitech_harness.tools.service import ToolRuntime, ToolService, ToolsService
 
 
@@ -65,40 +65,22 @@ async def _mount_tools() -> Context:
 
 @pytest.mark.asyncio
 async def test_tool_service_register_unregister_and_get() -> None:
-    """Verifies legacy tool registration, retrieval, schema export, and disposal."""
-    ctx = Context()
-    service = ToolService(ctx)
-
-    t1 = legacy_define_tool(name="calc", description="calculator", execute=lambda a: 1)
-    disposer = service.register(t1)
-
-    assert service.get("calc") is t1
-    assert len(service.get_schemas()) == 1
-    assert service.get_schemas()[0]["function"]["name"] == "calc"
-
-    disposer()
-    assert service.get("calc") is None
-    assert service.get_schemas() == []
-    disposer()
-
-
-@pytest.mark.asyncio
-async def test_tool_service_tools_property_returns_copy() -> None:
-    """Verifies the legacy tools mapping is a defensive copy."""
+    """Verifies tool registration, retrieval, and disposal."""
     ctx = Context()
     service = ToolService(ctx)
 
     tool = legacy_define_tool(
         name="calc", description="calculator", execute=lambda a: 1
     )
-    service.register(tool)
+    disposer = service.register(tool)
 
-    mapping = service.tools
-    assert mapping == {"calc": tool}
-    mapping["spoof"] = tool
-    mapping.clear()
-    assert service.get("calc") is tool
-    assert service.tools == {"calc": tool}
+    assert service.get("calc") is not None
+    assert service.get("calc")["name"] == "calc"
+
+    disposer()
+    assert service.get("calc") is None
+    disposer()
+    assert service.definitions() == []
 
 
 @pytest.mark.asyncio
@@ -701,16 +683,19 @@ async def test_service_additional_validation_and_edge_branches() -> None:
         )()
     )
 
-    # Scoped get() + legacy _unregister after overwrite + resolve mid-when replacement
+    # Scoped get() + unregister + resolve mid-when replacement
     ctx.tools.register(_parity_tool("visible_p"))
     assert ctx.tools.get("visible_p") is not None
 
     leg = legacy_define_tool(name="leg", description="leg", execute=lambda _a: "raw")
-    leg2 = legacy_define_tool(name="leg", description="leg2", execute=lambda _a: "raw2")
+    leg2 = legacy_define_tool(
+        name="leg2", description="leg2", execute=lambda _a: "raw2"
+    )
     off_leg1 = ctx.tools.register(leg)
     ctx.tools.register(leg2)
     off_leg1()
-    assert ctx.tools.get("leg") is leg2
+    assert ctx.tools.get("leg") is None
+    assert ctx.tools.get("leg2") is not None
 
     # Replacing registration during async when condition excludes stale snapshot
     dispose_race: list[Any] = []
@@ -731,11 +716,11 @@ async def test_service_additional_validation_and_edge_branches() -> None:
     ctx.on(
         "tools/execute",
         lambda _ex, _next: ToolResultData(
-            call_id="l1", name="leg", content="direct", is_error=False
+            call_id="l1", name="leg2", content="direct", is_error=False
         ),
         mode=EventMode.WATERFALL,
     )
     res_leg = await ctx.tools.execute(
-        ToolCallData(call_id="l1", name="leg", arguments={})
+        ToolCallData(call_id="l1", name="leg2", arguments={})
     )
     assert res_leg.content == "direct"

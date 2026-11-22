@@ -62,7 +62,6 @@ from magitech_harness.shell_env.service import ShellEnvRegistry
 from magitech_harness.subprocess.local import LocalSubprocessRuntime
 from magitech_harness.subprocess.service import SubprocessRuntime
 from magitech_harness.system_prompt.service import SystemPromptService
-from magitech_harness.tools.definition import Tool
 from magitech_harness.tools.native_executor import NativeToolExecutor
 from magitech_harness.tools.pipeline import ToolExecutionPipeline
 from magitech_harness.tools.schema import define_tool
@@ -244,7 +243,6 @@ __all__ = [
     "ShellResult",
     "SubprocessRuntime",
     "SystemPromptService",
-    "Tool",
     "ToolCallData",
     "ToolExecutionPipeline",
     "ToolResultData",
