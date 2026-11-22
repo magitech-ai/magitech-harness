@@ -450,4 +450,13 @@ def test_schema_dsl_additional_branches_and_kwarg_define_tool() -> None:
         parameters={},
         execute=lambda args: "ok",
     )
-    assert legacy_kw.name == "leg_kw"
+    assert legacy_kw["name"] == "leg_kw"
+    assert legacy_kw["output"]["schema"] == {"type": "string"}
+
+
+def test_default_text_render_handles_str_and_non_str() -> None:
+    """The legacy keyword shape's default output render produces text blocks."""
+    from magitech_harness.tools.schema import _default_text_render
+
+    assert _default_text_render({}, "hello") == [{"type": "text", "text": "hello"}]
+    assert _default_text_render({}, 42) == [{"type": "text", "text": "42"}]

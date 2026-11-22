@@ -10,7 +10,6 @@ from typing import Any, cast
 from magitech_harness.llm.error import HarnessError
 from magitech_harness.llm.types import ToolSchema
 from magitech_harness.llm.values import FrozenDict, FrozenList, snapshot_json_value
-from magitech_harness.tools.definition import Tool, legacy_define_tool
 from magitech_harness.tools.json_schema import (
     JSON_SCHEMA_ANNOTATION_KEYS,
     SCALAR_SCHEMA_TYPES,
@@ -527,16 +526,27 @@ def define_tool(
         raise ValueError(
             "define_tool requires a spec mapping or name/description kwargs"
         )
-    return legacy_define_tool(
-        name=name,
-        description=description,
-        parameters=parameters,
-        execute=cast(Any, execute),
+    # Legacy keyword shape now builds a model-visible parity ToolDefinition.
+    return define_tool_definition(
+        {
+            "name": name,
+            "description": description,
+            "parameters": parameters or {},
+            "output": {
+                "schema": {"type": "string"},
+                "render": _default_text_render,
+            },
+            "execute": cast(Any, execute),
+        }
     )
 
 
+def _default_text_render(_args: Any, value: Any) -> list[dict[str, str]]:
+    text = value if isinstance(value, str) else str(value)
+    return [{"type": "text", "text": text}]
+
+
 __all__ = [
-    "Tool",
     "ToolArgsError",
     "define_tool",
     "define_tool_definition",

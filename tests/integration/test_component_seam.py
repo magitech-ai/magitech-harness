@@ -40,7 +40,7 @@ async def test_component_seam_full_lifecycle(tmp_path: Path) -> None:
     tool_component_dir.mkdir()
 
     tool_code = (
-        "from magitech_harness.tools.definition import define_tool\n"
+        "from magitech_harness.tools.schema import define_tool\n"
         "def apply(ctx):\n"
         "    tool = define_tool(\n"
         "        name='add',\n"

@@ -20,7 +20,7 @@ from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.service import MockLlmAdapter, MockLLMProvider
 from magitech_harness.llm.types import ModelChunk, ModelResponse
 from magitech_harness.session.events import EventType, ToolCallData
-from magitech_harness.tools.definition import define_tool
+from magitech_harness.tools.schema import define_tool
 from tests.agent_turn_helper import run_agent_turn, stream_agent_turn
 
 CANONICAL_ABORT_TEXT = "Error: tool call aborted before dispatch"

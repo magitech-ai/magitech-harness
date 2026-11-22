@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import Awaitable, Callable, Mapping
 from contextvars import ContextVar
@@ -32,8 +33,8 @@ from magitech_harness.tools.contracts import (
     ToolGuard,
     ToolRegistrationOptions,
     ToolRestriction,
+    ToolRunContext,
 )
-from magitech_harness.tools.definition import Tool
 from magitech_harness.tools.json_schema import assert_supported_json_schema
 from magitech_harness.tools.pipeline import TOOLS_CHANGE
 from magitech_harness.tools.schema import project_tool_schema, validate_timeout_ms
@@ -151,7 +152,6 @@ class ToolsService(Service):
             lambda scope: _ToolLayer(scope),
             lambda: self.ctx.emit(TOOLS_CHANGE),
         )
-        self._legacy_tools: dict[str, Tool] = {}
 
         if ctx.has("systemPrompt"):
             system_prompt = ctx.get("systemPrompt", None, strict=False)
@@ -183,25 +183,12 @@ class ToolsService(Service):
     # Registration, Restrictions & Guards
     # ------------------------------------------------------------------
 
-    def _register_legacy(self, tool: Tool) -> Disposer:
-        self._legacy_tools[tool.name] = tool
-
-        def _unregister() -> None:
-            if self._legacy_tools.get(tool.name) is tool:
-                del self._legacy_tools[tool.name]
-
-        caller = self._caller_ctx()
-        return caller.effect(lambda: _unregister, label=f"tools.register({tool.name})")
-
     def register(
         self,
-        tool_or_def: Tool | Mapping[str, Any],
+        tool_or_def: Mapping[str, Any],
         options: ToolRegistrationOptions | None = None,
     ) -> Disposer:
-        """Register a parity ToolDefinition (or legacy Tool) in the caller's scope."""
-        if isinstance(tool_or_def, Tool):
-            return self._register_legacy(tool_or_def)
-
+        """Register a parity ToolDefinition in the caller's scope."""
         name = tool_or_def.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("tool definition must provide a non-empty string name")
@@ -366,19 +353,14 @@ class ToolsService(Service):
 
     def get(
         self, name: str, scope: Any = None, tool_set: Any = None
-    ) -> ToolDefinition | Tool | None:
-        """Look up a tool definition in scope/toolSet, falling back to legacy tools."""
+    ) -> ToolDefinition | None:
+        """Look up a tool definition in scope/toolSet."""
         target_scope = scope if scope is not None else scope_of(self._caller_ctx())
         if tool_set is not None:
             if isinstance(tool_set, ResolvedToolSet):
                 return tool_set.view(target_scope).get(name)
             return None
-        defn = self._view(target_scope).visible.get(name)
-        if defn is not None:
-            return defn
-        if target_scope is None:
-            return self._legacy_tools.get(name)
-        return None
+        return self._view(target_scope).visible.get(name)
 
     def executable(
         self, name: str, agent: Any = None, tool_set: Any = None
@@ -550,9 +532,9 @@ class ToolsService(Service):
         signal: AbortSignal | None = None,
         parent: Any = None,
     ) -> Any:
-        """Execute a parity ToolBatchInput (or legacy single ToolCallData until P3-6)."""
+        """Execute a parity ToolBatchInput or one ToolCallData."""
         if isinstance(batch_or_call, ToolCallData):
-            return await self._execute_legacy(
+            return await self._execute_single_call(
                 batch_or_call, session=session, signal=signal, parent=parent
             )
         agent = batch_or_call.get("agent")
@@ -560,19 +542,10 @@ class ToolsService(Service):
         return await executor.execute(cast(ToolBatchInput, batch_or_call))
 
     # ------------------------------------------------------------------
-    # Legacy Phase 2 compatibility shims (removed after P3-6 loop parity)
+    # Single-call execution (ToolCallData) through the scoped tool registry.
     # ------------------------------------------------------------------
 
-    @property
-    def tools(self) -> dict[str, Tool]:
-        """Legacy copy of registered Phase 2 Tool instances."""
-        return dict(self._legacy_tools)
-
-    def get_schemas(self) -> list[dict[str, Any]]:
-        """Legacy Phase 2 schema export for pre-P3-6 AgentLoopService."""
-        return [tool.to_schema() for tool in self._legacy_tools.values()]
-
-    async def _execute_legacy(
+    async def _execute_single_call(
         self,
         tool_call: ToolCallData,
         *,
@@ -580,7 +553,7 @@ class ToolsService(Service):
         signal: AbortSignal | None = None,
         parent: Any = None,
     ) -> ToolResultData:
-        tool = self._legacy_tools.get(tool_call.name)
+        tool = self.get(tool_call.name)
         if tool is None:
             err_res = ToolResultData(
                 call_id=tool_call.call_id,
@@ -599,7 +572,12 @@ class ToolsService(Service):
         try:
 
             async def _dispatch(execution: dict[str, Any]) -> Any:
-                return await tool.execute(execution["call"].arguments)
+                returned = tool["execute"](
+                    execution["call"].arguments, cast(ToolRunContext, execution)
+                )
+                if inspect.isawaitable(returned):
+                    return await returned
+                return returned
 
             try:
                 modified_call = await self.ctx.waterfall(

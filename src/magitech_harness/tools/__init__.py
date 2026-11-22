@@ -73,7 +73,6 @@ from magitech_harness.tools.presentation import (
     WebSource,
 )
 from magitech_harness.tools.schema import (
-    Tool,
     ToolArgsError,
     define_tool,
     parameter_schema_spec_to_json_schema,
@@ -109,7 +108,6 @@ __all__ = [
     "SearchResultView",
     "TerminalCallView",
     "TerminalResultView",
-    "Tool",
     "ToolActivationContext",
     "ToolActivationError",
     "ToolArgsError",
