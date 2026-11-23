@@ -1,27 +1,30 @@
 # Tools
 
 **Source:** `tools/contracts.py`, `tools/schema.py`, `tools/pipeline.py`,
-`tools/service.py`, `tools/definition.py`.
+`tools/service.py`.
 
 The tools subsystem registers model-facing tools and runs them through a scoped
 three-phase waterfall. The harness owns no domain tools; all tools come from
 `mth-plugins` components. The exhaustive list is in the
 [tool catalog](../tool-catalog.md).
 
-## Definition APIs
+## Definition API
 
-There are two registration shapes:
+Every tool definition comes from `define_tool` in
+`magitech_harness.tools.schema`, and the result is registered on `ctx.tools`.
+Only definitions registered there appear in `ctx.tools.definitions()` and are
+offered to the model.
 
-- The legacy `Tool` / `define_tool(name, description, parameters, execute)` form
-  stores a handler verbatim. All tools currently shipped use this form.
-- The canonical `define_tool(spec)` form validates a `ToolDefinition` with an
-  output schema and render function, plus optional `timeoutMs`,
-  `requiresApproval`, `deferLoading`, presentation hooks, and concurrency flags.
+`define_tool` validates a mapping spec into a model-visible `ToolDefinition`
+carrying an `output` schema and render function, plus optional `timeoutMs`,
+`requiresApproval`, `deferLoading`, presentation hooks, and concurrency flags.
+The short keyword form (`name`, `description`, `parameters`, `execute`) is
+normalized to the same definition with a string output schema and text renderer
+for existing callers; new tools should declare the spec explicitly.
 
 `ToolsService.register()` rejects the reserved name `run_code` and emits
-`tools/change`. Because shipped tools use the legacy form, none currently
-declares `requiresApproval` or `timeoutMs`; those fields are consumed only when
-a tool is defined canonically.
+`tools/change`. Guards read `requiresApproval` and `timeoutMs` from the
+definition, so a tool that needs either must declare it in its spec.
 
 ## The scoped pipeline
 
@@ -70,13 +73,19 @@ top-level body.
 ## Example: registering a tool
 
 ```python
-from magitech_harness.tools.definition import define_tool
+from magitech_harness.tools.schema import define_tool
 
 echo = define_tool(
-    name="echo",
-    description="Echo the given text",
-    parameters={"type": "object", "properties": {"text": {"type": "string"}}},
-    execute=lambda args: {"text": args["text"]},
+    {
+        "name": "echo",
+        "description": "Echo the given text",
+        "parameters": {"text": {"type": "string", "required": True}},
+        "output": {
+            "schema": {"type": "string"},
+            "render": lambda args, value: [{"type": "text", "text": value}],
+        },
+        "execute": lambda args: args["text"],
+    }
 )
 ctx.tools.register(echo)
 ```
