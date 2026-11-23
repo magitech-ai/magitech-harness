@@ -1015,7 +1015,7 @@ async def test_header_without_route_keeps_pending() -> None:
 
 async def test_routeless_header_event_keeps_pending() -> None:
     """Verifies a route-less header event leaves pending title work alone."""
-    ctx, service, title = _service()
+    _ctx, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     title.register(provider)
