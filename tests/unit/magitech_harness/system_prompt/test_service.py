@@ -33,6 +33,7 @@ BUILT_IN = (
     PERSONA_PREFIX_SECTION,
     PERSONA_SUFFIX_SECTION,
 )
+from tests._mount import mount
 
 SECTION_ORDER_NAMES = (
     "HARNESS_IDENTITY",
@@ -87,7 +88,7 @@ def _contributed(assembly: dict[str, Any]) -> list[dict[str, Any]]:
 
 async def _mount(config: dict[str, Any] | None = None) -> Context:
     ctx = Context()
-    await ctx.use(SystemPromptService, config or {})
+    await mount(ctx, SystemPromptService, config or {})
     await ctx.flush()
     return ctx
 
@@ -102,7 +103,7 @@ async def _mint_scope(ctx: Context, name: str) -> Scope:
             nonlocal minted
             minted = create_scope(inner, {"name": name})
 
-    await ctx.use(_Minter)
+    await mount(ctx, _Minter)
     assert minted is not None
     return minted
 
@@ -492,7 +493,7 @@ async def test_removes_contributions_on_fiber_dispose() -> None:
             )
             inner.systemPrompt.variable("scoped_var", lambda _c: "v")
 
-    fiber = await ctx.use(_Contributor)
+    fiber = await mount(ctx, _Contributor)
     await ctx.flush()
     before = await ctx.systemPrompt.assemble()
     assert len(_contributed(before)) == 1
@@ -919,6 +920,7 @@ async def test_tool_order_sorting_validation_and_errors() -> None:
     ):
         fail_ctx = Context()
         fib = fail_ctx.use(SystemPromptService, {"toolOrder": bad_order})
+        await fail_ctx.flush()
         with pytest.raises(ValueError, match=pat):
             await fib.await_settle()
 

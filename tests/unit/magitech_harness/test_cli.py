@@ -1,6 +1,7 @@
 """Unit tests for magitech_harness CLI entrypoint and interactive REPL."""
 
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -87,7 +88,11 @@ async def test_repl_dispatcher_all_commands(tmp_path: Path) -> None:
     await ctx.flush()
 
     s = ctx.sessions.create("sess_main")
-    ctx.sessions.log_event(s, EventType.USER_MESSAGE, {"text": "persisted"})
+    ctx.sessions.log_event(
+        s,
+        EventType.USER_MESSAGE,
+        {"role": "user", "content": [{"type": "text", "text": "persisted"}]},
+    )
 
     out_lines = []
 
@@ -450,7 +455,11 @@ async def test_main_async_session_commands(tmp_path: Path, capsys) -> None:
     ctx = create_harness(storage_dir=tmp_path)
     await ctx.flush()
     s = ctx.sessions.create("persisted_123")
-    ctx.sessions.log_event(s, EventType.USER_MESSAGE, {"text": "hello persisted"})
+    ctx.sessions.log_event(
+        s,
+        EventType.USER_MESSAGE,
+        {"role": "user", "content": [{"type": "text", "text": "hello persisted"}]},
+    )
     await ctx.sessions.flush()
 
     # Test session list
@@ -1085,16 +1094,20 @@ async def test_cli_headless_subcommand_exit_codes_and_output(
             "agent/error", {"agent": fake_agent, "error": RuntimeError("orphan crash")}
         )
         # Non-turn/end event and wrong-session turn/end must not clear failure.
-        fake_ctx.emit(
-            "session/event",
-            fake_sess,
-            SimpleNamespace(type=EventType.STEP_START, seq=99),
-        )
-        fake_ctx.emit(
-            "session/event",
-            other_sess,
-            SimpleNamespace(type=EventType.TURN_END, seq=99),
-        )
+        # rc.13 emit propagates projection errors; these forged seqs are
+        # deliberately invalid, so contain them as the old swallow did.
+        with contextlib.suppress(ValueError):
+            fake_ctx.emit(
+                "session/event",
+                fake_sess,
+                SimpleNamespace(type=EventType.STEP_START, seq=99),
+            )
+        with contextlib.suppress(ValueError):
+            fake_ctx.emit(
+                "session/event",
+                other_sess,
+                SimpleNamespace(type=EventType.TURN_END, seq=99),
+            )
 
     fake_agent = _FakeAgent(fake_sess, _emit_agent_err)
 

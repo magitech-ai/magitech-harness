@@ -523,7 +523,11 @@ async def test_sessions_row_receives_storage_dir(tmp_path: Path) -> None:
     assert cache.cache is not None
     assert ctx.sessions.projection_cache is cache.cache
     session = ctx.sessions.create("k2_storage")
-    ctx.sessions.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    ctx.sessions.log_event(
+        session,
+        EventType.USER_MESSAGE,
+        {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+    )
     await ctx.sessions.flush()
     location = ctx.sessions.location(session.session_id)
     assert location is not None
@@ -541,7 +545,11 @@ async def test_storage_dir_none_ignores_ambient_env(
     await ctx.flush()
     assert ctx.sessions.base_storage_dir is None
     session = ctx.sessions.create("k2_memory_only")
-    ctx.sessions.log_event(session, EventType.USER_MESSAGE, {"text": "hi"})
+    ctx.sessions.log_event(
+        session,
+        EventType.USER_MESSAGE,
+        {"role": "user", "content": [{"type": "text", "text": "hi"}]},
+    )
     await ctx.sessions.flush()
     assert ctx.sessions.location(session.session_id) is None
     assert list(tmp_path.iterdir()) == []

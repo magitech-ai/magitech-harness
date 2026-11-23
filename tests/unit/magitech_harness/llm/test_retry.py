@@ -60,7 +60,23 @@ class _FakeAgent:
         self.session = session
 
 
-def _mount_retry(ctx: Context, *, internals: dict[str, Any] | None = None) -> Any:
+async def _mount_retry(ctx: Context, *, internals: dict[str, Any] | None = None) -> Any:
+    if internals is None:
+        fiber = ctx.use(apply)
+        await fiber.load()
+        return fiber
+
+    async def _plugin(plugin_ctx: Context) -> None:
+        await apply(plugin_ctx, {}, internals)
+
+    _plugin.inject = apply.inject  # type: ignore[attr-defined]
+    fiber = ctx.use(_plugin)
+    await fiber.load()
+    return fiber
+
+
+def _start_retry(ctx: Context, *, internals: dict[str, Any] | None = None) -> Any:
+    """Mount without awaiting: registration can be deliberately deferred."""
     if internals is None:
         return ctx.use(apply)
 
@@ -624,8 +640,9 @@ async def test_stale_callback_after_disposal_and_sleep_draining() -> None:
         disposed_sleep_called.set()
         await asyncio.sleep(10)
 
-    fiber = _mount_retry(ctx, internals={"sleep": slow_sleep, "random": lambda: 0.5})
-    await fiber
+    fiber = await _mount_retry(
+        ctx, internals={"sleep": slow_sleep, "random": lambda: 0.5}
+    )
     policy = resolve_retry_policy(
         {
             "mode": "normal",
@@ -645,8 +662,7 @@ async def test_stale_callback_after_disposal_and_sleep_draining() -> None:
 
     # Upstream waterfall captures retry's callback before disposal, then invokes next() after disposal
     ctx2, registry2, session2 = _setup_context()
-    fiber2 = _mount_retry(ctx2, internals={"random": lambda: 0.5})
-    await fiber2
+    fiber2 = await _mount_retry(ctx2, internals={"random": lambda: 0.5})
 
     downstream_calls = 0
 
@@ -716,7 +732,9 @@ async def test_overlapping_registration_outcomes(outcome: str) -> None:
     async def fast_sleep(delay_ms: float, _signal: AbortSignal) -> None:
         waits.append(delay_ms)
 
-    fiber = _mount_retry(ctx, internals={"sleep": fast_sleep})
+    # Do not await the load here: registration is deliberately deferred and
+    # would block it; the original suite relied on fire-and-forget mounting.
+    fiber = _start_retry(ctx, internals={"sleep": fast_sleep})
     await registered_evt.wait()
 
     signal = AbortSignal()
@@ -858,8 +876,7 @@ async def test_jsonl_persistence_roundtrip_and_loader_swapped_rows(
 async def test_disposed_retry_listener_returns_none_directly() -> None:
     """A retry listener invoked after its lifetime aborts short-circuits to None."""
     ctx, _registry, session = _setup_context()
-    plugin = _mount_retry(ctx, internals={"random": lambda: 0.5})
-    await plugin
+    plugin = await _mount_retry(ctx, internals={"random": lambda: 0.5})
     listeners = ctx.events._listeners.get("agent/request-error", [])
     retry_listener = next(
         listener

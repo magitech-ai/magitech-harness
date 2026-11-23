@@ -10,6 +10,7 @@ from anima import Context
 
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
+from tests._mount import mount
 
 
 class _StubAgent:
@@ -19,9 +20,9 @@ class _StubAgent:
 
 async def _harness() -> tuple[Context, AgentRegistry, Any]:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
+    await mount(ctx, SessionProjectionRegistry)
     fiber = ctx.use(AgentRegistry)
-    await fiber
+    await fiber.load()
     return ctx, ctx.agents, fiber
 
 

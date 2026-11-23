@@ -395,7 +395,7 @@ async def test_wait_settlement_timeout_abort_and_pull_sources() -> None:
 async def test_teardown_containment_done_rejection_and_owner_disposal() -> None:
     root = Context()
     reg_fiber = root.use(LocalJobRegistry)
-    await reg_fiber
+    await reg_fiber.load()
     reg: LocalJobRegistry = root.jobs
     agents = _FakeAgents(root)
 
@@ -480,5 +480,5 @@ async def test_teardown_containment_done_rejection_and_owner_disposal() -> None:
 
     # Dispose a registry with zero owned jobs (empty owner_cleanups branch)
     empty_fiber = root.use(LocalJobRegistry)
-    await empty_fiber
+    await empty_fiber.load()
     await empty_fiber.dispose()

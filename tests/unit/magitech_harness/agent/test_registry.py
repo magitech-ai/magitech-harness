@@ -14,6 +14,7 @@ from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.store import Session
+from tests._mount import mount
 
 
 class _StubAgent:
@@ -34,8 +35,8 @@ async def test_registry_waits_for_session_projections_and_reads_turn_boundaries(
     assert ctx.get("agents") is None
     assert fiber.state is FiberState.PENDING
 
-    await ctx.use(SessionProjectionRegistry)
-    await fiber
+    await mount(ctx, SessionProjectionRegistry)
+    await fiber.load()
 
     session = Session.create("turn-positions")
     assert ctx.agents.turn_boundary_of(session) == {
@@ -81,8 +82,8 @@ async def test_registers_entries_emits_lifecycle_events_and_unregisters_on_dispo
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     lifecycle: list[str] = []
     ctx.on("agent/created", lambda p: lifecycle.append(f"created:{p['agent'].id}"))
     ctx.on("agent/disposed", lambda p: lifecycle.append(f"disposed:{p['agent'].id}"))
@@ -103,8 +104,8 @@ async def test_registers_entries_emits_lifecycle_events_and_unregisters_on_dispo
 
 async def test_rejects_mismatched_agent_and_session_ids() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     agent = _StubAgent("agent-id", session=Session.create("session-id"))
 
     with pytest.raises(
@@ -118,8 +119,8 @@ async def test_rolls_back_entry_and_pairs_disposed_when_created_listener_throws(
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     lifecycle: list[str] = []
     ctx.on("agent/created", lambda p: lifecycle.append(f"created:{p['agent'].id}"))
 
@@ -139,8 +140,8 @@ async def test_rolls_back_async_created_rejection_and_contains_disposed_failures
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     heard: list[str] = []
 
     async def _async_veto(_payload: dict[str, Any]) -> None:
@@ -175,8 +176,8 @@ async def test_rolls_back_async_created_rejection_and_contains_disposed_failures
 
 async def test_awaits_each_created_listener_and_rejects_reentrant_announce() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     entered = asyncio.Event()
     release = asyncio.Event()
     order: list[str] = []
@@ -210,8 +211,8 @@ async def test_awaits_each_created_listener_and_rejects_reentrant_announce() -> 
 
 async def test_separates_entry_from_announcement_and_guards_stale_detach() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     lifecycle: list[str] = []
     ctx.on("agent/created", lambda p: lifecycle.append(f"created:{p['agent'].id}"))
     ctx.on("agent/disposed", lambda p: lifecycle.append(f"disposed:{p['agent'].id}"))
@@ -247,8 +248,8 @@ async def test_defers_detach_requested_by_created_listener_until_dispatch_settle
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     order: list[str] = []
     agent = _StubAgent("reentrant")
     detach = ctx.agents.enter(agent)
@@ -274,8 +275,8 @@ async def test_factory_seam_delegates_through_calling_context_and_canonicalizes(
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
 
     with pytest.raises(RuntimeError, match="no agent factory"):
         await ctx.agents.create({"sessionId": "s"})
@@ -322,7 +323,7 @@ async def test_factory_seam_delegates_through_calling_context_and_canonicalizes(
         await inner.agents.resume({"resumeSessionId": "resume-s"})
 
     _consumer.inject = ["agents"]  # type: ignore[attr-defined]
-    await ctx.use(_consumer)
+    await mount(ctx, _consumer)
 
     assert calls["create"][0][0] is caller_contexts[0]
     assert calls["create"][0][1] is caller_fibers[0]
@@ -338,8 +339,8 @@ async def test_factory_seam_rejects_second_factory_and_clears_on_owner_dispose()
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
 
     class _Factory:
         async def create_agent(
@@ -361,7 +362,7 @@ async def test_factory_seam_rejects_second_factory_and_clears_on_owner_dispose()
             inner.agents.set_factory(_Factory())
 
     _owner.inject = ["agents"]  # type: ignore[attr-defined]
-    owner_fiber = await ctx.use(_owner)
+    owner_fiber = await mount(ctx, _owner)
     assert await ctx.agents.create({"sessionId": "before-s"}) is not None
     await owner_fiber.dispose()
     with pytest.raises(RuntimeError, match="no agent factory"):
@@ -370,8 +371,8 @@ async def test_factory_seam_rejects_second_factory_and_clears_on_owner_dispose()
 
 async def test_factory_seam_canonicalizes_bound_service() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     seen: list[tuple[str, Any]] = []
 
     class _ServiceFactory(Service):
@@ -393,7 +394,7 @@ async def test_factory_seam_canonicalizes_bound_service() -> None:
                 "dispose": lambda: None,
             }
 
-    await ctx.use(_ServiceFactory)
+    await mount(ctx, _ServiceFactory)
     child = ctx.extend()
     bound = child.traced_factory
     assert isinstance(bound, _BoundService)
@@ -407,8 +408,8 @@ async def test_factory_seam_canonicalizes_bound_service() -> None:
 
 async def test_factory_seam_canonicalizes_original_proxy_attribute() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
 
     class _InnerFactory:
         async def create_agent(

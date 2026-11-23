@@ -11,6 +11,7 @@ from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.store import Session
+from tests._mount import mount
 
 
 class _LiveAgent:
@@ -50,8 +51,8 @@ async def test_turn_archive_admission_reports_turn_only_when_running_and_prepend
     None
 ):
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     busy = await _register_live(ctx, "busy", "running")
     await _register_live(ctx, "quiet", "idle")
 
@@ -71,8 +72,8 @@ async def test_turn_archive_admission_reports_turn_only_when_running_and_prepend
 
 async def test_turn_archive_admission_cancels_running_with_user_cause() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(AgentRegistry)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, AgentRegistry)
     running = await _register_live(ctx, "stop-me", "running")
     idle = await _register_live(ctx, "already-idle", "idle")
 
@@ -86,9 +87,9 @@ async def test_turn_archive_admission_cancels_running_with_user_cause() -> None:
 
 async def test_turn_archive_admission_stops_answering_after_registry_dispose() -> None:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
+    await mount(ctx, SessionProjectionRegistry)
     fiber = ctx.use(AgentRegistry)
-    await fiber
+    await fiber.load()
     agent = await _register_live(ctx, "watched", "running")
     assert await _ask(ctx, agent.id) == [{"kind": "turn"}]
 

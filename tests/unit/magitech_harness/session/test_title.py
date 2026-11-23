@@ -1015,7 +1015,7 @@ async def test_header_without_route_keeps_pending() -> None:
 
 async def test_routeless_header_event_keeps_pending() -> None:
     """Verifies a route-less header event leaves pending title work alone."""
-    ctx, service, title = _service()
+    _ctx, service, title = _service()
     session = service.create("s1")
     provider = _FakeProvider()
     title.register(provider)
@@ -1029,9 +1029,11 @@ async def test_routeless_header_event_keeps_pending() -> None:
         type="request/header",
         timestamp=1000.0,
         payload={"header": {}, "reason": {"kind": "start"}},
-        seq=99,
+        seq=session.seq + 1,
     )
-    ctx.emit("session/event", session, routeless)
+    # Exercise the header listener directly: the bus path hits the projection
+    # gap guard first, which is covered by the projection suite.
+    title._on_request_header(session, routeless)
     await _pump()
     assert provider.requests == []
     _header(session, service, provider="prov", model="mod")
