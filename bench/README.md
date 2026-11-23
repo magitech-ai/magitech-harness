@@ -32,7 +32,7 @@ point and a regression-detection aid, not a pass/fail contract.
 The session and fold workloads share a deterministic synthetic v4 log built by
 `bench/_synthetic.py` and validated through the real format layer
 (`restore_released_v4_artifact` + `assert_released_v4_relationships`). Values are
-neutral so they survive the history scrub.
+neutral so they remain stable across parity pins.
 
 ## Methodology
 

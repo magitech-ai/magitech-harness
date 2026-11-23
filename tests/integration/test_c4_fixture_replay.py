@@ -3,7 +3,7 @@
 The fixtures under ``tests/fixtures/v4/`` are sanitized recorded v4 session
 logs whose event shapes mirror the reference snapshot corpus (basic replay,
 session titles, compaction checkpoint, approval audit). Values are neutral so
-they survive the history scrub. Each fixture is validated by the real format
+they remain stable across parity pins. Each fixture is validated by the real format
 layer (``restore_released_v4_artifact`` + ``assert_released_v4_relationships``),
 written to a JSONL root, and cold-loaded through ``SessionService`` — the same
 seam the cross-tooling round-trip uses. Derived messages and projections are
