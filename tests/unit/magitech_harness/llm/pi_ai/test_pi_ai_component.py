@@ -141,26 +141,28 @@ def test_component_configuration_reaches_the_adapter() -> None:
     assert "llama-3.1-8b-instant" in models
 
 
-def test_component_refreshes_routes_on_volatile_update() -> None:
-    """A volatile config commit atomically replaces the registered routes."""
+@pytest.mark.asyncio
+async def test_component_refreshes_routes_on_config_update() -> None:
+    """A committed config atomically replaces the registered routes."""
     ctx = _ctx()
     dispose = apply(ctx, config={"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
     assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
-    fiber = ctx.fiber
-    fiber.raw_config = {
-        "providers": {
-            "groq": {"apiKeyEnv": "GROQ_API_KEY"},
-            "anthropic": {"apiKeyEnv": "ANTHROPIC_API_KEY"},
+    await ctx.fiber.update(
+        {
+            "providers": {
+                "groq": {"apiKeyEnv": "GROQ_API_KEY"},
+                "anthropic": {"apiKeyEnv": "ANTHROPIC_API_KEY"},
+            }
         }
-    }
-    ctx.emit("loader/volatile-update", [["providers"]])
+    )
     assert sorted(p["id"] for p in ctx.llm.list_providers()) == ["anthropic", "groq"]
     dispose()
 
 
-def test_component_ignores_unchanged_volatile_update() -> None:
-    """A volatile commit with identical facts does not duplicate registration."""
+@pytest.mark.asyncio
+async def test_component_ignores_unchanged_config_update() -> None:
+    """A config commit with identical facts does not duplicate registration."""
     import magitech_harness.llm.service as svc
 
     calls: list[list[str]] = []
@@ -176,84 +178,82 @@ def test_component_ignores_unchanged_volatile_update() -> None:
         apply(ctx, config={"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
         assert calls == []  # registration created at mount, not replaced
 
-        fiber = ctx.fiber
-        fiber.raw_config = {"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}}
-        ctx.emit("loader/volatile-update", [["providers"]])
+        await ctx.fiber.update({"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
         # First reconcile: atomic replace of the identical route set.
         assert calls == [["groq"]]
         assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
-        ctx.emit("loader/volatile-update", [["providers"]])
+        await ctx.fiber.update({"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
         # Facts unchanged again: no further replace.
         assert calls == [["groq"]]
     finally:
         svc.AdapterRegistrationHandle.replace = original_replace
 
 
-def test_component_clears_routes_when_config_empties() -> None:
-    """A volatile commit that empties the routes withdraws them all."""
+@pytest.mark.asyncio
+async def test_component_clears_routes_when_config_empties() -> None:
+    """A config commit that empties the routes withdraws them all."""
     ctx = _ctx()
     apply(ctx, config={"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
     assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
-    fiber = ctx.fiber
-    fiber.raw_config = {"providers": {}}
-    ctx.emit("loader/volatile-update", [["providers"]])
+    await ctx.fiber.update({"providers": {}})
     assert ctx.llm.list_providers() == []
 
 
-def test_component_registers_routes_added_after_dormant_mount() -> None:
-    """A dormant mount picks up routes added by a later volatile commit."""
+@pytest.mark.asyncio
+async def test_component_registers_routes_added_after_dormant_mount() -> None:
+    """A dormant mount picks up routes added by a later config update."""
     ctx = _ctx()
     apply(ctx)  # dormant: directory only, no routes
     assert ctx.llm.list_providers() == []
 
-    fiber = ctx.fiber
-    fiber.raw_config = {"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}}
-    ctx.emit("loader/volatile-update", [["providers"]])
+    await ctx.fiber.update({"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
     assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
 
-def test_component_stays_dormant_on_empty_volatile_update() -> None:
-    """A dormant mount with an empty volatile commit stays dormant."""
+@pytest.mark.asyncio
+async def test_component_stays_dormant_on_empty_config_update() -> None:
+    """A dormant mount with an empty config update stays dormant."""
     ctx = _ctx()
     apply(ctx)
     assert ctx.llm.list_providers() == []
 
-    fiber = ctx.fiber
-    fiber.raw_config = {"providers": {}}
-    ctx.emit("loader/volatile-update", [["providers"]])
+    await ctx.fiber.update({"providers": {}})
     assert ctx.llm.list_providers() == []
 
 
-def test_component_keeps_previous_routes_on_volatile_resolution_failure() -> None:
-    """A volatile commit that cannot resolve leaves the prior routes serving."""
+@pytest.mark.asyncio
+async def test_component_keeps_previous_routes_on_config_resolution_failure() -> None:
+    """A config commit that cannot resolve leaves the prior routes serving."""
     ctx = _ctx()
     apply(ctx, config={"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
     assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
-    fiber = ctx.fiber
-    fiber.raw_config = {"providers": {"deepseek": {"apiKeyEnv": "DEEPSEEK_API_KEY"}}}
+    await ctx.fiber.update(
+        {"providers": {"deepseek": {"apiKeyEnv": "DEEPSEEK_API_KEY"}}}
+    )
     # deepseek declares no models in the catalog → resolution fails loud.
-    ctx.emit("loader/volatile-update", [["providers"]])
     # The observer swallows the failure; previous routes keep serving.
     assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
 
-def test_component_replaces_routes_on_existing_registration() -> None:
-    """A volatile commit that swaps routes replaces through the live handle."""
+@pytest.mark.asyncio
+async def test_component_replaces_routes_on_existing_registration() -> None:
+    """A config commit that swaps routes replaces through the live handle."""
     ctx = _ctx()
     apply(ctx, config={"providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY"}}})
     assert [p["id"] for p in ctx.llm.list_providers()] == ["groq"]
 
-    fiber = ctx.fiber
-    fiber.raw_config = {"providers": {"anthropic": {"apiKeyEnv": "ANTHROPIC_API_KEY"}}}
-    ctx.emit("loader/volatile-update", [["providers"]])
+    await ctx.fiber.update(
+        {"providers": {"anthropic": {"apiKeyEnv": "ANTHROPIC_API_KEY"}}}
+    )
     assert [p["id"] for p in ctx.llm.list_providers()] == ["anthropic"]
 
 
-def test_component_replaces_directory_on_volatile_display_name_change() -> None:
-    """A volatile commit that changes directory facts atomically replaces entries."""
+@pytest.mark.asyncio
+async def test_component_replaces_directory_on_display_name_change() -> None:
+    """A config commit that changes directory facts atomically replaces entries."""
     ctx = _ctx()
     apply(
         ctx,
@@ -268,11 +268,13 @@ def test_component_replaces_directory_on_volatile_display_name_change() -> None:
     }
     assert before["groq"] == "Groq One"
 
-    fiber = ctx.fiber
-    fiber.raw_config = {
-        "providers": {"groq": {"apiKeyEnv": "GROQ_API_KEY", "displayName": "Groq Two"}}
-    }
-    ctx.emit("loader/volatile-update", [["providers"]])
+    await ctx.fiber.update(
+        {
+            "providers": {
+                "groq": {"apiKeyEnv": "GROQ_API_KEY", "displayName": "Groq Two"}
+            }
+        }
+    )
     after = {
         e["provider"]: e["displayName"] for e in ctx.llm.list_configurable_providers()
     }
