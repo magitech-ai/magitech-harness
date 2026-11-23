@@ -35,6 +35,7 @@ from magitech_harness.llm.service import (
 )
 from magitech_harness.llm.types import ModelResponse
 from magitech_harness.session.events import ToolCallData
+from tests._mount import mount
 
 
 @pytest.mark.asyncio
@@ -531,7 +532,7 @@ def test_register_adapter_validation_disposal_and_replace() -> None:
 async def test_adapters_updated_containment_and_fiber_disposal() -> None:
     """Sync and async listener errors warn without breaking registration; fiber teardown unregisters."""
     ctx = Context()
-    await ctx.use(LLMService)
+    await mount(ctx, LLMService)
     await ctx.flush()
     llm = ctx.llm
     warn_spy = MagicMock()
@@ -586,7 +587,7 @@ def test_adapters_updated_outside_event_loop_closes_async_listener() -> None:
 async def test_configurable_provider_directory_lifecycle_and_validation() -> None:
     """Configurable provider directory enforces atomic registration, detach, replace, and disposal."""
     ctx = Context()
-    await ctx.use(LLMService)
+    await mount(ctx, LLMService)
     await ctx.flush()
     llm = ctx.llm
     events = MagicMock()

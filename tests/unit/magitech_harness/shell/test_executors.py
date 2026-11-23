@@ -55,8 +55,8 @@ async def test_config_validation_and_executor_resolve(tmp_path: Path) -> None:
         LocalBashExecutor,
         {"cwd": str(tmp_path), "timeoutMs": 1000, "maxTimeoutMs": 2000},
     )
-    await f1
-    await f2
+    await f1.load()
+    await f2.load()
 
     exe: LocalBashExecutor = root.shell
     assert exe.sandbox_mode is None
@@ -107,8 +107,8 @@ async def test_bash_local_live_execution_streaming_kill_timeout_and_run(
             "graceMs": 100,
         },
     )
-    await f1
-    await f2
+    await f1.load()
+    await f2.load()
     exe: ShellExecutor = root.shell
 
     # 1. Foreground with stdin, env precedence, magitechEnv beating env, and ShellExecutor.run()

@@ -17,6 +17,7 @@ from magitech_harness.scope import (
     ScopeLayer,
     create_scope,
 )
+from tests._mount import mount
 
 
 class _TestLayer(ScopeLayer):
@@ -39,7 +40,7 @@ async def _mint_scope(ctx: Context, key: ScopeKey) -> Scope:
         nonlocal scope
         scope = create_scope(inner, key)
 
-    await ctx.use(_setup)
+    await mount(ctx, _setup)
     assert scope is not None
     return scope
 
@@ -355,7 +356,7 @@ async def test_scoped_layers_chain_layers_ancestors_farthest_first() -> None:
         nonlocal child_scope
         child_scope = create_scope(inner, child_key, {"parent": root_key})
 
-    await ctx.use(_mount_child)
+    await mount(ctx, _mount_child)
     assert child_scope is not None
 
     layers: ScopedLayers[_TestLayer] = ScopedLayers(

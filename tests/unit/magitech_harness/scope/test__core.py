@@ -27,6 +27,7 @@ from magitech_harness.scope import (
     scope_target,
     waterfall_scoped,
 )
+from tests._mount import mount
 
 
 async def _mint_scope(
@@ -41,7 +42,7 @@ async def _mint_scope(
         nonlocal minted
         minted = create_scope(inner, key, options)
 
-    await ctx.use(_mount)
+    await mount(ctx, _mount)
     assert minted is not None
     return minted
 
@@ -83,7 +84,7 @@ async def test_create_scope_usable_synchronously_before_backing_fiber_activates(
         scope.ctx.effect(lambda: lambda: events.append("disposed"))
         events.append("registered")
 
-    await ctx.use(_setup)
+    await mount(ctx, _setup)
     assert scope is not None
     assert events == ["registered"]
     await scope.dispose()

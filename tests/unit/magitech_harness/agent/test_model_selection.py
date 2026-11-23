@@ -18,6 +18,7 @@ from magitech_harness.llm.message import create_user_message
 from magitech_harness.session.projection_registry import SessionProjectionRegistry
 from magitech_harness.session.service import SessionService
 from magitech_harness.session.store import Session
+from tests._mount import mount
 
 INITIAL = {"provider": "alpha", "model": "a0"}
 INPUT = create_user_message(
@@ -52,8 +53,8 @@ async def _async_setup(
     options: dict[str, Any] | None = None,
 ) -> tuple[Context, _StubAgent, Session, AgentModel, Any]:
     ctx = Context()
-    await ctx.use(SessionProjectionRegistry)
-    await ctx.use(SessionService)
+    await mount(ctx, SessionProjectionRegistry)
+    await mount(ctx, SessionService)
     projection = ctx.sessionProjections.register(model_selection_projection_definition)
     session = ctx.sessions.create("model-selection")
     opts = dict(INITIAL) if options is None else options

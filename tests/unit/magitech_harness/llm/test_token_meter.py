@@ -1460,7 +1460,7 @@ async def test_pre_init_synchronous_measure_and_swapped_row_probe(
         meter.context_pressure(s)
 
     release_reg.set_result(None)
-    await fiber
+    await fiber.load()
     post_m = meter.measure(s)
     assert post_m["totalTokens"] == pre_m["totalTokens"]
     await fiber.dispose()
@@ -1483,7 +1483,7 @@ async def test_pre_init_synchronous_measure_and_swapped_row_probe(
     await reg_started2.wait()
     ctx.tokenMeter.dispose()
     release_reg2.set_result(None)
-    await fiber2
+    await fiber2.load()
     await fiber2.dispose()
 
     reg.dispose()
