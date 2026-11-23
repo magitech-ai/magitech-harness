@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from anima import Context, Disposer
+from anima import Context, Disposer, EventMode
 
 from magitech_harness.llm.pi_ai.adapter import PiAiAdapter
 from magitech_harness.llm.pi_ai.config import ResolvedProfile, resolve_profiles
@@ -98,12 +98,13 @@ def apply(
 ) -> Disposer:
     """Mount the pi-ai multi-provider adapter onto ctx.llm.
 
-    The mount is reactive: whenever a volatile config commit touches this
-    component's fiber, the directory entries and adapter routes are
-    atomically re-resolved from the fiber's live config and re-registered
-    only when the facts actually changed (atomic replace, never
-    dispose-then-register, matching the documented contract). A bare
-    mount with zero routes stays dormant (directory only).
+    The mount is reactive: whenever this fiber's config is updated through
+    Anima's rc.13 native lifecycle (``Fiber.update`` -> ``internal/update``
+    waterfall), the directory entries and adapter routes are atomically
+    re-resolved from the fiber's live config and re-registered only when the
+    facts actually changed (atomic replace, never dispose-then-register,
+    matching the documented contract). A bare mount with zero routes stays
+    dormant (directory only).
 
     Args:
         ctx: Active Anima Context.
@@ -137,7 +138,7 @@ def apply(
         registration = llm.register_adapter(routes, adapter)
 
     current_dir_facts = _directory_facts(directory_entries(resolved))
-    # Sentinel: "no route facts established yet" so an empty volatile commit
+    # Sentinel: "no route facts established yet" so an empty config update
     # on a dormant mount is still reconciled (branch coverage).
     current_route_facts: Any = None
 
@@ -165,8 +166,14 @@ def apply(
             current_route_facts = new_route_facts
         resolved = new_resolved
 
-    def on_volatile_update(_paths: Any) -> None:
-        """Reconcile directory and routes after a volatile config commit.
+    def on_config_update(_resolved: Any) -> None:
+        """Accept this fiber's config update in place and reconcile.
+
+        Subscribes to the rc.13 ``internal/update`` waterfall scoped to this
+        mount's fiber; the update is accepted in place (the default handler
+        that restarts the fiber does not run) and the directory entries and
+        adapter routes are atomically re-resolved from the fiber's live
+        config, replacing only when the facts actually changed.
 
         A resolution failure leaves the previous registration serving (the
         reference logs the conflict and keeps prior state).
@@ -175,13 +182,15 @@ def apply(
             refresh()
         except Exception:  # observer must not crash the emitter
             logger.exception(
-                "pi-ai: volatile config update conflicts with existing provider route"
+                "pi-ai: config update conflicts with existing provider route"
             )
 
-    volatile_listener = ctx.on("loader/volatile-update", on_volatile_update)
+    config_update_listener = ctx.on(
+        "internal/update", on_config_update, mode=EventMode.WATERFALL
+    )
 
     def _teardown() -> None:
-        volatile_listener()
+        config_update_listener()
         if registration is not None:
             registration()
         directory_handle()
