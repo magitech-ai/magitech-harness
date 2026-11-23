@@ -6,10 +6,10 @@ canonical `define_tool` contract in `src/magitech_harness/tools/schema.py`. This
 page is maintained by hand from source; the docs review checks it against the
 registration calls. Domain tools live in `mth-plugins`; the harness ships none.
 
-All shipped tools currently use the legacy `Tool` registration form, so none
-declares `requiresApproval` or `timeoutMs`. Those fields are consumed only for
-canonically defined tools. `run_code` is a reserved name and cannot be
-registered.
+All shipped tools are registered with `define_tool` from
+`magitech_harness.tools.schema`. Tools that need approval or a deadline declare
+`requiresApproval` or `timeoutMs` in their spec; `run_code` is a reserved name
+and cannot be registered.
 
 ## Filesystem and shell
 
