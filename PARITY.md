@@ -24,6 +24,11 @@ names who accepted its reason.
   was built and conformance-recorded against. Malcom decided (2026-11-18) to
   freeze the 1.0 audit here; rc.3 (`39163dd3…`) drift is listed in the
   post-1.0 appendix, not counted against 1.0.
+- **Reference identity:** DeepSeek Harness, built on Cordis and its preprint
+  "A Programming Paradigm for Spatiotemporal Composability" (arXiv:2608.25512).
+  This Python stack implements that kernel paradigm; the lineage is published
+  in `anima/README.md`, attributed in `anima/NOTICE`, and recorded in
+  agents-home decision D-025.
 - **Python repos:** anima `0.3.0` @ release bump, magitech-harness `0.3.0` @ C6-fix
   merge, mth-plugins `0.3.0` @ release bump merge. All clean on `main`.
 - **Suites (100% statement + branch coverage):** anima 1228, harness 2285,
@@ -110,23 +115,23 @@ names who accepted its reason.
 | 20 findings as live conformance cases | DONE | `test_c4_conformance.py` (FIND-01..20) |
 | ACC-06 bidirectional wire round-trip | DONE | `test_cross_tooling_roundtrip.py`, conformance ACC-06; see `docs/conformance/acc-06.md` |
 | Spill, session-query, telemetry, credentials, schedule (P7 landed early) | DONE | Conformance-covered; Phase 7 tail but landed and proven |
-| History scrub clean in tree AND history (§12 done-state) | PARTIAL | Tree is scrub-clean in all three repos (0 findings). Two 2026-11-07 commit messages in harness history remain: one port-claim phrase and one reference-kernel naming phrase. A partial force-push was judged risky **and** incomplete (16 remote branches, 14 open anima PRs, GitHub pull refs not rewritable); a complete rewrite needs the separate delete/recreate operation. **Malcom accepted (2026-11-18)** recording this as a PARTIAL to keep 1.0 moving rather than performing a destructive rewrite he was uneasy about. Rehearsal verified and preserved; full rewrite deferred to a separately-authorized operation. |
+| Lineage disclosed openly (former §12 scrub requirement) | DONE | Ratified 2026-11-22 in agents-home D-025 and anima ADR 0012: the Cordis / DeepSeek Harness lineage is stated in `anima/README.md`, attributed in `anima/NOTICE`, and pinned above. The scrub-check gate was retired; no history rewrite is needed or authorised. The two 2026-11-07 commit messages remain in harness history by decision. |
 
 ## Acceptance summary
 
 - In-scope MISSING: **none**.
 - In-scope DIVERGED: **none**.
 - PARTIAL rows: all carry reasons accepted by Malcom (ratified §8, §8 rulings,
-  pinned conformance rows, or his 2026-11-18 scrub decision) — none accepted
-  by an agent on his behalf.
+  pinned conformance rows, or the 2026-11-18 scrub decision, now superseded) —
+  none accepted by an agent on his behalf.
 - Criterion 1 (the parity map) therefore holds at the rc.1 audit target.
 - Re-ratification 2026-11-19: PIN-01 moved from PARTIAL to DONE at Malcom's
   decision after anima adopted failure aggregation (all-settled semantics,
   `ExceptionGroup` for ≥2 failures); the acceptance test and both parity maps
   were updated in the same refinement program.
-- §12 scrub done-state is **PARTIAL with Malcom's accepted reason** (above);
-  the two residual commit messages are the only known deviation from the
-  binary "clean in tree AND history" line.
+- §12's "clean in tree AND history" line was **superseded on 2026-11-22** by
+  ratified lineage disclosure (D-025 / ADR 0012); no history rewrite is needed
+  or authorised, and the two residual commit messages remain by decision.
 
 ## Post-1.0 appendix — rc.3 drift (NOT counted against 1.0)
 
