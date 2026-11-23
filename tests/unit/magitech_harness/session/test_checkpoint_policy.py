@@ -177,7 +177,7 @@ async def test_llm_stream_log_is_durable_before_first_chunk(tmp_path: Path) -> N
     order: list[str] = []
     _install_recording_provider(ctx, order)
     session = ctx.sessions.create("llm-durable")
-    ctx.sessions.log_event(session, EventType.TURN_START, {"turn_id": "turn-1"})
+    ctx.sessions.log_event(session, EventType.TURN_START, {"turn": 1})
 
     stream = ctx.llm.stream(messages=[], session_id=session.session_id)
     first = await stream.__aiter__().__anext__()

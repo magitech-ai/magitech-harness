@@ -879,7 +879,9 @@ def test_drive_stall_leaves_cell_behind() -> None:
     # Forge a gap: the log's second event claims a later seq.
     forged = _event("approval/policy", {"policy": "x"}, 5, 2000)
     session.events.append(forged)
-    ctx.emit("session/event", session, forged)
+    # rc.13 emit propagates listener errors; the stalled cell stays put.
+    with pytest.raises(ValueError, match="cannot advance"):
+        ctx.emit("session/event", session, forged)
     assert registry.cached_snapshot(session)["as_of_seq"] == 0
 
 
@@ -1115,9 +1117,9 @@ def test_on_event_changed_batches_changes_and_delivers_on_throw(
 
     off_boom = registry.on_changed(_boom_on_beta)
     ev2 = session.append("approval/policy", {"policy": "y"})
-    with caplog.at_level("ERROR"):
+    # rc.13 emit propagates the listener error to the caller.
+    with pytest.raises(RuntimeError, match="boom"):
         ctx.emit("session/event", session, ev2)
-    assert "boom" in caplog.text
     assert len(event_batches) == 2
     assert event_batches[1][0] == [
         {"key": "alpha", "val": {"v": 2}},

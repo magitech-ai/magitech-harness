@@ -920,6 +920,7 @@ async def test_tool_order_sorting_validation_and_errors() -> None:
     ):
         fail_ctx = Context()
         fib = fail_ctx.use(SystemPromptService, {"toolOrder": bad_order})
+        await fail_ctx.flush()
         with pytest.raises(ValueError, match=pat):
             await fib.await_settle()
 
