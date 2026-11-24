@@ -8,11 +8,11 @@ harness — no benchmark dependency, no shipped entry point, no network.
 ## Running
 
 ```sh
-uv run python -m bench                       # all workloads, repeat=7 warmup=2
-uv run python -m bench --only turn-latency   # one workload
-uv run python -m bench --list                # workload ids
-uv run python -m bench --json                # machine-readable samples + environment
-uv run python -m bench --repeat 15 --warmup 3
+uv run -m bench                       # all workloads, repeat=7 warmup=2
+uv run -m bench --only turn-latency   # one workload
+uv run -m bench --list                # workload ids
+uv run -m bench --json                # machine-readable samples + environment
+uv run -m bench --repeat 15 --warmup 3
 ```
 
 The package lives outside `src/`, so it is not in the wheel and is exempt from
@@ -64,7 +64,7 @@ a new `--json` run against these within the same environment.
 
 ### Environment
 
-- Command: `uv run python -m bench` (repeat=7, warmup=2)
+- Command: `uv run -m bench` (repeat=7, warmup=2)
 - Python 3.14.9, Linux (x86_64, 8 logical CPUs), uv-managed virtualenv
 - Commit: the C5 benchmark-suite merge on `main`
 

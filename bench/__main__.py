@@ -1,4 +1,4 @@
-"""Benchmark runner: ``uv run python -m bench``.
+"""Benchmark runner: ``uv run -m bench``.
 
 Options:
   --repeat N     timed samples per workload (default 7)
