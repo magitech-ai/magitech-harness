@@ -91,13 +91,13 @@ EXPECTED_ROWS = [
     {
         "id": "bash-local",
         "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
-        "disabled": {"__jsExpr": "process.platform === 'win32'"},
+        "disabled_on": ["win32"],
         "config": {},
     },
     {
         "id": "pwsh-local",
         "name": "magitech_harness.shell.pwsh_local:LocalPwshExecutor",
-        "disabled": {"__jsExpr": "process.platform !== 'win32'"},
+        "enabled_on": ["win32"],
         "config": {},
     },
     {

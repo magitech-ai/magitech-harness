@@ -30,11 +30,11 @@
   config: {}
 - id: bash-local
   name: magitech_harness.shell.bash_local:LocalBashExecutor
-  disabled: !!js process.platform === 'win32'
+  disabled_on: [win32]
   config: {}
 - id: pwsh-local
   name: magitech_harness.shell.pwsh_local:LocalPwshExecutor
-  disabled: !!js process.platform !== 'win32'
+  enabled_on: [win32]
   config: {}
 - id: jobs
   name: magitech_harness.jobs.local:LocalJobRegistry
