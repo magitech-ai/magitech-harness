@@ -16,7 +16,7 @@ import logging
 import os
 from typing import TypedDict
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.spill.service import (
     SaveTextSpill,

@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, BinaryIO, Literal
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.fs.patch import PatchHunk, apply_hunks

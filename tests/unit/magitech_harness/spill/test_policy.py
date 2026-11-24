@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.spill.local import LocalSpillStore
 from magitech_harness.spill.policy import apply

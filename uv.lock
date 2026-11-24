@@ -7,9 +7,9 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "anima"
+name = "animas"
 version = "1.0.0"
-source = { editable = "../anima" }
+source = { editable = "../animas" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -407,7 +407,7 @@ name = "magitech-harness"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
-    { name = "anima" },
+    { name = "animas" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -424,7 +424,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anima", editable = "../anima" },
+    { name = "animas", editable = "../animas" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "pydantic", specifier = ">=2.14.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },

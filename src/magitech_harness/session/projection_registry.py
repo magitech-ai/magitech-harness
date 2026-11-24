@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 from weakref import WeakKeyDictionary
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.session.events import SessionEvent
 

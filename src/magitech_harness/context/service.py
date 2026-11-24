@@ -7,8 +7,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from anima import Context, Disposer, Service
-from anima.core import _access_context
+from animas import Context, Disposer, Service
+from animas.core import _access_context
 
 logger = logging.getLogger(__name__)
 

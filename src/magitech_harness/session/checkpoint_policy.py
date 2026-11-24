@@ -18,7 +18,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from anima import Context, Disposer, EventMode
+from animas import Context, Disposer, EventMode
 
 from magitech_harness.session.events import ToolCallData, ToolResultData
 from magitech_harness.session.store import Session, SessionStore

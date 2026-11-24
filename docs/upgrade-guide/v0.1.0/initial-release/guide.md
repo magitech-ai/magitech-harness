@@ -8,7 +8,7 @@ description: The initial 0.1.0 harness baseline.
 ## Change
 
 The 0.1.0 baseline established the event-sourced session core, the composable
-service mount model on the Anima kernel, the turn loop, and the strict quality
+service mount model on the Animas kernel, the turn loop, and the strict quality
 gates (100% statement and branch coverage, strict mypy). It introduced the
 concepts documented in [CONTEXT.md](../../../../CONTEXT.md) and the first set of
 [architecture decisions](../../../adr/).

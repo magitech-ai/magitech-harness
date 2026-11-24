@@ -15,7 +15,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, TypedDict, cast
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.session.events import EventType, SessionEvent
 from magitech_harness.session.projection_registry import (

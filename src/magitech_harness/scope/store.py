@@ -6,8 +6,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any, Protocol, TypedDict, cast
 
-from anima import Context, Disposer
-from anima.core import _current_fiber
+from animas import Context, Disposer
+from animas.core import _current_fiber
 
 from magitech_harness.scope._core import ScopeKey, scope_chain_of, scope_of
 

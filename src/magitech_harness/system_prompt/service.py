@@ -10,8 +10,8 @@ import re
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, NotRequired, TypedDict, cast
 
-from anima import Context, Disposer, Service
-from anima.core import _access_context
+from animas import Context, Disposer, Service
+from animas.core import _access_context
 
 from magitech_harness.scope import (
     AnonymousEntries,

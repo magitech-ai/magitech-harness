@@ -10,9 +10,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context, EventMode, FiberState
-from anima.jsexpr import dump_yaml
-from anima.loader import load_profile
+from animas import Context, EventMode, FiberState
+from animas.jsexpr import dump_yaml
+from animas.loader import load_profile
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.retry import (

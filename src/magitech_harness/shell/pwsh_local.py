@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.shell._subprocess_base import (
     SubprocessShellExecutor,

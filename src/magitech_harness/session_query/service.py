@@ -16,7 +16,7 @@ from __future__ import annotations  # pragma: no cover
 from typing import ClassVar  # pragma: no cover
 
 # pragma: no cover
-from anima import Context, Service  # pragma: no cover
+from animas import Context, Service  # pragma: no cover
 
 # pragma: no cover
 from magitech_harness.session_query.engine import (  # pragma: no cover

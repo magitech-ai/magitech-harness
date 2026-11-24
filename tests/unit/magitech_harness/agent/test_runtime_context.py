@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.runtime_context import (
     RuntimeContextProjection,

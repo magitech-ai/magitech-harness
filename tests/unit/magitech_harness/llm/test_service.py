@@ -9,7 +9,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.llm import (

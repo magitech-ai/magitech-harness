@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Mapping
 from typing import Any, cast
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.agent.model_selection import model_selection_projection_definition

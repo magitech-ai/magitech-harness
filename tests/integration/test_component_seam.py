@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from anima import Context, FiberState
+from animas import Context, FiberState
 
 from magitech_harness import create_harness
 from magitech_harness.llm.service import MockLLMProvider

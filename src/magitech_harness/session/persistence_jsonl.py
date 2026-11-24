@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Self
 
-from anima import Context, Disposer, Service
+from animas import Context, Disposer, Service
 
 from magitech_harness.session.events import (
     KNOWN_SESSION_EVENT_TYPES,

@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.spill.local import LocalSpillStore
 from magitech_harness.spill.store import sessionDir

@@ -16,9 +16,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from anima import Context, FiberState, Service
-from anima.jsexpr import dump_yaml, load_yaml
-from anima.loader import LoaderService, load_profile
+from animas import Context, FiberState, Service
+from animas.jsexpr import dump_yaml, load_yaml
+from animas.loader import LoaderService, load_profile
 
 import magitech_harness
 from magitech_harness import (

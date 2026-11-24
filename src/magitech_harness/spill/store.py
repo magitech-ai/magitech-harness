@@ -1,7 +1,7 @@
 """Kernel-independent storage mechanics for the local spill backend.
 
 Private session-scoped directory selection, safe-name derivation, path-traversal
-protection, and the exclusive owner-only write. No anima or harness imports --
+protection, and the exclusive owner-only write. No animas or harness imports --
 this module is pure Python standard library so it can be tested in isolation.
 
 Local filesystem store for spilled text.

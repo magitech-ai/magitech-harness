@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.shell.types import (

@@ -9,7 +9,7 @@ from typing import Any, ClassVar
 from unittest.mock import patch
 
 import pytest
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.scope import Scope, ScopeKey, create_scope, scope_of
 from magitech_harness.system_prompt import (

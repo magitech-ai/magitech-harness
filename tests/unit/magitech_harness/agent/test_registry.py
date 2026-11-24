@@ -6,9 +6,9 @@ import asyncio
 from typing import Any
 
 import pytest
-from anima import Context, FiberState, Service
-from anima.core import symbols
-from anima.reflect import _BoundService
+from animas import Context, FiberState, Service
+from animas.core import symbols
+from animas.reflect import _BoundService
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.agent.registry import AgentRegistry

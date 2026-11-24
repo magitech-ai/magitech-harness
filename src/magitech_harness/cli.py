@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from anima import Context
+from animas import Context
 
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortError

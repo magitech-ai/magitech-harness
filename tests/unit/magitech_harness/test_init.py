@@ -2,7 +2,7 @@
 
 from typing import ClassVar
 
-from anima import Context
+from animas import Context
 
 import magitech_harness
 from magitech_harness import MockLLMProvider
@@ -26,7 +26,7 @@ def test_package_exports() -> None:
 
 
 def test_create_harness_default() -> None:
-    """Verifies that create_harness boots an Anima Context with all core services."""
+    """Verifies that create_harness boots an Animas Context with all core services."""
     ctx = magitech_harness.create_harness()
     assert isinstance(ctx, Context)
     assert ctx.has("sessions")

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from typing import Any
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.fs.patch import PatchHunk

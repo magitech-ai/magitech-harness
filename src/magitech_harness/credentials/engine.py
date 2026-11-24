@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar, Literal, Self, TypedDict, cast
 
-from anima import Context, Service
+from animas import Context, Service
 
 __all__ = [
     "CredentialConfig",
@@ -115,7 +115,7 @@ class CredentialService(Service):
     user.
 
     Args:
-        ctx: The anima Context to register the service on.
+        ctx: The animas Context to register the service on.
         config: Optional configuration (currently unused).
     """
 

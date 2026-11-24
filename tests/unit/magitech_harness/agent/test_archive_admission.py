@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.archive_admission import install_turn_archive_admission
 from magitech_harness.agent.cancellation import AbortSignal

@@ -10,9 +10,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from anima import Context, FiberState
-from anima.jsexpr import load_yaml
-from anima.loader import LoaderService
+from animas import Context, FiberState
+from animas.jsexpr import load_yaml
+from animas.loader import LoaderService
 
 from magitech_harness.agent.agent_loop import AgentLoop, FactoryOwnership
 from magitech_harness.agent.assistant_stream import AssistantStreamAttempt

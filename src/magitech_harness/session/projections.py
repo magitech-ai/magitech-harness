@@ -16,7 +16,7 @@ import os
 import re
 from typing import Annotated, Any, Self, cast
 
-from anima import Context, Disposer
+from animas import Context, Disposer
 from pydantic import (
     AfterValidator,
     BaseModel,

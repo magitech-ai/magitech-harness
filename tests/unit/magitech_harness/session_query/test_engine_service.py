@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.session_query.engine import SessionQueryEngine
 from magitech_harness.session_query.service import SessionQueryService

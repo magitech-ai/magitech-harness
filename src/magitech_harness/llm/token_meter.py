@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, ClassVar, cast
 from weakref import WeakKeyDictionary
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.llm.assistant_stream import (
     assemble_assistant_stream,

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortController
 from magitech_harness.fs.local import LocalFileSystem

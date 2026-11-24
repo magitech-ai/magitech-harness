@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.fs.observation_policy import apply as apply_observation_policy
 from magitech_harness.fs.types import FsError, FsTarget

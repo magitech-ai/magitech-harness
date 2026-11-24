@@ -21,7 +21,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
-from anima import Context, Disposer
+from animas import Context, Disposer
 
 from magitech_harness.session.title import (
     TitleProviderRequest,

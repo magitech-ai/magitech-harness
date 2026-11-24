@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar, TypedDict
 
-from anima import Context, Service
+from animas import Context, Service
 
 __all__ = [
     "EventReporter",

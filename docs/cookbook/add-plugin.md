@@ -13,7 +13,7 @@
 
    ```python
    # my_package/my_component.py
-   from anima import Context, EventMode
+   from animas import Context, EventMode
 
    def apply(ctx: Context, config: dict | None = None, **kwargs) -> None:
        def on_result(view, result, next_fn):

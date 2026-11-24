@@ -19,8 +19,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from dataclasses import dataclass
 from typing import Any, Protocol, cast, overload
 
-from anima import Context, Service
-from anima.events import Disposer
+from animas import Context, Service
+from animas.events import Disposer
 
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.llm.adapter_failure import (
@@ -533,7 +533,7 @@ def _detach_directory_entry(entry: LlmConfigurableProvider) -> LlmConfigurablePr
 
 
 def _sync_dispose(dispose: Disposer) -> Callable[[], None]:
-    """Wrap an anima Disposer into a synchronous zero-argument handle."""
+    """Wrap an animas Disposer into a synchronous zero-argument handle."""
 
     def _close() -> None:
         _ = dispose()

@@ -435,14 +435,14 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "pinned",
         "parallel dispatch raises the first error instead of an aggregate",
         (),
-        "Pinned in anima tests/integration/test_phase1_acceptance.py::test_acceptance_dispatch_modes. Needs a design decision, not a drive-by fix.",
+        "Pinned in animas tests/integration/test_phase1_acceptance.py::test_acceptance_dispatch_modes. Needs a design decision, not a drive-by fix.",
     ),
     (
         "PIN-02",
         "pinned",
         "context provide notifies at registration time rather than after ACTIVE",
         (),
-        "Pinned in anima tests/integration/test_phase1_acceptance.py::test_acceptance_mount_event_sequence (count-only). Needs a design decision, not a drive-by fix.",
+        "Pinned in animas tests/integration/test_phase1_acceptance.py::test_acceptance_mount_event_sequence (count-only). Needs a design decision, not a drive-by fix.",
     ),
     (
         "DEF-01",

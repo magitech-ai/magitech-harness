@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.shell.types import ShellResult

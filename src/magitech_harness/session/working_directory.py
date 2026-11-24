@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from typing import Any, ClassVar
 from weakref import WeakKeyDictionary
 
-from anima import Context, EventMode, Service
+from animas import Context, EventMode, Service
 
 from magitech_harness.agent.cancellation import (
     AbortController,

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Literal
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.jobs.archive_admission import install_job_archive_admission

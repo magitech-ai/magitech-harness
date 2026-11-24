@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.agent_loop import (
     CONFIGURED_AGENT_IDENTITIES_KEY,
@@ -1259,7 +1259,7 @@ async def test_agent_loop_remaining_route_drain_inactive_and_teardown_paths(
     )
     await setup_started.wait()
     # Dispose factory while _publish is inside slow_pub_setup -> hits publication_done await (788)
-    # AND rollback dispose failure (956-957)! (anima catches & logs effect unload failures)
+    # AND rollback dispose failure (956-957)! (animas catches & logs effect unload failures)
     await ctx_pub.fiber.dispose()
     with pytest.raises(RuntimeError):
         await create_pub

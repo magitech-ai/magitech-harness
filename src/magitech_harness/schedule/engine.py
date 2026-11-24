@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, ClassVar, Literal, TypedDict, cast
 
-from anima import Context, Service
+from animas import Context, Service
 
 __all__ = [
     "ScheduleConfig",
@@ -159,7 +159,7 @@ class ScheduleService(Service):
     tasks. Each task has its own timing, target, and lifecycle state.
 
     Args:
-        ctx: The anima Context to register the service on.
+        ctx: The animas Context to register the service on.
         config: Optional configuration (delivery settings).
     """
 

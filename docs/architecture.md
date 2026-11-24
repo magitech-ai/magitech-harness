@@ -12,17 +12,17 @@ Source of truth: the mounted rows in
 composition in [`__init__.py`](../src/magitech_harness/__init__.py), and the
 decision records in [adr/](adr/).
 
-## Anima and the Context
+## Animas and the Context
 
-The harness is built on the `anima` micro-kernel. A `Context` is the root
+The harness is built on the `animas` micro-kernel. A `Context` is the root
 object; services are mounted on it as rows and addressed as attributes such as
-`ctx.sessions`, `ctx.tools`, `ctx.llm`, and `ctx.agents` / `ctx.agentLoop`. Anima supplies the
+`ctx.sessions`, `ctx.tools`, `ctx.llm`, and `ctx.agents` / `ctx.agentLoop`. Animas supplies the
 event bus (observers, waterfalls, scoped emit), the effect/disposer registry,
 and fiber-local context. Sessions are the durable substrate; the kernel is not a
 persistence layer.
 
-**[Python]** The Python runtime builds on the Anima micro-kernel; see
-`anima`. The seam vocabulary (mount, emit, waterfall, dispose) is equivalent;
+**[Python]** The Python runtime builds on the Animas micro-kernel; see
+`animas`. The seam vocabulary (mount, emit, waterfall, dispose) is equivalent;
 the package name is not. See [adr/0001](adr/0001-event-sourced-sessions-with-compaction-seam.md).
 
 ## Profiles and bundles

@@ -1,6 +1,6 @@
 # Magitech Harness
 
-The native Python agent runtime substrate and turn execution engine powered by the Anima micro-kernel.
+The native Python agent runtime substrate and turn execution engine powered by the Animas micro-kernel.
 
 ## Language
 

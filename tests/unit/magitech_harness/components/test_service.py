@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from anima import Context, FiberState
+from animas import Context, FiberState
 
 from magitech_harness.components.manifest import ComponentManifest
 from magitech_harness.components.service import (
@@ -92,8 +92,8 @@ def test_split_entry_point_file_attr_and_module_paths(tmp_path: Path) -> None:
         "custom_apply",
     )
     assert _split_entry_point("component.py", manifest) == ("component.py", None)
-    assert _split_entry_point("anima.core:Context", manifest) == (
-        "anima.core:Context",
+    assert _split_entry_point("animas.core:Context", manifest) == (
+        "animas.core:Context",
         None,
     )
 
@@ -184,7 +184,7 @@ async def test_component_service_mount_module_path() -> None:
     manifest = ComponentManifest(
         name="standard-module-component",
         version="1.0.0",
-        entry_point="anima.core:Context",
+        entry_point="animas.core:Context",
     )
 
     ctx = Context()

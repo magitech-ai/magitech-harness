@@ -9,8 +9,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, ClassVar, cast
 
-from anima import Context, Disposer, Service
-from anima.core import _access_context
+from animas import Context, Disposer, Service
+from animas.core import _access_context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.types import ToolSchema

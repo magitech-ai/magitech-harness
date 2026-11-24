@@ -18,4 +18,4 @@ jobs:
       checkout-path: "magitech-harness"
       working-directory: "magitech-harness"
       pre-commands: |
-        git clone --depth 1 https://github.com/magitech-ai/anima.git anima
+        git clone --depth 1 https://github.com/magitech-ai/animas.git animas

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, TypedDict
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.contracts import (
     AgentOptions,

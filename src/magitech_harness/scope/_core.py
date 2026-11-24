@@ -9,8 +9,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
-from anima import Context, Disposer, Fiber
-from anima.core import Service, _BoundService, _current_fiber
+from animas import Context, Disposer, Fiber
+from animas.core import Service, _BoundService, _current_fiber
 
 ScopeKey = object
 

@@ -11,7 +11,7 @@ Streaming token deltas from language models can be implemented via observer call
 
 We define the model streaming protocol using native Python asynchronous generators:
 1. In the `LLMProvider` protocol, streaming is declared as `def stream(self, request: ModelRequest, ...) -> AsyncIterator[ModelChunk]` (returning an asynchronous iterator rather than an awaitable coroutine returning an iterator).
-2. The core `LLMService` wraps streaming through the Anima waterfall event `llm/stream`, allowing guardrails to inspect or modify chunk streams on the fly.
+2. The core `LLMService` wraps streaming through the Animas waterfall event `llm/stream`, allowing guardrails to inspect or modify chunk streams on the fly.
 3. `AgentLoopService.stream_turn(...)` consumes the generator via `async for chunk in ...`, yielding incremental token deltas, reasoning chunks, and tool lifecycle events directly to the caller.
 
 ## Consequences

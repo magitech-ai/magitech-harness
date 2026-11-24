@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, cast
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.assistant_stream import AssistantStreamAttempt
 from magitech_harness.agent.cancellation import AbortController, AbortSignal

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from anima.jsexpr import load_yaml
+from animas.jsexpr import load_yaml
 
 __all__ = ["merge_bundle_rows", "profile_rows_from_source"]
 

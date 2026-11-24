@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any, TypedDict
 
-from anima import Context, Service
+from animas import Context, Service
 
 __all__ = [
     "SaveTextSpill",

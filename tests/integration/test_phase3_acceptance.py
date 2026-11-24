@@ -13,7 +13,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from anima import EventMode
+from animas import EventMode
 
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortController, AbortSignal

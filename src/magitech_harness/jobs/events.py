@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, cast
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.jobs.types import JobEvent, JobEventFilter
 from magitech_harness.scope import (

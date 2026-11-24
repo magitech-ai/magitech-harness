@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.shell_env import (
     MAGITECH_AGENTS_HOME_ENV,

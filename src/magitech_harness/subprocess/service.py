@@ -7,7 +7,7 @@ import sys
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.error import HarnessError

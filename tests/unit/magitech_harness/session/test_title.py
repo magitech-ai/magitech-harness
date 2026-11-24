@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness import MockLLMProvider, create_harness
 from magitech_harness.agent.cancellation import AbortError, AbortSignal

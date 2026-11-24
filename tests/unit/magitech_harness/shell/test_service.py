@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.shell.service import (

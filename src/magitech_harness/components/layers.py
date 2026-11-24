@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import ClassVar
 
-from anima import Context, Service
+from animas import Context, Service
 
 
 @dataclass(frozen=True)

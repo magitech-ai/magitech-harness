@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness.session.events import (
     SURFACE_EVENT_TYPES,
