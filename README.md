@@ -41,7 +41,7 @@ Built directly on top of **`animas`** ([`https://github.com/magitech-ai/animas`]
 
 ### Prerequisites
 * Python 3.12+ (tested with `uv`)
-* The `animas` micro-kernel at `../animas` (or installed via pip)
+* The `animas` micro-kernel at `../animas` (or added with `uv add animas`)
 
 ### Running the Test Suite
 `magitech-harness` maintains strict **100% statement and 100% branch test coverage**:

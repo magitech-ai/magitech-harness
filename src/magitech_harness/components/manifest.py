@@ -19,7 +19,7 @@ class ComponentManifest(BaseModel):
         description: Brief human-readable description of component capabilities.
         entry_point: Import target string (e.g. 'module:apply' or 'component.py:apply').
         types: List of capability categories provided (e.g. 'Tool', 'Provider').
-        python_deps: List of required pip dependency specifications.
+        python_deps: List of required Python dependency specifications.
         hooks: List of lifecycle/waterfall hook names the component binds to.
         enabled: Whether the component is enabled by default.
         path: Optional directory path where the component and manifest reside.
