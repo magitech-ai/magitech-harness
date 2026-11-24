@@ -1,4 +1,4 @@
-"""Anima component entry point for the pi-ai provider."""
+"""Animas component entry point for the pi-ai provider."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from anima import Context, Disposer, EventMode
+from animas import Context, Disposer, EventMode
 
 from magitech_harness.llm.pi_ai.adapter import PiAiAdapter
 from magitech_harness.llm.pi_ai.config import ResolvedProfile, resolve_profiles
@@ -99,7 +99,7 @@ def apply(
     """Mount the pi-ai multi-provider adapter onto ctx.llm.
 
     The mount is reactive: whenever this fiber's config is updated through
-    Anima's rc.13 native lifecycle (``Fiber.update`` -> ``internal/update``
+    Animas's rc.13 native lifecycle (``Fiber.update`` -> ``internal/update``
     waterfall), the directory entries and adapter routes are atomically
     re-resolved from the fiber's live config and re-registered only when the
     facts actually changed (atomic replace, never dispose-then-register,
@@ -107,7 +107,7 @@ def apply(
     dormant (directory only).
 
     Args:
-        ctx: Active Anima Context.
+        ctx: Active Animas Context.
         config: Optional component configuration carrying ``providers`` profiles.
         providers: Optional provider profiles keyed by route name.
         **kwargs: Unused extra component configuration.

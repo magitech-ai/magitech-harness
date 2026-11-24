@@ -13,7 +13,7 @@ from collections.abc import Callable, Sequence
 from functools import partial
 from typing import Any, TypedDict
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.spill.notice import format_spill_notice
 from magitech_harness.spill.retention import retain_content

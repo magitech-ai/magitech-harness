@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, cast
 
-from anima import Context, Disposer
+from animas import Context, Disposer
 
 from magitech_harness.tools.contracts import (
     ToolBatchInput,

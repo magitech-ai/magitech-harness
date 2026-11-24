@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.agent.cancellation import AbortError, AbortSignal
 from magitech_harness.scope import bind_scope_parent, create_scope

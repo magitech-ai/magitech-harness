@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable
 from typing import Any, Literal, TypedDict, cast
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.session.surface import (
     SurfaceError,

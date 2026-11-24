@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context, Service
+from animas import Context, Service
 
 from magitech_harness import create_harness
 from magitech_harness.fs.local import LocalFileSystem

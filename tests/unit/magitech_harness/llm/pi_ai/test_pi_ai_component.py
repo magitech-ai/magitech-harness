@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.llm.pi_ai.component import apply, directory_entries
 from magitech_harness.llm.pi_ai.config import resolve_profiles

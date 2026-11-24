@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from anima.jsexpr import load_yaml
+from animas.jsexpr import load_yaml
 
 import magitech_harness
 

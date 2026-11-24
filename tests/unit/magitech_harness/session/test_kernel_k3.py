@@ -13,8 +13,8 @@ registry as a required injection, so a swapped bundle still wires it.
 from pathlib import Path
 
 import pytest
-from anima import Context
-from anima.jsexpr import dump_yaml, load_yaml
+from animas import Context
+from animas.jsexpr import dump_yaml, load_yaml
 
 import magitech_harness
 from magitech_harness import check_bundle_entries, create_harness

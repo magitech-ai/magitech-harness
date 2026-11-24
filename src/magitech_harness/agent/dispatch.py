@@ -7,7 +7,7 @@ import inspect
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.scope import Scoped, scope_target

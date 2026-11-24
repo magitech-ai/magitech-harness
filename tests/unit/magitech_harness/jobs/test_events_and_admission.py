@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from unittest.mock import MagicMock
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.jobs.archive_admission import install_job_archive_admission
 from magitech_harness.jobs.events import JobEventHub, JobLayer

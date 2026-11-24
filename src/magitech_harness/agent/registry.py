@@ -9,8 +9,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, cast
 
-from anima import Context, Fiber, FiberState, Service
-from anima.core import _access_context, _BoundService, symbols
+from animas import Context, Fiber, FiberState, Service
+from animas.core import _access_context, _BoundService, symbols
 
 from magitech_harness.agent.archive_admission import install_turn_archive_admission
 from magitech_harness.agent.cancellation import AbortSignal

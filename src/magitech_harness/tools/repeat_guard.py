@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.llm.message import create_user_message
 

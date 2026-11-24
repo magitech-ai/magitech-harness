@@ -6,7 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.scope import (
     AnonymousEntries,

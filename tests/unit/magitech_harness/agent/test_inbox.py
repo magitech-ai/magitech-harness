@@ -7,7 +7,7 @@ import math
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.dispatch import agent_events
 from magitech_harness.agent.inbox import (

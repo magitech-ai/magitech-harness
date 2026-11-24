@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any, cast
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import MAX_TIMER_DELAY_MS, AbortSignal
 from magitech_harness.subprocess.output import (

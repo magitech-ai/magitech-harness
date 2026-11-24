@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.projection import turn_boundary_projection_definition
 from magitech_harness.session.projection_registry import SessionProjectionRegistry

@@ -9,7 +9,7 @@ from magitech_harness.schedule.engine import (
 
 def test_service_creation() -> None:
     """ScheduleService registers itself as ctx.schedule."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -18,7 +18,7 @@ def test_service_creation() -> None:
 
 def test_service_duplicate_raises() -> None:
     """Creating ScheduleService twice raises RuntimeError."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     ScheduleService(ctx)
@@ -31,7 +31,7 @@ def test_service_duplicate_raises() -> None:
 
 def test_schedule_create() -> None:
     """schedule_create() creates a task."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -59,7 +59,7 @@ def test_schedule_create() -> None:
 
 def test_schedule_list() -> None:
     """schedule_list() returns all tasks."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -89,7 +89,7 @@ def test_schedule_list() -> None:
 
 def test_schedule_list_filter_active() -> None:
     """schedule_list() with active filter."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -125,7 +125,7 @@ def test_schedule_list_filter_active() -> None:
 
 def test_schedule_view() -> None:
     """schedule_view() returns task details."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -152,7 +152,7 @@ def test_schedule_view() -> None:
 
 def test_schedule_edit_update() -> None:
     """schedule_edit() update action changes task fields."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -193,7 +193,7 @@ def test_schedule_edit_update() -> None:
 
 def test_schedule_edit_pause_resume() -> None:
     """schedule_edit() pause and resume actions."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -224,7 +224,7 @@ def test_schedule_edit_pause_resume() -> None:
 
 def test_schedule_edit_delete() -> None:
     """schedule_edit() delete action removes task."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -249,7 +249,7 @@ def test_schedule_edit_delete() -> None:
 
 def test_schedule_edit_nonexistent() -> None:
     """schedule_edit() on non-existent task returns None."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -262,7 +262,7 @@ def test_schedule_edit_nonexistent() -> None:
 
 def test_schedule_config_default() -> None:
     """ScheduleService with no config uses empty config."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx)
@@ -271,7 +271,7 @@ def test_schedule_config_default() -> None:
 
 def test_schedule_config_with_values() -> None:
     """OtelService with config uses provided values."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = ScheduleService(ctx, {"delivery_history_days": 30})

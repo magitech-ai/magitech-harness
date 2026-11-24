@@ -10,8 +10,8 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
-from anima import Context
-from anima.core import _access_context
+from animas import Context
+from animas.core import _access_context
 
 from magitech_harness.agent.cancellation import AbortSignal, deadline, timeout_of
 from magitech_harness.jobs.events import JobEventHub, JobLayer

@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 # Read-only tools: these do not mutate workspace state and need no grant.
 READ_ONLY_TOOLS = frozenset(

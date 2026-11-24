@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, Literal, cast
 
-from anima import Context, Fiber, FiberState, Service
+from animas import Context, Fiber, FiberState, Service
 
 from magitech_harness.agent.cancellation import AbortController, AbortSignal
 from magitech_harness.agent.constants import DEFAULT_MAX_PARALLEL_TOOL_CALLS

@@ -5,7 +5,7 @@ description = "Magitech Harness: Composable Agent Runtime by Magitech"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anima>=1,<2",
+    "animas>=1,<2",
     "httpx>=0.27.0",
     "pydantic>=2.14.3",
     "pyyaml>=6.0.3",
@@ -17,7 +17,7 @@ magitech = "magitech_harness.cli:main"
 magitech-harness = "magitech_harness.cli:main"
 
 [tool.uv.sources]
-anima = { path = "../anima", editable = true }
+animas = { path = "../animas", editable = true }
 
 [build-system]
 requires = ["uv_build>=0.13.7,<0.14.0"]

@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.registry import AgentRegistry
 from magitech_harness.session.projection_registry import SessionProjectionRegistry

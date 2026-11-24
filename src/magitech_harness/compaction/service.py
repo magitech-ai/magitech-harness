@@ -6,8 +6,8 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from anima import Context, Disposer, Service
-from anima.core import _access_context
+from animas import Context, Disposer, Service
+from animas.core import _access_context
 
 logger = logging.getLogger(__name__)
 

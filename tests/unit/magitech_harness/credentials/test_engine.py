@@ -33,7 +33,7 @@ def test_credential_key() -> None:
 
 def test_service_creation() -> None:
     """CredentialService registers itself as ctx.credentials."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -42,7 +42,7 @@ def test_service_creation() -> None:
 
 def test_service_duplicate_raises() -> None:
     """Creating CredentialService twice raises RuntimeError."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     CredentialService(ctx)
@@ -55,7 +55,7 @@ def test_service_duplicate_raises() -> None:
 
 def test_resolve_stored_value() -> None:
     """resolve() returns stored value with source 'stored'."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -67,7 +67,7 @@ def test_resolve_stored_value() -> None:
 
 def test_resolve_environment_value() -> None:
     """resolve() returns environment value when not stored."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -79,7 +79,7 @@ def test_resolve_environment_value() -> None:
 
 def test_resolve_not_found() -> None:
     """resolve() returns None when key is not configured."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -90,7 +90,7 @@ def test_resolve_not_found() -> None:
 
 def test_stored_outranks_environment() -> None:
     """Stored value outranks environment fallback."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -103,7 +103,7 @@ def test_stored_outranks_environment() -> None:
 
 def test_describe_stored() -> None:
     """describe() reports stored key as configured with masked value."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -117,7 +117,7 @@ def test_describe_stored() -> None:
 
 def test_describe_environment() -> None:
     """describe() reports environment key as configured."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -131,7 +131,7 @@ def test_describe_environment() -> None:
 
 def test_describe_not_configured() -> None:
     """describe() reports unconfigured key."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -144,7 +144,7 @@ def test_describe_not_configured() -> None:
 
 def test_set_and_unset() -> None:
     """set() stores a value, unset() removes it."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -157,7 +157,7 @@ def test_set_and_unset() -> None:
 
 def test_set_empty_value_refused() -> None:
     """set() with empty string is refused."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -168,7 +168,7 @@ def test_set_empty_value_refused() -> None:
 
 def test_read_record() -> None:
     """read_record() returns stored record by key."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -182,7 +182,7 @@ def test_read_record() -> None:
 
 def test_read_record_not_found() -> None:
     """read_record() returns None when record does not exist."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -193,7 +193,7 @@ def test_read_record_not_found() -> None:
 
 def test_describe_record() -> None:
     """describe_record() reports record info without exposing value."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -210,7 +210,7 @@ def test_describe_record() -> None:
 
 def test_list_records() -> None:
     """list_records() returns all records without exposing values."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -231,7 +231,7 @@ def test_list_records() -> None:
 
 def test_modify_record() -> None:
     """modify_record() updates a record atomically."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -249,7 +249,7 @@ def test_modify_record() -> None:
 
 def test_modify_record_no_change() -> None:
     """modify_record() returns None when mutation returns None."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -260,7 +260,7 @@ def test_modify_record_no_change() -> None:
 
 def test_modify_record_remove_existing() -> None:
     """modify_record() removes existing record when mutation returns None."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -276,7 +276,7 @@ def test_modify_record_remove_existing() -> None:
 
 def test_delete_record() -> None:
     """delete_record() removes a record."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)
@@ -291,7 +291,7 @@ def test_delete_record() -> None:
 
 def test_delete_record_not_found() -> None:
     """delete_record() is a no-op when record does not exist."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = CredentialService(ctx)

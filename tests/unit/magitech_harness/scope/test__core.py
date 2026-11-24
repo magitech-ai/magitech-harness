@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from typing import Any, ClassVar
 
 import pytest
-from anima import Context, EventMode, Service
-from anima.core import _access_context
+from animas import Context, EventMode, Service
+from animas.core import _access_context
 
 from magitech_harness.scope import (
     CreateScopeOptions,

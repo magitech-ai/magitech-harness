@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from anima import Context
+from animas import Context
 
 
 def install_turn_archive_admission(

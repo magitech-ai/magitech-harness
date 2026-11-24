@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context, FiberState
-from anima.jsexpr import dump_yaml
-from anima.loader import load_profile
+from animas import Context, FiberState
+from animas.jsexpr import dump_yaml
+from animas.loader import load_profile
 
 from magitech_harness import create_harness
 from magitech_harness.llm.assistant_stream import AssistantStreamAccumulator

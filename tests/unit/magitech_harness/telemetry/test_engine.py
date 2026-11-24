@@ -75,7 +75,7 @@ def test_session_log_reporter() -> None:
 
 def test_otel_service_creation() -> None:
     """OtelService registers itself as ctx.otel."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = OtelService(ctx)
@@ -84,7 +84,7 @@ def test_otel_service_creation() -> None:
 
 def test_otel_service_duplicate_raises() -> None:
     """Creating OtelService twice raises RuntimeError."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     OtelService(ctx)
@@ -97,7 +97,7 @@ def test_otel_service_duplicate_raises() -> None:
 
 def test_otel_create_event_reporter() -> None:
     """OtelService.create_event_reporter() creates an EventReporter channel."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = OtelService(ctx)
@@ -116,7 +116,7 @@ def test_otel_create_event_reporter() -> None:
 
 def test_otel_create_session_log_reporter() -> None:
     """OtelService.create_session_log_reporter() creates a SessionLogReporter channel."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = OtelService(ctx)
@@ -135,7 +135,7 @@ def test_otel_create_session_log_reporter() -> None:
 
 def test_otel_shutdown_all() -> None:
     """OtelService.shutdown_all() shuts down all channels."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = OtelService(ctx)
@@ -153,7 +153,7 @@ def test_otel_shutdown_all() -> None:
 
 def test_otel_config_default() -> None:
     """OtelService with no config uses empty config."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = OtelService(ctx)
@@ -162,7 +162,7 @@ def test_otel_config_default() -> None:
 
 def test_otel_config_with_values() -> None:
     """OtelService with config uses provided values."""
-    from anima import Context
+    from animas import Context
 
     ctx = Context()
     service = OtelService(

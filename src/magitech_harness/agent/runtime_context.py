@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.system_prompt import (
     SystemPromptCommit,

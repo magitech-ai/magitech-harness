@@ -1,7 +1,7 @@
 """ComponentService (ctx.components): Discovery and mounting of portable Magitech components.
 
 This service manages the discovery, lifecycle, and status tracking of components
-within the Anima context.
+within the Animas context.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from anima import Context, Fiber, Service
-from anima.loader import resolve_component_target
+from animas import Context, Fiber, Service
+from animas.loader import resolve_component_target
 from pydantic import ValidationError
 
 from magitech_harness.components.manifest import ComponentManifest
@@ -142,14 +142,14 @@ class ComponentService(Service):
         return discovered
 
     def mount_component(self, manifest: ComponentManifest, **config: Any) -> Fiber:
-        """Mounts a validated component manifest into the Anima context.
+        """Mounts a validated component manifest into the Animas context.
 
         Args:
             manifest: The component manifest specification.
             **config: Configuration kwargs to pass to the component.
 
         Returns:
-            The loaded Anima Fiber instance.
+            The loaded Animas Fiber instance.
         """
         target = resolve_entry_point(manifest)
         # Mount on the root context, not this service's own context: as

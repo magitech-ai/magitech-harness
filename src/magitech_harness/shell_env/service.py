@@ -10,8 +10,8 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Protocol, TypedDict, cast
 
-from anima import Context, Service
-from anima.core import _access_context
+from animas import Context, Service
+from animas.core import _access_context
 
 from magitech_harness.subprocess.types import MAGITECH_ENV_PREFIX
 

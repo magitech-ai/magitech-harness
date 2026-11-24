@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from anima import Context, EventMode, FiberState
+from animas import Context, EventMode, FiberState
 
 from magitech_harness.agent.agent_loop import AgentLoop
 from magitech_harness.agent.cancellation import AbortController

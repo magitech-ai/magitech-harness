@@ -4,7 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.approval.service import (

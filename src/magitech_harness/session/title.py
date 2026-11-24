@@ -30,7 +30,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, NotRequired, Protocol, TypedDict
 
-from anima import Context, Disposer, EventMode, Service
+from animas import Context, Disposer, EventMode, Service
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.call_config import is_agent_loop_request

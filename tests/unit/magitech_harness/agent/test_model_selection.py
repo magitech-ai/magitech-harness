@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.agent.dispatch import agent_events

@@ -11,9 +11,9 @@ Many agent CLI tools tightly couple command-line option parsing, environment con
 
 We decouple application launching into a lightweight profile bootstrapper:
 1. The `mth` CLI binary parses only launcher-level configuration (`--profile <name>`, `--patch <file>`).
-2. It captures all remaining unparsed arguments into an immutable dictionary on the root Anima context (`ctx.cmdline_args`).
+2. It captures all remaining unparsed arguments into an immutable dictionary on the root Animas context (`ctx.cmdline_args`).
 3. It wires fail-loud process shutdown hooks into `ctx.app_exit` and resolves the target profile.
-4. The interactive multi-turn REPL is itself implemented as an Anima component, loaded by the profile, which reads `ctx.cmdline_args` to configure model selection, session resumption, and prompt options.
+4. The interactive multi-turn REPL is itself implemented as an Animas component, loaded by the profile, which reads `ctx.cmdline_args` to configure model selection, session resumption, and prompt options.
 
 ## Consequences
 

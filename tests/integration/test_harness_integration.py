@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import ClassVar
 
 import pytest
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness import (
     EventType,

@@ -12,7 +12,7 @@ import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, NewType, TypedDict, cast
 
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.retry_policy import ResolvedRetryPolicy

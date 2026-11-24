@@ -7,7 +7,7 @@ from functools import partial
 from typing import Any, cast
 from weakref import ReferenceType, ref
 
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.fs.types import (
     FsError,

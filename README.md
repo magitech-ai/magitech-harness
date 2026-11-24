@@ -2,7 +2,7 @@
 
 The composable autonomous agent runtime powering **Magitech**.
 
-Built directly on top of **`anima`** ([`https://github.com/magitech-ai/anima`](https://github.com/magitech-ai/anima)), the micro-kernel.
+Built directly on top of **`animas`** ([`https://github.com/magitech-ai/animas`](https://github.com/magitech-ai/animas)), the micro-kernel.
 
 [![Tests](https://img.shields.io/badge/coverage-100%25-brightgreen)](tests/)
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
@@ -13,7 +13,7 @@ Built directly on top of **`anima`** ([`https://github.com/magitech-ai/anima`](h
 
 ```
                     ┌─────────────────────────┐
-                    │      Anima Context      │
+                    │      Animas Context      │
                     └────────────┬────────────┘
          ┌───────────────┬───────┴───────┬───────────────┐
          ▼               ▼               ▼               ▼
@@ -41,7 +41,7 @@ Built directly on top of **`anima`** ([`https://github.com/magitech-ai/anima`](h
 
 ### Prerequisites
 * Python 3.12+ (tested with `uv`)
-* The `anima` micro-kernel at `../anima` (or installed via pip)
+* The `animas` micro-kernel at `../animas` (or installed via pip)
 
 ### Running the Test Suite
 `magitech-harness` maintains strict **100% statement and 100% branch test coverage**:

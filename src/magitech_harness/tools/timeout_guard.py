@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from anima import Context, EventMode
+from animas import Context, EventMode
 
 from magitech_harness.agent.cancellation import deadline, timeout_of
 

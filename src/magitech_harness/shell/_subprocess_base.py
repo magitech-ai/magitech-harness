@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, ClassVar
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import (
     MAX_TIMER_DELAY_MS,

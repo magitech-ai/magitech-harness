@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol, cast, runtime_checkable
 from weakref import WeakKeyDictionary
 
-from anima import Context
+from animas import Context
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.error import is_harness_error
