@@ -17,8 +17,8 @@ from typing import Any, ClassVar
 
 import pytest
 from animas import Context, FiberState, Service
-from animas.jsexpr import dump_yaml, load_yaml
 from animas.loader import LoaderService, load_profile
+from animas.profile_yaml import dump_yaml, load_yaml
 
 import magitech_harness
 from magitech_harness import (

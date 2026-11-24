@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from animas import Context, Service
-from animas.jsexpr import dump_yaml, load_yaml
+from animas.profile_yaml import dump_yaml, load_yaml
 
 import magitech_harness
 from magitech_harness import EventType, check_bundle_entries, create_harness
