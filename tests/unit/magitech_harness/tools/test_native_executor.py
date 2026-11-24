@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 from animas import Context, FiberState
-from animas.jsexpr import dump_yaml
 from animas.loader import load_profile
+from animas.profile_yaml import dump_yaml
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.system_prompt.service import SystemPromptService

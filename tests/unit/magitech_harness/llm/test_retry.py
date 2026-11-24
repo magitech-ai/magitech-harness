@@ -11,8 +11,8 @@ from typing import Any
 
 import pytest
 from animas import Context, EventMode, FiberState
-from animas.jsexpr import dump_yaml
 from animas.loader import load_profile
+from animas.profile_yaml import dump_yaml
 
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.retry import (

@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 from animas import Context, FiberState
-from animas.jsexpr import dump_yaml
 from animas.loader import load_profile
+from animas.profile_yaml import dump_yaml
 
 from magitech_harness import create_harness
 from magitech_harness.llm.assistant_stream import AssistantStreamAccumulator
