@@ -6,7 +6,7 @@ This is the authoritative, evidence-backed 1:1 parity map between DeepSeek Harne
 `mth-components` (marketplace for optional, on-demand, third-party tools).
 
 It replaces `fcc0ad46` (0.2.2-rc.1), which is now historical provenance only. Lineage is preserved
-and attributed: see `docs/adr/0012-lineage-disclosure.md` (animas), `animas/NOTICE`, and
+and attributed: see `animas/docs/adr/0012-lineage-disclosure.md`, `animas/NOTICE`, and
 `agents-home` decision D-025. Nothing is scrubbed.
 
 ## Verdict vocabulary
