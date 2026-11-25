@@ -104,7 +104,7 @@ async def test_read_only_tool_runs_without_approval(tmp_path: Any) -> None:
     ctx.tools.register(
         define_tool(
             {
-                "name": "read_file",
+                "name": "probe_read",
                 "description": "Read.",
                 "parameters": {},
                 "output": {
@@ -121,7 +121,7 @@ async def test_read_only_tool_runs_without_approval(tmp_path: Any) -> None:
                 {
                     "type": "tool-call",
                     "id": "c2",
-                    "name": "read_file",
+                    "name": "probe_read",
                     "arguments": "{}",
                 }
             ],

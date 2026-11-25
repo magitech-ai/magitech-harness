@@ -19,6 +19,9 @@ and cannot be registered.
 
 ## Filesystem and shell
 
+Mounted by `tool-fs`, `tool-fs-search`, and `tool-bash` in
+[`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml).
+
 | Tool | Arguments | Behavior |
 |---|---|---|
 | `bash` | `command` (req), `timeout_ms` (default `30000`), `cwd` | Runs a shell command via `ctx.shell` with a 64 KiB in-memory cap; spills complete output to disk and renders `[output truncated; full output: …]`. Reports exit code and timeout. |
