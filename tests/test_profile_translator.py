@@ -20,15 +20,31 @@ from magitech_harness.profiles.translate import (
     translate_row,
 )
 
-DSH_BASE_PATCH = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / ".dsh-scratch"
-    / "dsh"
-    / "packages"
-    / "bundle"
-    / "base"
-    / "cordis.patch.yml"
-)
+
+def _find_dsh_base_patch() -> Path | None:
+    """Locate the read-only DSH clone from any checkout depth.
+
+    The clone lives beside the repositories (`.dsh-scratch/dsh`), so a fixed
+    number of `..` hops works from one layout and silently skips from another.
+    Walk the ancestors instead; CI has no clone and gets `None`.
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = (
+            parent
+            / ".dsh-scratch"
+            / "dsh"
+            / "packages"
+            / "bundle"
+            / "base"
+            / "cordis.patch.yml"
+        )
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+DSH_BASE_PATCH = _find_dsh_base_patch()
+HAS_DSH_PATCH = DSH_BASE_PATCH is not None
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +205,7 @@ def test_row_profile_context_guard_drops_gate():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not DSH_BASE_PATCH.exists(), reason="DSH scratch clone not present")
+@pytest.mark.skipif(not HAS_DSH_PATCH, reason="DSH scratch clone not present")
 def test_translate_real_base_patch_has_101_rows():
     rows = translate_file(DSH_BASE_PATCH)
     assert len(rows) == 101
@@ -203,7 +219,7 @@ def test_translate_real_base_patch_has_101_rows():
     )
 
 
-@pytest.mark.skipif(not DSH_BASE_PATCH.exists(), reason="DSH scratch clone not present")
+@pytest.mark.skipif(not HAS_DSH_PATCH, reason="DSH scratch clone not present")
 def test_translate_real_base_patch_no_js_expressions_remain():
     rows = translate_file(DSH_BASE_PATCH)
     __import__("yaml").safe_dump({"insert": rows}, sort_keys=False)
@@ -222,7 +238,7 @@ def test_translate_real_base_patch_no_js_expressions_remain():
             )
 
 
-@pytest.mark.skipif(not DSH_BASE_PATCH.exists(), reason="DSH scratch clone not present")
+@pytest.mark.skipif(not HAS_DSH_PATCH, reason="DSH scratch clone not present")
 def test_translate_real_base_patch_platform_rows():
     rows = translate_file(DSH_BASE_PATCH)
     by_id = {r["id"]: r for r in rows if isinstance(r, dict)}
@@ -232,7 +248,7 @@ def test_translate_real_base_patch_platform_rows():
     assert by_id["pwsh-sandbox"]["enabled_on"] == ["win32"]
 
 
-@pytest.mark.skipif(not DSH_BASE_PATCH.exists(), reason="DSH scratch clone not present")
+@pytest.mark.skipif(not HAS_DSH_PATCH, reason="DSH scratch clone not present")
 def test_translate_real_base_patch_env_rows():
     rows = translate_file(DSH_BASE_PATCH)
     by_id = {r["id"]: r for r in rows if isinstance(r, dict)}
