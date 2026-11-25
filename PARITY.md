@@ -119,13 +119,13 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 58 | upstream-skills | `@deepseek-ai/dsh-upstream-skills` | packages/connector/upstream-skills/src/index.ts | mth-components | NONE | PARTIAL | upstream skills not mounted |
 | 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | NONE | MISSING | `/plan`, `/compact` slash commands |
 | 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | mth-components | NONE | PARTIAL | command feedback |
-| 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | NONE | MISSING | `get_goal`, `create_goal`, `update_goal` |
-| 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | MISSING | goal round driver |
-| 63 | command-goal | `@deepseek-ai/dsh-command-goal` | packages/goal/command-goal/src/index.ts | magitech-harness | NONE | MISSING | `/goal` slash command |
+| 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
+| 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | PARTIAL | automatic continuation rounds not wired into the loop; entry/complete/block authority is implemented and probe-tested |
+| 63 | command-goal | `@deepseek-ai/dsh-command-goal` | packages/goal/command-goal/src/index.ts | magitech-harness | `src/magitech_harness/goal/command.py` | DONE | `test_goal.py`, `test_cli.py` |
 | 64 | plan-mode | `@deepseek-ai/dsh-plan-mode` | packages/plan/plan-mode/src/index.ts | magitech-harness (base tool) | NONE | MISSING | `plan`, `exit_plan_mode` |
 | 65 | token-meter | `@deepseek-ai/dsh-token-meter` | packages/llm/token-meter/src/index.ts | magitech-harness | `src/magitech_harness/llm/token_meter.py` | DONE | `test_token_meter.py` |
 | 66 | compaction-basic | `@deepseek-ai/dsh-compaction-basic` | packages/compaction/compaction-basic/src/index.ts | magitech-harness | `src/magitech_harness/compaction/service.py` | DONE | `test_compaction_service.py` |
-| 67 | command-compact | `@deepseek-ai/dsh-command-compact` | packages/compaction/command-compact/src/index.ts | magitech-harness | NONE | MISSING | `/compact` slash command |
+| 67 | command-compact | `@deepseek-ai/dsh-command-compact` | packages/compaction/command-compact/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (`/compact` → `session/compact` waterfall) | DONE | `test_cli.py` |
 | 68 | subagent | `@deepseek-ai/dsh-subagent` | packages/core/subagent/src/index.ts | magitech-harness | NONE | MISSING | subagent service + lineage |
 | 69 | agent-team | `@deepseek-ai/dsh-agent-team` | packages/team/agent-team/src/index.ts | magitech-harness | NONE | MISSING | `team_task_*` tools |
 | 70 | tool-agent-team | `@deepseek-ai/dsh-tool-agent-team` | packages/team/tool-agent-team/src/index.ts:119 | magitech-harness (base tool) | NONE | MISSING | team tools |
@@ -144,7 +144,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 83 | tool-result-pruner | `@deepseek-ai/dsh-compaction-tool-result-pruner` | packages/compaction/compaction-tool-result-pruner/src/index.ts | magitech-harness | NONE | PARTIAL | tool-result pruning not wired |
 | 84 | image-offload | `@deepseek-ai/dsh-compaction-image-offload` | packages/compaction/compaction-image-offload/src/index.ts | magitech-harness | NONE | PARTIAL | image offload not wired |
 | 85 | tool-todo | `@deepseek-ai/dsh-tool-todo` | packages/todo/tool-todo/src/index.ts:137 | magitech-harness (base tool) | `src/magitech_harness/tools/todo.py` | DONE | `tests/unit/magitech_harness/tools/test_todo.py` |
-| 86 | tool-goal | `@deepseek-ai/dsh-tool-goal` | packages/goal/tool-goal/src/index.ts:197 | magitech-harness (base tool) | NONE | MISSING | goal tools (see 61-63) |
+| 86 | tool-goal | `@deepseek-ai/dsh-tool-goal` | packages/goal/tool-goal/src/index.ts:197 | magitech-harness (base tool) | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
 | 87 | repeat-tool-reminder | `@deepseek-ai/dsh-repeat-tool-reminder` | packages/guard/repeat-tool-reminder/src/index.ts | magitech-harness | `src/magitech_harness/tools/repeat_guard.py` | DONE | `test_repeat_guard.py` |
 | 88 | web | `@deepseek-ai/dsh-web` | packages/web/web/src/index.ts | magitech-harness | NONE | MISSING | `web_search`/`web_fetch` provider seam |
 | 89 | web-search-deepseek | `@deepseek-ai/dsh-web-search-deepseek` | packages/web/web-search-deepseek/src/index.ts | mth-components | NONE | MISSING | web search provider |
@@ -177,9 +177,9 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `job_list` | packages/jobs/tool-jobs/src/index.ts:572 | `job_list` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
 | `job_kill` | packages/jobs/tool-jobs/src/index.ts:435 | `job_kill` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
 | `todo_write` | packages/todo/tool-todo/src/index.ts:137 | `todo_write` | `src/magitech_harness/tools/todo.py` | DONE | `test_todo.py` |
-| `get_goal` | packages/goal/tool-goal/src/index.ts:197 | — | NONE | MISSING | — |
-| `create_goal` | packages/goal/tool-goal/src/index.ts:209 | — | NONE | MISSING | — |
-| `update_goal` | packages/goal/tool-goal/src/index.ts:236 | — | NONE | MISSING | — |
+| `get_goal` | packages/goal/tool-goal/src/index.ts:197 | `get_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
+| `create_goal` | packages/goal/tool-goal/src/index.ts:209 | `create_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
+| `update_goal` | packages/goal/tool-goal/src/index.ts:236 | `update_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
 | `invoke_subagent` | packages/subagent/tool-subagent/src/index.ts | — | NONE | MISSING | — |
 | `send_message` | packages/subagent/tool-subagent-control/src/index.ts:45 | — | NONE | MISSING | — |
 | `interrupt_agent` | packages/subagent/tool-subagent-control/src/index.ts:126 | — | NONE | MISSING | — |
@@ -201,17 +201,14 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 These rows/tools are in DSH base and have no Python implementation. Each needs an executable probe to reach DONE.
 
 1. `job_output` / `job_list` / `job_kill` — `src/magitech_harness/tools/jobs.py` (new) — probe `test_job_tools.py`
-2. `get_goal` / `create_goal` / `update_goal` — `src/magitech_harness/tools/goal.py` (new) — probe `test_goal_tools.py`
-3. `invoke_subagent` / `send_message` / `interrupt_agent` / `list_agents` / `wait_agent` — subagent subsystem in `src/magitech_harness/agent/` + `src/magitech_harness/tools/subagent.py` — probe `test_subagent_tools.py`
-4. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
-5. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
-6. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
-7. `web_search` / `web_fetch` — `src/magitech_harness/tools/web.py` (new) — probe `test_web_tools.py`
-8. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
-9. `command-compact` (`/compact`) — slash command plumbing — probe `test_compact_command.py`
-10. `command-goal` (`/goal`) — slash command plumbing — probe `test_goal_command.py`
-11. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
-12. image-offload — probe `test_image_offload.py`
+2. `invoke_subagent` / `send_message` / `interrupt_agent` / `list_agents` / `wait_agent` — subagent subsystem in `src/magitech_harness/agent/` + `src/magitech_harness/tools/subagent.py` — probe `test_subagent_tools.py`
+3. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
+4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
+5. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
+6. `web_search` / `web_fetch` — `src/magitech_harness/tools/web.py` (new) — probe `test_web_tools.py`
+7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
+10. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
+11. image-offload — probe `test_image_offload.py`
 
 ## PARTIAL rows with accepted reasons
 

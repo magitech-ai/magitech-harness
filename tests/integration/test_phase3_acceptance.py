@@ -188,10 +188,13 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
     assert len(captured_options) == 3
     assert [t["name"] for t in captured_options[0]["tools"]] == [
         "add_nums",
+        "create_goal",
+        "get_goal",
         "job_kill",
         "job_list",
         "job_output",
         "todo_write",
+        "update_goal",
     ]
     assert captured_options[0]["sessionId"] == "replay-sess"
     assert "Compute 20 + 22" in _message_texts(captured_options[0]["messages"])
