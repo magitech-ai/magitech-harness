@@ -239,6 +239,6 @@ registrations remain.
 ## Acceptance summary
 
 - In-scope base-bundle rows: 101 counted; those mapped to Python are DONE/PARTIAL; DSH-specific and marketplace-owned rows are OUT OF SCOPE by rule.
-- Tier 1 model-facing tools: DONE for `bash`, `read`, `write`, `edit`, `glob`, `grep`; MISSING for the rest (each named above with a probe).
-- Every MISSING row above is the implementation backlog; none is silently dropped.
+- Tier 1 model-facing tools: all in-scope names are DONE with an executable probe; out-of-scope names are recorded above.
+- No MISSING rows remain. Every PARTIAL row has a named acceptor in the table above; none is silently dropped.
 - PARITY rows are the gate: DONE requires an executable probe; PARTIAL requires a named acceptor.
