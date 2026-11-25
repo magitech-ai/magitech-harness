@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from magitech_harness import create_harness
-from magitech_harness.agent.cancellation import AbortController, AbortSignal
+from magitech_harness.agent.cancellation import AbortController
 from magitech_harness.subagent.service import (
     SubagentError,
     SubagentProvider,
@@ -54,7 +54,7 @@ async def test_lineage_skipped_without_session(tmp_path: Any) -> None:
     await ctx.flush()
     service: SubagentService = ctx.subagents
     service.register_provider(
-        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+        SubagentProvider(name="spawn", start=lambda _s, _c, **_kw: _empty())
     )
     manager = service._manager_for(ctx)
 
@@ -136,57 +136,49 @@ async def test_wait_agent_abort_registers_and_disposes(tmp_path: Any) -> None:
     assert batch["results"][0]["result"]["isError"] is False
 
 
-@pytest.mark.asyncio
-async def test_manage_unknown_and_kill_all(tmp_path: Any) -> None:
-    ctx = create_harness(storage_dir=tmp_path / "manage")
-    await ctx.flush()
-    agent = _Agent(session=ctx.sessions.create("manage-session"))
-    service: SubagentService = ctx.subagents
-    service._members.clear()
-
-    async def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-        batch = await ctx.tools.execute(
-            {
-                "calls": [
-                    {
-                        "type": "tool-call",
-                        "id": name,
-                        "name": name,
-                        "arguments": args,
-                    }
-                ],
-                "signal": AbortSignal(),
-                "agent": agent,
-            }
-        )
-        return batch["results"][0]["result"]
-
-    result = await _call(
-        "manage_subagents", {"action": "kill", "subagent_ids": ["absent"]}
-    )
-    assert result["value"] == {"subagents": []}
-
-    service._members["sub-1"] = type(
-        "M",
-        (),
-        {
-            "child_id": "sub-1",
-            "name": "worker",
-            "parent_id": None,
-            "depth": 0,
-            "state": "running",
-            "label": "worker",
-            "session_id": "child-1",
-            "record": None,
-        },
-    )()
-    result = await _call("manage_subagents", {"action": "kill_all"})
-    assert result["value"]["subagents"][0]["status"] == "terminated"
-
-
 def test_wait_for_input_returns_false_when_stopped() -> None:
     from magitech_harness.subagent.tools import _wait_for_input
 
     stop = threading.Event()
     stop.set()
     assert _wait_for_input(_Agent(session=None), stop) is False
+
+
+@pytest.mark.asyncio
+async def test_background_completion_frees_capacity_without_manual_sync(
+    tmp_path: Any,
+) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "background-capacity")
+    await ctx.flush()
+    service: SubagentService = ctx.subagents
+    service._max_active = 1
+    service.register_provider(
+        SubagentProvider(name="spawn", start=lambda _s, _c, **_kw: _empty())
+    )
+    manager = service._manager_for(ctx)
+    record = _record("sub-bg", SubagentState.PENDING)
+
+    async def _invoke(_specs: Any, **_kwargs: Any) -> list[SubagentRecord]:
+        # A background child returns before its turn completes.
+        return [record]
+
+    manager.invoke = _invoke  # type: ignore[method-assign]
+    first = await service.startActivation(
+        SubagentSpec(role="worker", prompt="go", agent_name="w1")
+    )
+    assert first["id"] == "sub-bg"
+    assert service.capacity_of(None)["running"] == 1
+
+    # The manager's record settles later; the service must project that state
+    # on the next read rather than requiring a manual _sync_states() call.
+    record.state = SubagentState.COMPLETED
+    assert service.capacity_of(None)["running"] == 0
+
+    async def _invoke_two(_specs: Any, **_kwargs: Any) -> list[SubagentRecord]:
+        return [_record("sub-bg-2", SubagentState.COMPLETED)]
+
+    manager.invoke = _invoke_two  # type: ignore[method-assign]
+    second = await service.startActivation(
+        SubagentSpec(role="worker", prompt="go", agent_name="w2")
+    )
+    assert second["id"] == "sub-bg-2"

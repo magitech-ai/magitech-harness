@@ -132,7 +132,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 71 | subagent-spawn-in-process | `@deepseek-ai/dsh-subagent-spawn-in-process` | packages/subagent/subagent-spawn-in-process/src/index.ts | magitech-harness | `src/magitech_harness/subagent/providers.py` | DONE | `test_surface.py` |
 | 72 | subagent-fork-in-process | `@deepseek-ai/dsh-subagent-fork-in-process` | packages/subagent/subagent-fork-in-process/src/index.ts | magitech-harness | `src/magitech_harness/subagent/providers.py` | DONE | `test_surface.py` (replays parent events with surface ops) |
 | 73 | tool-subagent-control | `@deepseek-ai/dsh-tool-subagent-control` | packages/subagent/tool-subagent-control/src/index.ts:45 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_manager.py` |
-| 74 | tool-subagent | `@deepseek-ai/dsh-tool-subagent` | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`; tool names `subagent` plus `list_subagent_models` |
+| 74 | tool-subagent | `@deepseek-ai/dsh-tool-subagent` | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`; dsh tool name `subagent` plus `list_subagent_models` |
 | 75 | tool-subagent-fork | `@deepseek-ai/dsh-tool-subagent` (fork) | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_manager.py`; tool name `subagent_fork` |
 | 76 | ptc-runtime | `@deepseek-ai/dsh-ptc-runtime-node` | packages/ptc-runtime/ptc-runtime-node/src/ | DSH-specific | NONE | OUT OF SCOPE | PTC Node runtime |
 | 77 | workflow-ptc | `@deepseek-ai/dsh-workflow-ptc` | packages/workflow/workflow-ptc/src/ | DSH-specific | NONE | OUT OF SCOPE | |
@@ -180,11 +180,10 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `get_goal` | packages/goal/tool-goal/src/index.ts:197 | `get_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
 | `create_goal` | packages/goal/tool-goal/src/index.ts:209 | `create_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
 | `update_goal` | packages/goal/tool-goal/src/index.ts:236 | `update_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
-| `invoke_subagent` | packages/subagent/tool-subagent/src/index.ts | — | NONE | MISSING | — |
-| `send_message` | packages/subagent/tool-subagent-control/src/index.ts:45 | — | NONE | MISSING | — |
-| `interrupt_agent` | packages/subagent/tool-subagent-control/src/index.ts:126 | — | NONE | MISSING | — |
-| `list_agents` | packages/subagent/tool-subagent-control/src/list-agents.ts:46 | — | NONE | MISSING | — |
-| `wait_agent` | packages/subagent/tool-subagent-control/src/wait-agent.ts:91 | — | NONE | MISSING | — |
+| `send_message` | packages/subagent/tool-subagent-control/src/index.ts:45 | `send_message` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
+| `interrupt_agent` | packages/subagent/tool-subagent-control/src/index.ts:126 | `interrupt_agent` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
+| `list_agents` | packages/subagent/tool-subagent-control/src/list-agents.ts:46 | `list_agents` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
+| `wait_agent` | packages/subagent/tool-subagent-control/src/wait-agent.ts:91 | `wait_agent` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
 | `team_task_create` | packages/team/tool-agent-team/src/index.ts:119 | — | NONE | MISSING | — |
 | `team_task_list` | packages/team/tool-agent-team/src/index.ts:145 | — | NONE | MISSING | — |
 | `team_task_get` | packages/team/tool-agent-team/src/index.ts:186 | — | NONE | MISSING | — |
@@ -201,8 +200,7 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 These rows/tools are in DSH base and have no Python implementation. Each needs an executable probe to reach DONE.
 
 1. `job_output` / `job_list` / `job_kill` — `src/magitech_harness/tools/jobs.py` (new) — probe `test_job_tools.py`
-2. `invoke_subagent` / `send_message` / `interrupt_agent` / `list_agents` / `wait_agent` — subagent subsystem in `src/magitech_harness/agent/` + `src/magitech_harness/tools/subagent.py` — probe `test_subagent_tools.py`
-3. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
+2. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
 4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
 5. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
 6. `web_search` / `web_fetch` — `src/magitech_harness/tools/web.py` (new) — probe `test_web_tools.py`
@@ -228,6 +226,9 @@ registrations remain.
 | `agent-instructions` | Row not mounted; instruction surface is via system-prompt sections. | Malcom (documented gap) |
 | `upstream-skills` | Upstream skills download nothing until registered; no local files to pin. | Malcom (documented gap) |
 | `image-offload` | Image offload not wired; no image-capable route in the Python stack. | Malcom (documented gap) |
+| `commands` | REPL slash commands exist; the durable command registry and `command/run`/`command/done` events are not. | **No acceptance recorded** — open gap |
+| `command-feedback` | Feedback command not mounted. | **No acceptance recorded** — open gap |
+| `goal-round-driver` | Automatic continuation rounds are not wired into the loop; entry/complete/block authority is implemented and probed. | **No acceptance recorded** — open gap |
 
 ## OUT OF SCOPE (recorded, not counted)
 

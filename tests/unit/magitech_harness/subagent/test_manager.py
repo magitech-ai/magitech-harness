@@ -376,7 +376,7 @@ async def test_subagent_manager_manage_and_errors(
         await manager.send_message(sid, "hello")
 
     # 6. Unknown manage action
-    with pytest.raises(ValueError, match="Unknown manage_subagents action"):
+    with pytest.raises(ValueError, match="Unknown manage action"):
         await manager.manage("invalid_action")
 
     # 7. Shutdown calls kill_all

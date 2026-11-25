@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from animas import Context, Service
+
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.cli import summarize_headless_outcome
@@ -27,8 +28,18 @@ from magitech_harness.tools.service import ToolService
 
 logger = logging.getLogger(__name__)
 
-SUBAGENT_TRIAD_TOOLS = frozenset(
-    {"invoke_subagent", "send_message", "manage_subagents"}
+# The child mounts these from its own base bundle; copying a parent's
+# same-named definition would double-register it.
+BUNDLED_SUBAGENT_TOOLS = frozenset(
+    {
+        "subagent",
+        "subagent_fork",
+        "send_message",
+        "list_agents",
+        "interrupt_agent",
+        "wait_agent",
+        "list_subagent_models",
+    }
 )
 
 
@@ -196,7 +207,7 @@ class SubagentManager(Service):
         if parent_tools is not None:
             for tool in parent_tools.definitions():
                 name = tool["name"]
-                if name in SUBAGENT_TRIAD_TOOLS:
+                if name in BUNDLED_SUBAGENT_TOOLS:
                     continue
                 if allowed is not None and name not in allowed:
                     continue
@@ -385,7 +396,7 @@ class SubagentManager(Service):
                 results.append(self._records[sid])
             return results
 
-        raise ValueError(f"Unknown manage_subagents action '{action}'")
+        raise ValueError(f"Unknown manage action '{action}'")
 
     async def _terminate_child(self, subagent_id: str) -> None:
         """Terminates an individual subagent and cleans up worktrees."""

@@ -45,7 +45,7 @@ class SubagentProvider:
     """A named backend able to start one delegated child."""
 
     name: str
-    start: Callable[[SubagentSpec, Any], Awaitable[dict[str, Any]]]
+    start: Callable[..., Awaitable[dict[str, Any]]]
     capabilities: frozenset[str] = frozenset()
 
 
@@ -138,6 +138,7 @@ class SubagentService(Service):
                 f"subagent depth {depth} exceeds the configured cap {cap}",
                 "MAX_DEPTH_EXCEEDED",
             )
+        self._sync_states()
         if len(self._running_members()) >= self._max_active:
             raise SubagentError(
                 "background subagent limit reached", "CAPACITY_EXCEEDED"
@@ -194,7 +195,7 @@ class SubagentService(Service):
                     ],
                 },
             )
-        result = await backend.start(spec, self.ctx)
+        result = await backend.start(spec, self.ctx, session=session)
         return {
             "kind": "activation",
             "id": child_id,
@@ -205,6 +206,7 @@ class SubagentService(Service):
         }
 
     def _running_members(self) -> list[_Member]:
+        self._sync_states()
         return [
             member for member in self._members.values() if member.state == "running"
         ]
@@ -283,9 +285,7 @@ class SubagentService(Service):
     def capacity_of(self, caller: Any) -> dict[str, int]:
         """Current running count and capacity for the caller's tree."""
         del caller
-        running = sum(
-            1 for member in self._members.values() if member.state == "running"
-        )
+        running = len(self._running_members())
         return {"running": running, "limit": self._max_active}
 
     async def list_descendants(
@@ -293,6 +293,7 @@ class SubagentService(Service):
     ) -> list[dict[str, Any]]:
         """List the tree below one root as model-facing rows."""
         del signal
+        self._sync_states()
         return [
             {
                 "id": member.child_id,

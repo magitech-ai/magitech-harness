@@ -78,9 +78,11 @@ def _member(
 
 def test_provider_dispose_noop_for_foreign_provider() -> None:
     service = _service()
-    provider = SubagentProvider(name="x", start=lambda _s, _c: _empty())
+    provider = SubagentProvider(name="x", start=lambda _s, _c, **_kw: _empty())
     dispose = service.register_provider(provider)
-    service._providers["x"] = SubagentProvider(name="x", start=lambda _s, _c: _empty())
+    service._providers["x"] = SubagentProvider(
+        name="x", start=lambda _s, _c, **_kw: _empty()
+    )
     dispose()
     assert "x" in service._providers
 
@@ -206,7 +208,7 @@ def test_log_event_without_active_session() -> None:
 async def test_start_activation_guards() -> None:
     service = _service()
     service.register_provider(
-        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+        SubagentProvider(name="spawn", start=lambda _s, _c, **_kw: _empty())
     )
     service._members["a"] = _member("a", "a")
     with pytest.raises(SubagentError, match="already in use"):
@@ -226,7 +228,7 @@ async def test_start_activation_guards() -> None:
 async def test_start_activation_depth_and_capacity() -> None:
     service = _service()
     service.register_provider(
-        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+        SubagentProvider(name="spawn", start=lambda _s, _c, **_kw: _empty())
     )
     service._members["parent"] = _member("parent", "parent")
     service._members["parent"].depth = 1
@@ -437,58 +439,6 @@ async def test_interrupt_with_live_task() -> None:
     assert task.cancelled() or task.done()
 
 
-@pytest.mark.asyncio
-async def test_send_message_and_interrupt_success_paths(tmp_path: Any) -> None:
-    ctx = create_harness(storage_dir=tmp_path / "success")
-    await ctx.flush()
-    session = ctx.sessions.create("success-session")
-    agent = _FakeAgent()
-    agent.session = session
-    service: SubagentService = ctx.subagents
-    service._members["sub-1"] = _member("sub-1", "worker")
-    manager = service._manager_for(ctx)
-    manager._records["sub-1"] = SubagentRecord(
-        subagent_id="sub-1",
-        role="worker",
-        agent_name="worker",
-        model_id="inherit",
-        workspace_path=Path("."),
-        session_id="child-session",
-        session_path=Path("."),
-        state=SubagentState.RUNNING,
-    )
-
-    async def _run_child(child_id: str, _message: str) -> None:
-        assert child_id == "sub-1"
-
-    manager._run_child = _run_child  # type: ignore[method-assign]
-
-    async def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-        batch = await ctx.tools.execute(
-            {
-                "calls": [
-                    {
-                        "type": "tool-call",
-                        "id": name,
-                        "name": name,
-                        "arguments": args,
-                    }
-                ],
-                "signal": AbortSignal(),
-                "agent": agent,
-            }
-        )
-        return batch["results"][0]["result"]
-
-    result = await call("send_message", {"agent": "worker", "message": "hi"})
-    assert result["isError"] is False
-    assert result["value"]["messageId"].startswith("msg-")
-
-    result = await call("interrupt_agent", {"agent": "worker"})
-    assert result["isError"] is False
-    assert result["value"] == {"accepted": True}
-
-
 def test_wait_for_input_stops_promptly() -> None:
     from magitech_harness.subagent.tools import _wait_for_input
 
@@ -507,7 +457,7 @@ async def test_delegation_logs_lineage_to_caller_session(tmp_path: Any) -> None:
     session = ctx.sessions.create("lineage-session")
     service: SubagentService = ctx.subagents
     service.register_provider(
-        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+        SubagentProvider(name="spawn", start=lambda _s, _c, **_kw: _empty())
     )
     record = SubagentRecord(
         subagent_id="sub-real",
@@ -673,7 +623,7 @@ async def test_wait_agent_abort_sets_stop_without_leaking(tmp_path: Any) -> None
 def test_depth_uses_caller_session_id() -> None:
     service = _service()
     service.register_provider(
-        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+        SubagentProvider(name="spawn", start=lambda _s, _c, **_kw: _empty())
     )
     service._members["sub-1"] = _member("sub-1", "worker")
     service._members["sub-1"].session_id = "child-session"
@@ -726,49 +676,6 @@ async def test_wait_agent_abort_during_turn(tmp_path: Any) -> None:
     assert batch["results"][0]["result"]["isError"] is False
 
 
-@pytest.mark.asyncio
-async def test_compatibility_alias_tools(tmp_path: Any) -> None:
-    ctx = create_harness(storage_dir=tmp_path / "aliases")
-    await ctx.flush()
-    session = ctx.sessions.create("alias-session")
-    agent = _FakeAgent()
-    agent.session = session
-    service: SubagentService = ctx.subagents
-    service._members["sub-1"] = _member("sub-1", "worker")
-    service._members["sub-1"].session_id = "child-1"
-
-    async def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
-        batch = await ctx.tools.execute(
-            {
-                "calls": [
-                    {
-                        "type": "tool-call",
-                        "id": name,
-                        "name": name,
-                        "arguments": args,
-                    }
-                ],
-                "signal": AbortSignal(),
-                "agent": agent,
-            }
-        )
-        return batch["results"][0]["result"]
-
-    result = await _call("manage_subagents", {"action": "list"})
-    assert result["isError"] is False
-    assert result["value"]["subagents"][0]["subagent_id"] == "sub-1"
-
-    result = await _call(
-        "manage_subagents", {"action": "kill", "subagent_ids": ["sub-1"]}
-    )
-    assert result["isError"] is False
-    assert result["value"]["subagents"][0]["status"] == "terminated"
-
-    result = await _call("list_subagent_models", {})
-    assert result["isError"] is False
-    assert "models" in result["value"]
-
-
 def test_sync_states_skips_record_without_state() -> None:
     service = _service()
     member = _member("sub-1", "worker")
@@ -808,3 +715,56 @@ def test_wait_for_input_waits_then_stops() -> None:
     stop = threading.Event()
     stop.set()
     assert _wait_for_input(_FakeInbox(False), stop) is False
+
+
+@pytest.mark.asyncio
+async def test_dsh_named_control_tools_success(tmp_path: Any) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "dsh-control")
+    await ctx.flush()
+    session = ctx.sessions.create("dsh-control-session")
+    agent = _FakeAgent()
+    agent.session = session
+    service: SubagentService = ctx.subagents
+    service._members["sub-1"] = _member("sub-1", "worker")
+    service._members["sub-1"].session_id = "child-1"
+    manager = service._manager_for(ctx)
+    manager._records["sub-1"] = SubagentRecord(
+        subagent_id="sub-1",
+        role="worker",
+        agent_name="worker",
+        model_id="inherit",
+        workspace_path=Path("."),
+        session_id="child-1",
+        session_path=Path("."),
+        state=SubagentState.RUNNING,
+    )
+
+    async def _run_child(child_id: str, _message: str) -> None:
+        assert child_id == "sub-1"
+
+    manager._run_child = _run_child  # type: ignore[method-assign]
+
+    async def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        batch = await ctx.tools.execute(
+            {
+                "calls": [
+                    {
+                        "type": "tool-call",
+                        "id": name,
+                        "name": name,
+                        "arguments": args,
+                    }
+                ],
+                "signal": AbortSignal(),
+                "agent": agent,
+            }
+        )
+        return batch["results"][0]["result"]
+
+    result = await call("send_message", {"agent": "worker", "message": "hi"})
+    assert result["isError"] is False
+    assert result["value"]["messageId"].startswith("msg-")
+
+    result = await call("interrupt_agent", {"agent": "worker"})
+    assert result["isError"] is False
+    assert result["value"] == {"accepted": True}

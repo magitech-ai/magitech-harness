@@ -18,7 +18,7 @@ lineage, capacity, name resolution, messaging and interruption.
 | `list_agents` | list the root and reachable descendants with status and capacity |
 | `interrupt_agent` | request cooperative cancellation of a descendant |
 | `wait_agent` | wait for pending next-step input, with a bounded timeout |
-| `invoke_subagent`, `manage_subagents`, `list_subagent_models` | compatibility aliases and model discovery |
+| `list_subagent_models` | model discovery |
 
 ## Delegation scope
 

@@ -15,13 +15,15 @@ from magitech_harness.subagent.service import SubagentProvider
 from magitech_harness.subagent.types import SubagentSpec
 
 
-async def _start(ctx: Any, spec: SubagentSpec, *, fork: bool) -> dict[str, Any]:
+async def _start(
+    ctx: Any, spec: SubagentSpec, *, fork: bool, session: Any = None
+) -> dict[str, Any]:
     child = create_harness()
     setattr(child, "workspace_dir", getattr(ctx, "workspace_dir", None))  # noqa: B010
     await child.flush()
-    session = child.sessions.create()
+    child_session = child.sessions.create()
     if fork:
-        parent_session = getattr(ctx, "session", None)
+        parent_session = session or getattr(ctx, "session", None)
         if parent_session is not None:
             inherited = list(parent_session.events)
             # The in-flight turn may contain an assistant tool call with no
@@ -32,26 +34,30 @@ async def _start(ctx: Any, spec: SubagentSpec, *, fork: bool) -> dict[str, Any]:
                 if event.type == "turn/end":
                     balanced_end = index + 1
             for event in inherited[:balanced_end]:
-                session.append(
+                child_session.append(
                     event.type,
                     dict(event.payload),
                     surface_op=event.surface_op,
                     source_event_seqs=event.source_event_seqs,
                 )
     return {
-        "sessionId": session.session_id,
+        "sessionId": child_session.session_id,
         "mode": "fork" if fork else "spawn",
     }
 
 
-async def start_spawn(spec: SubagentSpec, ctx: Any) -> dict[str, Any]:
+async def start_spawn(
+    spec: SubagentSpec, ctx: Any, *, session: Any = None
+) -> dict[str, Any]:
     """Start a fresh child context with no inherited conversation."""
-    return await _start(ctx, spec, fork=False)
+    return await _start(ctx, spec, fork=False, session=session)
 
 
-async def start_fork(spec: SubagentSpec, ctx: Any) -> dict[str, Any]:
+async def start_fork(
+    spec: SubagentSpec, ctx: Any, *, session: Any = None
+) -> dict[str, Any]:
     """Start a child seeded with the parent's completed turns."""
-    return await _start(ctx, spec, fork=True)
+    return await _start(ctx, spec, fork=True, session=session)
 
 
 def spawn_provider() -> SubagentProvider:

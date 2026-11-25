@@ -1,7 +1,8 @@
 # 0023. Subagent tool names and compatibility aliases
 
 Date: 2026-11-25
-Status: accepted (evidence-backed)
+Status: **superseded** by [ADR 0024](0024-remove-compatibility-aliases.md)
+(2026-11-25). This body is preserved as history; the alias decision no longer applies.
 Related: [ADR 0022](0022-supersede-zero-builtin-domain-tools-base-bundle-in-harness.md)
 
 ## Context
