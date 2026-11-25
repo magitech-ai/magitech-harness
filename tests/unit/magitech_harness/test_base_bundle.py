@@ -49,6 +49,11 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "agent-instructions",
+        "name": "magitech_harness.agent_instructions.service:apply",
+        "config": {"maxBytes": 65536},
+    },
+    {
         "id": "system-prompt",
         "name": "magitech_harness.system_prompt.service:SystemPromptService",
         "config": {},

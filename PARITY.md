@@ -112,7 +112,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 51 | fs-observation-policy | `@deepseek-ai/dsh-fs-observation-policy` | packages/fs/fs-observation-policy/src/index.ts | magitech-harness | `src/magitech_harness/fs/observation_policy.py` | DONE | `test_observation_policy.py` |
 | 52 | tool-fs | `@deepseek-ai/dsh-tool-fs` | packages/fs/tool-fs/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/tools/fs.py` | DONE | `test_fs_{read,write,edit}.py`; `apply_patch` stays unported and refuses to mount |
 | 53 | tool-fs-search | `@deepseek-ai/dsh-tool-fs-search` | packages/fs/tool-fs-search/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/tools/fs_search.py` | DONE | `test_fs_search.py` |
-| 54 | agent-instructions | `@deepseek-ai/dsh-agent-instructions` | packages/context/agent-instructions/src/index.ts | magitech-harness | NONE | PARTIAL | agent instructions row not mounted |
+| 54 | agent-instructions | `@deepseek-ai/dsh-agent-instructions` | packages/context/agent-instructions/src/index.ts | magitech-harness | `src/magitech_harness/agent_instructions/` | DONE | `test_agent_instructions.py` (AGENTS.md/CLAUDE.md discovery, two-chain budget, durable typed user messages, resume identity) |
 | 55 | skill | `@deepseek-ai/dsh-skill` | packages/skill/skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_registry/component.py` | DONE | `test_skills_registry.py` |
 | 56 | skill-filesystem | `@deepseek-ai/dsh-skill-filesystem` | packages/skill/skill-filesystem/src/index.ts | mth-components | `src/mth_components/bridges/skills_filesystem/component.py` | DONE | `test_skills_filesystem.py` |
 | 57 | tool-skill | `@deepseek-ai/dsh-tool-skill` | packages/skill/tool-skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_loader/component.py` | DONE | `test_skills_loader.py` |
@@ -218,7 +218,7 @@ registrations remain.
 |---|---|---|
 | `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
 | `sandbox` / `sandbox-policy` | Windows ACL sandbox backend not implemented on Linux; `sandbox_policy` enforcement on all paths is a documented gap (finding #13). | Malcom (ratified plan C1) |
-| `agent-instructions` | Row not mounted; instruction surface is via system-prompt sections. | Malcom (documented gap) |
+| `agent-instructions` | Implemented as a durable instruction loader (row 54 DONE). | Resolved by implementation |
 | `upstream-skills` | Upstream skills download nothing until registered; no local files to pin. | Malcom (documented gap) |
 | `image-offload` | Implemented as a durable message projection + `agent/request-error` retry (row 84 DONE). | Resolved by implementation |
 | `commands` | Implemented as a durable registry with lifecycle events (row 59 DONE). | Resolved by implementation |
