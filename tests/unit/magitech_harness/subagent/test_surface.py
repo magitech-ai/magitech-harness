@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -21,7 +23,11 @@ from magitech_harness.subagent.service import (
     SubagentService,
     _Member,
 )
-from magitech_harness.subagent.types import SubagentSpec
+from magitech_harness.subagent.types import (
+    SubagentRecord,
+    SubagentSpec,
+    SubagentState,
+)
 
 
 class _FakeSession:
@@ -131,14 +137,33 @@ async def test_send_message_rejects_stopped_child() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_message_delivers_via_manager() -> None:
+async def test_send_message_uses_manager_child_id() -> None:
     service = _service()
-    service._members["sub-1"] = _member()
+    member = _member("sub-real", "worker")
+    member.session_id = "child-session"
+    service._members["sub-real"] = member
     manager = service._manager_for(service.ctx)
-    manager.send_message = AsyncMock()  # type: ignore[method-assign]
-    result = await service.send_message(None, "sub-1", [{"type": "text", "text": "hi"}])
+    manager._records["sub-real"] = SubagentRecord(
+        subagent_id="sub-real",
+        role="worker",
+        agent_name="worker",
+        model_id="inherit",
+        workspace_path=Path("."),
+        session_id="child-session",
+        session_path=Path("."),
+        state=SubagentState.RUNNING,
+    )
+    seen: list[str] = []
+
+    async def _run_child(child_id: str, _message: str) -> None:
+        seen.append(child_id)
+
+    manager._run_child = _run_child  # type: ignore[method-assign]
+    result = await service.send_message(
+        None, "sub-real", [{"type": "text", "text": "hi"}]
+    )
     assert result["messageId"].startswith("msg-")
-    manager.send_message.assert_awaited_once_with("sub-1", "hi")
+    assert seen == ["sub-real"]
 
 
 def test_interrupt_cancels_task() -> None:
@@ -345,7 +370,7 @@ async def test_wait_agent_timeout_and_pending(tmp_path: Any) -> None:
 def test_wait_for_input_helper() -> None:
     from magitech_harness.subagent.tools import _wait_for_input
 
-    assert _wait_for_input(_FakeInbox(True)) is True
+    assert _wait_for_input(_FakeInbox(True), threading.Event()) is True
 
 
 @pytest.mark.asyncio
@@ -422,7 +447,21 @@ async def test_send_message_and_interrupt_success_paths(tmp_path: Any) -> None:
     service: SubagentService = ctx.subagents
     service._members["sub-1"] = _member("sub-1", "worker")
     manager = service._manager_for(ctx)
-    manager.send_message = AsyncMock()  # type: ignore[method-assign]
+    manager._records["sub-1"] = SubagentRecord(
+        subagent_id="sub-1",
+        role="worker",
+        agent_name="worker",
+        model_id="inherit",
+        workspace_path=Path("."),
+        session_id="child-session",
+        session_path=Path("."),
+        state=SubagentState.RUNNING,
+    )
+
+    async def _run_child(child_id: str, _message: str) -> None:
+        assert child_id == "sub-1"
+
+    manager._run_child = _run_child  # type: ignore[method-assign]
 
     async def call(name: str, args: dict[str, Any]) -> dict[str, Any]:
         batch = await ctx.tools.execute(
@@ -450,24 +489,322 @@ async def test_send_message_and_interrupt_success_paths(tmp_path: Any) -> None:
     assert result["value"] == {"accepted": True}
 
 
-def test_wait_for_input_polls_until_pending() -> None:
+def test_wait_for_input_stops_promptly() -> None:
     from magitech_harness.subagent.tools import _wait_for_input
 
-    class _Eventually:
-        def __init__(self) -> None:
-            self.has_pending = False
-            self.calls = 0
+    stop = threading.Event()
+    # A pending inbox returns immediately.
+    assert _wait_for_input(_FakeInbox(True), stop) is True
+    # A stopped waiter returns False without polling.
+    stop.set()
+    assert _wait_for_input(_FakeInbox(False), stop) is False
 
-    inbox = _Eventually()
-    ticks = iter([0.0, 0.0, 0.0, 0.0, 3601.0])
 
-    def _sleep(_seconds: float) -> None:
-        inbox.calls += 1
-        if inbox.calls >= 2:
-            inbox.has_pending = True
+@pytest.mark.asyncio
+async def test_delegation_logs_lineage_to_caller_session(tmp_path: Any) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "lineage")
+    await ctx.flush()
+    session = ctx.sessions.create("lineage-session")
+    service: SubagentService = ctx.subagents
+    service.register_provider(
+        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+    )
+    record = SubagentRecord(
+        subagent_id="sub-real",
+        role="worker",
+        agent_name="worker",
+        model_id="inherit",
+        workspace_path=Path("."),
+        session_id="child-session",
+        session_path=Path("."),
+        state=SubagentState.COMPLETED,
+    )
 
-    with (
-        patch("time.monotonic", side_effect=lambda: next(ticks)),
-        patch("time.sleep", side_effect=_sleep),
+    async def _invoke(_specs: Any, **_kwargs: Any) -> list[SubagentRecord]:
+        return [record]
+
+    manager = service._manager_for(ctx)
+    manager.invoke = _invoke  # type: ignore[method-assign]
+
+    result = await service.startActivation(
+        SubagentSpec(role="worker", prompt="go", agent_name="worker"),
+        session=session,
+    )
+    assert result["id"] == "sub-real"
+    types = [event.type for event in session.events]
+    assert "subagent/descriptor" in types
+    assert "subagent/catalog" in types
+
+
+def test_capacity_frees_when_manager_record_completes(tmp_path: Any) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "capacity")
+    service = SubagentService(ctx, {"maxActiveSubagents": 1})
+    service._members["sub-1"] = _member("sub-1", "worker")
+    record = SubagentRecord(
+        subagent_id="sub-1",
+        role="worker",
+        agent_name="worker",
+        model_id="inherit",
+        workspace_path=Path("."),
+        session_id="child-session",
+        session_path=Path("."),
+        state=SubagentState.COMPLETED,
+    )
+    service._members["sub-1"].record = record
+    service._sync_states()
+    assert service._members["sub-1"].state == "completed"
+    assert service.capacity_of(None)["running"] == 0
+
+
+@pytest.mark.asyncio
+async def test_fork_replays_only_balanced_prefix(tmp_path: Any) -> None:
+    from magitech_harness import create_harness as real_create
+    from magitech_harness.session.pairing import is_tool_pairing_balanced
+
+    parent = real_create(storage_dir=tmp_path / "fork-balance")
+    await parent.flush()
+    session = parent.sessions.create("parent")
+    session.append("turn/start", {"turn": 1})
+    session.append(
+        "user/message",
+        {
+            "role": "user",
+            "id": "m1",
+            "content": [{"type": "text", "text": "hi"}],
+            "source": {"kind": "user"},
+        },
+        surface_op="append",
+    )
+    session.append(
+        "assistant/message",
+        {
+            "turn": 1,
+            "step": 1,
+            "message": {
+                "role": "assistant",
+                "id": "a1",
+                "content": [{"type": "text", "text": "ok"}],
+                "source": {"kind": "model", "provider": "mock", "model": "mock"},
+            },
+            "stream": [],
+        },
+        surface_op="append",
+    )
+    session.append("turn/end", {"turn": 1, "reason": {"kind": "completed"}})
+    session.append("turn/start", {"turn": 2})
+    session.append(
+        "tool/call",
+        {
+            "turn": 2,
+            "step": 1,
+            "callId": "c2",
+            "name": "bash",
+            "arguments": {"command": "echo x"},
+        },
+    )
+    parent.session = session
+
+    captured: list[Any] = []
+
+    def _factory(storage_dir: Any = None, **kwargs: Any) -> Any:
+        child = real_create(storage_dir=tmp_path / "fork-child")
+        captured.append(child)
+        return child
+
+    from unittest.mock import patch
+
+    with patch(
+        "magitech_harness.subagent.providers.create_harness", side_effect=_factory
     ):
-        assert _wait_for_input(inbox) is True
+        await providers.start_fork(SubagentSpec(role="worker", prompt="go"), parent)
+    assert captured
+    await captured[0].flush()
+    child_session = captured[0].sessions.list_sessions()[-1]
+    child = captured[0].sessions.read(child_session)
+    assert child is not None
+    assert [event.type for event in child.events] == [
+        "turn/start",
+        "user/message",
+        "assistant/message",
+        "turn/end",
+    ]
+    assert is_tool_pairing_balanced(child.events, len(child.events) - 1)
+
+
+@pytest.mark.asyncio
+async def test_wait_agent_abort_sets_stop_without_leaking(tmp_path: Any) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "abort-wait")
+    await ctx.flush()
+    session = ctx.sessions.create("abort-session")
+    agent = _FakeAgent(pending=False)
+    agent.session = session
+    signal = AbortSignal()
+    from magitech_harness.subagent import tools as tools_mod
+
+    seen: list[threading.Event] = []
+
+    def _wait(inbox: Any, stop: threading.Event) -> bool:
+        seen.append(stop)
+        return stop.wait(1) is False
+
+    original = tools_mod._wait_for_input
+    tools_mod._wait_for_input = _wait  # type: ignore[assignment]
+    try:
+        batch = await ctx.tools.execute(
+            {
+                "calls": [
+                    {
+                        "type": "tool-call",
+                        "id": "wait_agent",
+                        "name": "wait_agent",
+                        "arguments": {"timeout_ms": 10_000},
+                    }
+                ],
+                "signal": signal,
+                "agent": agent,
+            }
+        )
+    finally:
+        tools_mod._wait_for_input = original  # type: ignore[assignment]
+    assert batch["results"][0]["result"]["isError"] is False
+    assert seen and seen[0].is_set()
+
+
+def test_depth_uses_caller_session_id() -> None:
+    service = _service()
+    service.register_provider(
+        SubagentProvider(name="spawn", start=lambda _s, _c: _empty())
+    )
+    service._members["sub-1"] = _member("sub-1", "worker")
+    service._members["sub-1"].session_id = "child-session"
+    service._members["sub-1"].depth = 1
+    service._max_depth = 1
+    with pytest.raises(SubagentError, match="exceeds the configured cap"):
+        asyncio.run(
+            service.startActivation(
+                SubagentSpec(role="worker", prompt="go"),
+                parent_id="child-session",
+            )
+        )
+
+
+def test_ancestry_guards_reject_foreign_caller() -> None:
+    service = _service()
+    service._members["sub-1"] = _member("sub-1", "worker")
+    service._members["sub-1"].session_id = "child-1"
+    service._members["sub-2"] = _member("sub-2", "other", parent="sub-1")
+    service._members["sub-2"].session_id = "child-2"
+    service._members["sub-2"].depth = 1
+    with pytest.raises(SubagentError, match="outside the caller tree"):
+        service.resolve_name(_FakeAgent("child-2"), "worker")
+    with pytest.raises(SubagentError, match="ancestor of the target"):
+        service.interrupt("sub-2", {"agent": _FakeAgent("child-2")})
+
+
+@pytest.mark.asyncio
+async def test_wait_agent_abort_during_turn(tmp_path: Any) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "abort-midflight")
+    await ctx.flush()
+    session = ctx.sessions.create("abort-session-2")
+    agent = _FakeAgent(pending=False)
+    agent.session = session
+    signal = AbortSignal()
+    batch = await ctx.tools.execute(
+        {
+            "calls": [
+                {
+                    "type": "tool-call",
+                    "id": "wait_agent",
+                    "name": "wait_agent",
+                    "arguments": {"timeout_ms": 10_000},
+                }
+            ],
+            "signal": signal,
+            "agent": agent,
+        }
+    )
+    assert batch["results"][0]["result"]["isError"] is False
+
+
+@pytest.mark.asyncio
+async def test_compatibility_alias_tools(tmp_path: Any) -> None:
+    ctx = create_harness(storage_dir=tmp_path / "aliases")
+    await ctx.flush()
+    session = ctx.sessions.create("alias-session")
+    agent = _FakeAgent()
+    agent.session = session
+    service: SubagentService = ctx.subagents
+    service._members["sub-1"] = _member("sub-1", "worker")
+    service._members["sub-1"].session_id = "child-1"
+
+    async def _call(name: str, args: dict[str, Any]) -> dict[str, Any]:
+        batch = await ctx.tools.execute(
+            {
+                "calls": [
+                    {
+                        "type": "tool-call",
+                        "id": name,
+                        "name": name,
+                        "arguments": args,
+                    }
+                ],
+                "signal": AbortSignal(),
+                "agent": agent,
+            }
+        )
+        return batch["results"][0]["result"]
+
+    result = await _call("manage_subagents", {"action": "list"})
+    assert result["isError"] is False
+    assert result["value"]["subagents"][0]["subagent_id"] == "sub-1"
+
+    result = await _call(
+        "manage_subagents", {"action": "kill", "subagent_ids": ["sub-1"]}
+    )
+    assert result["isError"] is False
+    assert result["value"]["subagents"][0]["status"] == "terminated"
+
+    result = await _call("list_subagent_models", {})
+    assert result["isError"] is False
+    assert "models" in result["value"]
+
+
+def test_sync_states_skips_record_without_state() -> None:
+    service = _service()
+    member = _member("sub-1", "worker")
+    member.record = object()
+    service._members["sub-1"] = member
+    service._sync_states()
+    assert member.state == "running"
+
+
+def test_ancestor_walks_grandparent_chain() -> None:
+    service = _service()
+    service._members["root-child"] = _member("root-child", "child")
+    service._members["root-child"].session_id = "child-session"
+    service._members["grand"] = _member("grand", "grand", parent="root-child")
+    service._members["grand"].depth = 1
+    service._members["grand"].session_id = "grand-session"
+    assert service._caller_member(_FakeAgent("child-session")) is not None
+    assert service._ancestor_of(_FakeAgent("child-session"), service._members["grand"])
+
+
+def test_resolve_name_rejects_unknown() -> None:
+    service = _service()
+    with pytest.raises(SubagentError, match="no agent named"):
+        service.resolve_name(None, "missing")
+
+
+def test_log_event_without_sessions_service() -> None:
+    ctx = Context()
+    LLMService(ctx)
+    service = SubagentService(ctx)
+    service._log_event("subagent/descriptor", {})
+
+
+def test_wait_for_input_waits_then_stops() -> None:
+    from magitech_harness.subagent.tools import _wait_for_input
+
+    stop = threading.Event()
+    stop.set()
+    assert _wait_for_input(_FakeInbox(False), stop) is False

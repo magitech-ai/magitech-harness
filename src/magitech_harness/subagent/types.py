@@ -39,6 +39,7 @@ class SubagentSpec:
     workspace: Literal["inherit", "branch"] = "inherit"
     allowed_tools: frozenset[str] | None = None
     wait: bool = True
+    max_depth: int | None = None
 
 
 @dataclass

@@ -1,35 +1,42 @@
 # Subagent
 
-**Source:** `mth-components/src/mth_components/tools/subagent/`.
+**Source:** `src/magitech_harness/subagent/`, mounted by the base bundle rows
+`subagent`, `subagent-spawn-in-process`, `subagent-fork-in-process`,
+`tool-subagent`, `tool-subagent-fork` and `tool-subagent-control`.
 
-The subagent tool spawns child harnesses to handle delegated work. It is a
-domain tool from `mth-components`, not part of the harness core.
+The subagent domain is Tier 1 substrate under ADR 0022, not a marketplace
+component. `ctx.subagents` owns provider registration, the live child tree,
+lineage, capacity, name resolution, messaging and interruption.
 
 ## Tools
 
 | Tool | Purpose |
 |---|---|
-| `invoke_subagent` | spawn a child with a role, prompt, optional model, workspace mode (`inherit`/`branch`), tool allow-list, and wait flag |
-| `send_message` | run another turn on an existing subagent |
-| `manage_subagents` | `list`, `kill`, or `kill_all`; aborts tasks, removes worktrees, closes sessions |
+| `subagent` | delegate through the `spawn` provider; returns the child name |
+| `subagent_fork` | delegate through the `fork` provider, seeding the child from the parent's completed turns |
+| `send_message` | deliver a follow-up to an agent in the caller's tree |
+| `list_agents` | list the root and reachable descendants with status and capacity |
+| `interrupt_agent` | request cooperative cancellation of a descendant |
+| `wait_agent` | wait for pending next-step input, with a bounded timeout |
+| `invoke_subagent`, `manage_subagents`, `list_subagent_models` | compatibility aliases and model discovery |
 
 ## Delegation scope
 
-A child harness gets a fresh context with the default bundle. The parent's
-providers and tool objects are copied into it, but the child is pinned to a
-fail-closed approval scope: its approval policy is set to `never` at creation,
-so it never inherits the parent's interactive approver or one-shot grants. A
-branch-worktree child runs under its own workspace. Abort signals propagate from
-parent to child.
+A child harness gets a fresh context with the full base bundle. The parent's
+providers are copied through the public seams; the child is pinned to a
+fail-closed approval scope, so it never inherits the parent's interactive
+approver or one-shot grants. A branch-worktree child runs under its own
+workspace. Abort signals propagate from parent to child. Child descriptors and
+the catalog are logged as `subagent/descriptor` and `subagent/catalog` events.
 
-**[Python]** The reference composes child scopes from parent presets and pins a
-delegation triad (permission preset, sandbox mode, approval `never`) into the
-child's session log. This port pins the approval policy; full preset/sandbox
-delegation events are not yet emitted.
+**[Python]** The dsh reference composes child scopes from parent presets and
+pins a delegation triad into the child's session log. This port pins the
+approval policy and logs lineage; full preset/sandbox delegation events are not
+yet emitted.
 
 ## Configuration
 
-Component config: `subsessions_dir` and `workspace_root` (code-derived). There
-are no base-bundle YAML keys for subagents.
+Rows: `subagent` (`maxActiveSubagents`, `maxDepth`) and the three tool rows.
+The manager still accepts code-only `subsessions_dir` and `workspace_root`.
 
 Unresolved questions: none.

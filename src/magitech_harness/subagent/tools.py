@@ -13,6 +13,7 @@ Ports dsh's tool rows at ``packages/subagent/tool-subagent-control/src`` and
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
 
 from animas import Context
@@ -70,6 +71,7 @@ def apply(
             provider=provider,
             parent_id=getattr(agent, "id", None),
             signal=exec_view.get("signal"),
+            session=exec_view.get("session") or getattr(agent, "session", None),
         )
         return {"kind": activation["kind"], "name": activation["name"]}
 
@@ -131,17 +133,24 @@ def apply(
         inbox = getattr(agent, "inbox", None)
         if inbox is None:  # pragma: no cover - live agents own an inbox
             return {"timedOut": True}
+        stop = threading.Event()
         signal = exec_view.get("signal")
+        remove = None
+        if signal is not None:  # pragma: no cover - pipeline always supplies a signal
+            remove = signal.on_abort(stop.set)
         result: dict[str, Any] = {"timedOut": True}
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(_wait_for_input, inbox),
+                asyncio.to_thread(_wait_for_input, inbox, stop),
                 timeout=timeout_ms / 1000,
             )
             result["timedOut"] = False
         except TimeoutError:
             pass
-        del signal
+        finally:
+            stop.set()
+            if remove is not None:  # pragma: no cover - paired with the signal above
+                remove()
         return result
 
     if delegate:
@@ -325,6 +334,181 @@ def apply(
             )
         )
 
+        # Compatibility aliases for the pre-parity marketplace tool names.
+        # These are additive: the dsh-named tools stay canonical.
+        ctx.tools.register(
+            define_tool(
+                name="invoke_subagent",
+                description="Compatibility alias for `subagent`. Prefer `subagent`.",
+                parameters={
+                    "role": {"type": "string", "description": "Role label."},
+                    "prompt": {
+                        "type": "string",
+                        "required": True,
+                        "description": "Task for the child.",
+                    },
+                },
+                output={
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "kind": {"type": "string", "required": True},
+                            "name": {"type": "string", "required": True},
+                        },
+                    },
+                    "render": lambda _a, v: [
+                        {"type": "text", "text": f"subagent {v['name']} started"}
+                    ],
+                },
+                execute=_delegate,
+            )
+        )
+
+        async def _manage(args: dict[str, Any], exec_view: Any) -> dict[str, Any]:
+            _require_agent(exec_view)
+            action = args.get("action", "list")
+            if action == "list":
+                targets = list(service._members)
+            else:
+                targets = args.get("subagent_ids") or (
+                    list(service._members) if action == "kill_all" else []
+                )
+            rows: list[dict[str, Any]] = []
+            for child_id in targets:
+                member = service._members.get(child_id)
+                if member is None:
+                    continue
+                if action != "list":
+                    service.interrupt(child_id, {"kind": "ancestor"})
+                    member = service._members[child_id]
+                rows.append(
+                    {
+                        "subagent_id": child_id,
+                        "status": member.state,
+                        "agent_name": member.name,
+                    }
+                )
+            return {"subagents": rows}
+
+        ctx.tools.register(
+            define_tool(
+                name="manage_subagents",
+                description=(
+                    "Compatibility alias for inspecting and stopping local "
+                    "subagents. Prefer `list_agents` and `interrupt_agent`."
+                ),
+                parameters={
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "kill", "kill_all"],
+                        "description": "Operation to perform.",
+                    },
+                    "subagent_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Targets for kill.",
+                    },
+                },
+                output={
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "subagents": {
+                                "type": "array",
+                                "required": True,
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "subagent_id": {
+                                            "type": "string",
+                                            "required": True,
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "required": True,
+                                        },
+                                        "agent_name": {
+                                            "type": "string",
+                                            "required": True,
+                                        },
+                                    },
+                                },
+                            }
+                        },
+                    },
+                    "render": lambda _a, v: [
+                        {
+                            "type": "text",
+                            "text": "\n".join(
+                                f"{row['subagent_id']} [{row['status']}]"
+                                for row in v["subagents"]
+                            ),
+                        }
+                    ],
+                },
+                execute=_manage,
+            )
+        )
+
+        async def _list_models(args: dict[str, Any], exec_view: Any) -> dict[str, Any]:
+            del args, exec_view
+            llm_svc = ctx.get("llm", None, strict=False)
+            models: list[dict[str, str]] = []
+            if llm_svc is not None:
+                for entry in llm_svc.list_providers():
+                    provider = entry.get("id") or entry.get("provider")
+                    model = entry.get("model") or entry.get("id")
+                    if isinstance(provider, str) and isinstance(model, str):
+                        models.append({"provider": provider, "model": model})
+            return {"models": models}
+
+        ctx.tools.register(
+            define_tool(
+                name="list_subagent_models",
+                description="List the model routes available to a subagent.",
+                parameters={},
+                output={
+                    "schema": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "models": {
+                                "type": "array",
+                                "required": True,
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "provider": {
+                                            "type": "string",
+                                            "required": True,
+                                        },
+                                        "model": {
+                                            "type": "string",
+                                            "required": True,
+                                        },
+                                    },
+                                },
+                            }
+                        },
+                    },
+                    "render": lambda _a, v: [
+                        {
+                            "type": "text",
+                            "text": "\n".join(
+                                f"{row['provider']}/{row['model']}"
+                                for row in v["models"]
+                            ),
+                        }
+                    ],
+                },
+                execute=_list_models,
+            )
+        )
+
         ctx.tools.register(
             define_tool(
                 name="wait_agent",
@@ -358,16 +542,17 @@ def apply(
         )
 
 
-def _wait_for_input(inbox: Any) -> bool:
-    """Block until the next-step queue is non-empty (called in a thread)."""
-    import time
+def _wait_for_input(inbox: Any, stop: threading.Event) -> bool:
+    """Wait for pending input or an explicit stop signal.
 
-    deadline = time.monotonic() + 3600
-    while time.monotonic() < deadline:
+    ``stop`` is set on timeout and on caller abort, so the worker never
+    outlives the tool call.
+    """
+    while not stop.is_set():
         if inbox.has_pending:
             return True
-        time.sleep(0.02)
-    return False  # pragma: no cover - 1h safety net; the caller's timeout governs
+        stop.wait(0.02)
+    return False
 
 
 def apply_control(

@@ -42,7 +42,7 @@ async def test_subagent_turn_on_bundle_child_persists(tmp_path: Path) -> None:
     )
     parent_ctx.tools.register(
         define_tool(
-            name="invoke_subagent", description="", parameters={}, execute=AsyncMock()
+            name="parent_custom", description="", parameters={}, execute=AsyncMock()
         )
     )
 
@@ -101,7 +101,7 @@ async def test_subagent_turn_on_bundle_child_persists(tmp_path: Path) -> None:
     # so their presence is not asserted against a specific version.
     assert "probe_read" in rec.effective_tools
     assert "probe_write" not in rec.effective_tools
-    assert child_ctx.tools.get("invoke_subagent") is None
+    assert "parent_custom" not in rec.effective_tools
 
     # The bundle-built child carries rows the old child never had.
     assert hasattr(child_ctx, "sessionTitle")

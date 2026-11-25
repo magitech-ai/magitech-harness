@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from animas import Context, Service
-
 from magitech_harness import check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.cli import summarize_headless_outcome
@@ -48,7 +47,7 @@ class SubagentManager(Service):
     """Manages conversational subagent lifecycles and workspace isolation."""
 
     def __init__(self, ctx: Context, config: dict[str, Any] | None = None) -> None:
-        super().__init__(ctx, "subagents")
+        super().__init__(ctx, "_subagentWorker")
         cfg = config or {}
         self.subsessions_dir = cfg.get("subsessions_dir") or (
             Path.home() / ".agents" / "sessions" / "subsessions"

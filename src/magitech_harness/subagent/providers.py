@@ -24,7 +24,14 @@ async def _start(ctx: Any, spec: SubagentSpec, *, fork: bool) -> dict[str, Any]:
         parent_session = getattr(ctx, "session", None)
         if parent_session is not None:
             inherited = list(parent_session.events)
-            for event in inherited:
+            # The in-flight turn may contain an assistant tool call with no
+            # result yet. Replaying it would produce an unbalanced child log,
+            # so seed only through the last completed turn (dsh slice rule).
+            balanced_end = 0
+            for index, event in enumerate(inherited):
+                if event.type == "turn/end":
+                    balanced_end = index + 1
+            for event in inherited[:balanced_end]:
                 session.append(
                     event.type,
                     dict(event.payload),

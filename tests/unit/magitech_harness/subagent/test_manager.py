@@ -136,7 +136,10 @@ def parent_ctx(tmp_path: Path) -> Context:
     )
     tools.register(
         define_tool(
-            name="invoke_subagent", description="", parameters={}, execute=AsyncMock()
+            name="parent_custom_tool",
+            description="",
+            parameters={},
+            execute=AsyncMock(),
         )
     )
     llm = LLMService(ctx)
@@ -536,7 +539,9 @@ async def test_child_ctx_bundle_built_copies_providers_and_persists(
     # triad never reaches a child.
     assert child_ctx.tools.get("read_file") is not None
     assert "write_file" not in rec.effective_tools
-    assert child_ctx.tools.get("invoke_subagent") is None
+    # The child's base bundle provides its own delegation surface; a parent's
+    # same-named tool is never copied into it.
+    assert "parent_custom_tool" not in rec.effective_tools
 
     # The bundle-built child carries rows the old child never had.
     assert hasattr(child_ctx, "sessionTitle")

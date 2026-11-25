@@ -65,8 +65,9 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 | `list_agents` | none | Lists the root and all reachable descendants with status and capacity. |
 | `interrupt_agent` | `agent` (req) | Requests cooperative interruption of a live child. |
 | `wait_agent` | `timeout_ms` (10000–3600000, default 30000) | Waits for pending next-step input; reports whether it timed out. |
-| `send_message` | `subagent_id` (req), `message` (req) | Runs another turn on an existing subagent. |
-| `manage_subagents` | `action` (req: `list`/`kill`/`kill_all`), `subagent_ids` [] | Inspects or terminates subagents, aborting tasks and removing worktrees. |
+| `invoke_subagent` | `role`, `prompt` (req) | Compatibility alias for `subagent`; new callers should use the dsh name. |
+| `manage_subagents` | `action` (`list`/`kill`/`kill_all`), `subagent_ids` [] | Compatibility alias for inspecting and stopping local children. |
+| `list_subagent_models` | none | Lists the model routes a delegated child can use. |
 
 ## Language and skills
 
