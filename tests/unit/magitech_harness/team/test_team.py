@@ -234,13 +234,13 @@ async def test_board_is_shared_with_children(harness: Any) -> None:
     service: TeamService = harness.agentTeams
     root = _agent(harness, "root-session")
     child_session = harness.sessions.create("child-session")
-    child = SimpleNamespace(id="child-agent", session=child_session, options={})
+    child = SimpleNamespace(id="child-session", session=child_session, options={})
 
     # Register the child in the live tree, parented at the root session.
     from magitech_harness.subagent.service import _Member
 
-    harness.subagents._members["child-agent"] = _Member(
-        child_id="child-agent",
+    harness.subagents._members["sub-1"] = _Member(
+        child_id="sub-1",
         name="worker",
         parent_id="root-session",
         session_id="child-session",
@@ -1104,3 +1104,10 @@ def test_last_branches(harness: Any) -> None:
         ]
     )
     assert len(_list(svc, ctx, agent, {"owner": "worker"})["tasks"]) == 1
+
+
+def test_member_for_non_string_id(harness: Any) -> None:
+    service: TeamService = harness.agentTeams
+    agent = SimpleNamespace(id=123, session=harness.sessions.create("numeric"))
+    assert service._member_for(agent) is None
+    assert service._caller_id(agent) == 123

@@ -82,7 +82,7 @@ revision from `team_task_get` or `team_task_list`.
 | Tool | Arguments | Behavior |
 |---|---|---|
 | `team_task_create` | `subject` (req), `description` (req), `blocked_by` [], `write_scopes` [] | Creates an unowned pending task with advisory write scopes and dependency ids. |
-| `team_task_list` | `status`, `unowned`, `ready`, `cursor` (0), `limit` (1–100, default 50) | Lists tasks with readiness, owner, revision, blockers and write-scope warnings; returns `nextCursor` when more pages exist. |
+| `team_task_list` | `status`, `owner`, `unowned`, `ready`, `cursor` (0), `limit` (1–100, default 50) | Lists tasks with readiness, owner, revision, blockers and write-scope warnings; returns `nextCursor` when more pages exist. |
 | `team_task_get` | `task_id` (req) | Reads the complete latest value of one task. |
 | `team_task_update` | `task_id` (req), `expected_revision` (req), `action` (req), plus action-specific fields | Compare-and-set transition: `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, `delete`. |
 

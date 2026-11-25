@@ -98,13 +98,34 @@ class TeamService(Service):
         subagents = self._subagents()
         return getattr(subagents, "_members", {}) if subagents is not None else {}
 
-    def _root_session(self, agent: Any) -> Any:
-        """The root Session of the caller's subagent tree."""
+    def _member_for(self, agent: Any) -> Any:
+        """Resolve a live agent to its subagent member by session or child id."""
         members = self._members()
         agent_id = getattr(agent, "id", None)
-        member = members.get(agent_id) if isinstance(agent_id, str) else None
+        if not isinstance(agent_id, str):
+            return None
+        return next(
+            (
+                member
+                for member in members.values()
+                if member.session_id == agent_id or member.child_id == agent_id
+            ),
+            None,
+        )
+
+    def _caller_id(self, agent: Any) -> Any:
+        """The stable tree id used for task ownership (child id, or root id)."""
+        member = self._member_for(agent)
+        if member is not None:
+            return member.child_id
+        return getattr(agent, "id", None)
+
+    def _root_session(self, agent: Any) -> Any:
+        """The root Session of the caller's subagent tree."""
+        member = self._member_for(agent)
         if member is None:
             return agent.session
+        members = self._members()
         seen: set[str] = set()
         current = member
         while current.parent_id is not None and current.parent_id not in seen:
@@ -277,7 +298,7 @@ class TeamService(Service):
         action = request.get("action")
         lead = self._is_lead(caller)
         owner = current.get("ownerId")
-        caller_id = getattr(caller, "id", None)
+        caller_id = self._caller_id(caller)
         is_owner = owner is not None and owner == caller_id
         next_task = {**current, "revision": current["revision"] + 1}
 
@@ -451,8 +472,8 @@ class TeamService(Service):
 
     def _resolve_assignee(self, caller: Any, target: str) -> tuple[str, str | None]:
         root_session = self._root_session(caller)
-        if target == getattr(root_session, "session_id", None) or target == getattr(
-            caller, "id", None
+        if target == getattr(root_session, "session_id", None) or target == self._caller_id(
+            caller
         ):
             return target, self._names(caller).get("self")
         subagents = self._subagents()
