@@ -208,6 +208,8 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
         "todo_write",
         "update_goal",
         "wait_agent",
+        "web_fetch",
+        "web_search",
         "write_file",
     ]
     assert captured_options[0]["sessionId"] == "replay-sess"

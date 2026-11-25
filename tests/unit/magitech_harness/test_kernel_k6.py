@@ -304,7 +304,7 @@ async def test_check_bundle_entries_fails_before_flush_on_loop_path() -> None:
     with pytest.raises(RuntimeError, match="no bundle entries"):
         check_bundle_entries(ctx)
     await ctx.flush()
-    assert len(list(loader.entries())) == 53
+    assert len(list(loader.entries())) == 55
     check_bundle_entries(ctx)
 
 
@@ -320,10 +320,10 @@ def test_check_bundle_entries_sync_path_settles_at_load() -> None:
     loader = LoaderService(ctx, {"filename": _base_bundle_path()})
     loader.load(_base_bundle_path())
     entries = list(loader.entries())
-    assert len(entries) == 53
+    assert len(entries) == 55
     enabled = [entry for entry in entries if not entry.disabled]
     disabled = [entry for entry in entries if entry.disabled]
-    assert len(enabled) == 52
+    assert len(enabled) == 54
     assert len(disabled) == 1
     assert all(
         entry.fiber is not None and entry.fiber.state is FiberState.ACTIVE

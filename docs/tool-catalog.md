@@ -67,6 +67,13 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 | `wait_agent` | `timeout_ms` (10000–3600000, default 30000) | Waits for pending next-step input; reports whether it timed out. |
 | `list_subagent_models` | none | Lists the model routes a delegated child can use. |
 
+## Web
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `web_search` | `queries` (req, array of strings) | Searches the web through a registered search provider selected by the current model route. Fails with a `WEB_PROVIDER_*` error when none is registered; results are untrusted data. |
+| `web_fetch` | `url` (req, http(s)) | Fetches an HTTP(S) URL through the anonymous fetcher (which can reach intranet/local addresses), decodes HTML/text within byte/char caps, and treats the body as untrusted data. |
+
 ## Language and skills
 
 | Tool | Arguments | Behavior |
