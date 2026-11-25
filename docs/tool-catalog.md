@@ -1,10 +1,10 @@
 # Tool catalog
 
 Exhaustive reference for the tools that can be registered on `ctx.tools`.
-Source of truth: registration sites in `mth-plugins/src/mth_plugins/` and the
+Source of truth: registration sites in `mth-components/src/mth_components/` and the
 canonical `define_tool` contract in `src/magitech_harness/tools/schema.py`. This
 page is maintained by hand from source; the docs review checks it against the
-registration calls. Domain tools live in `mth-plugins`; the harness ships none.
+registration calls. Domain tools live in `mth-components`; the harness ships none.
 
 All shipped tools are registered with `define_tool` from
 `magitech_harness.tools.schema`. Tools that need approval or a deadline declare

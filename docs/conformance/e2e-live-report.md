@@ -13,7 +13,7 @@ to import from `site-packages`, not editable source.
 ## Environment
 
 - Python 3.14.9, clean venv, three wheels: animas 0.2.0, magitech-harness 0.2.0,
-  mth-plugins 0.2.0.
+  mth-components 0.2.0.
 - Scratch environments and session directories were removed after the run.
 
 ## Results: 36 PASS, 2 FAIL across 38 checks
@@ -33,7 +33,7 @@ ran with `--no-deps` plus explicit runtime dependencies. This was the version-pi
 fix addressed by the 0.3.0 release (see [`release-notes/v0.3.0.md`](../release-notes/v0.3.0.md)).
 
 FAIL 2 — the marketplace `index.json` was absent from the installed plugin
-wheel, so `mth_plugins.index.load_index()` failed. Runtime component discovery
+wheel, so `mth_components.index.load_index()` failed. Runtime component discovery
 uses a manifest scan instead, so no user flow depended on it. This was a latent
 packaging bug, fixed below.
 

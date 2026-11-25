@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - A component module importable on the Python path with an `apply(ctx, config=None, **kwargs)` entry point.
-- A domain tool component in `mth-plugins` (the harness core intentionally owns no domain tools).
+- A domain tool component in `mth-components` (the harness core intentionally owns no domain tools).
 
 ## Steps
 

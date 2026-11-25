@@ -9,7 +9,7 @@ each repository keeps its own source of truth for detail.
 |---|---|---|---|---|
 | animas | `Context`, `Service`, `Fiber`, event modes, effects/disposers, YAML loader | — | mount / emit / waterfall / effect; profile loading | — |
 | magitech-harness | runtime composition, turn loop, sessions, config-layer resolution, native guards | animas | `ctx.sessions`, `ctx.tools`, `ctx.llm`, `ctx.agents`, `ctx.agentLoop`, `ctx.layers`; native guard seams | animas kernel primitives |
-| mth-plugins | domain tools, providers, marketplace guards, bridges | animas + harness | `apply(ctx, config)` components via `magitech.components` / `index.json` | harness service seams (`ctx.tools`, `ctx.llm`, `ctx.compaction`) |
+| mth-components | domain tools, providers, marketplace guards, bridges | animas + harness | `apply(ctx, config)` components via `magitech.components` / `index.json` | harness service seams (`ctx.tools`, `ctx.llm`, `ctx.compaction`) |
 
 ## What is mounted by default
 
@@ -34,6 +34,6 @@ wheels replace them at install time.
 
 - [animas guidance](https://github.com/magitech-ai/animas) and its `AGENTS.md`
 - [harness guidance](AGENTS.md) and [architecture](architecture.md)
-- [mth-plugins guidance](https://github.com/magitech-ai/mth-plugins) and its `AGENTS.md`
+- [mth-components guidance](https://github.com/magitech-ai/mth-components) and its `AGENTS.md`
 
 Unresolved questions: none.

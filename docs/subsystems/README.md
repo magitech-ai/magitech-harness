@@ -7,7 +7,7 @@ the [catalogs](../tool-catalog.md).
 
 These pages are maintained from source. A change that reshapes a documented
 service, event, or contract updates its owning page in the same change. The
-authoritative declarations are in `src/magitech_harness/` and the `mth-plugins`
+authoritative declarations are in `src/magitech_harness/` and the `mth-components`
 package; see each page's **Source** line.
 
 ## Kernel and composition

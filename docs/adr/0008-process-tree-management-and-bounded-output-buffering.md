@@ -27,4 +27,4 @@ In agentic runtimes, subprocess execution is a primary operational vulnerability
 
 ## Consequences
 - **Positive**: Zero orphan processes on cancellation or timeout; immune to memory exhaustion from massive output streams.
-- **Positive**: Clean architectural seam between the headless OS execution backend (`magitech-harness`) and domain tools with disk spilling (`mth-plugins`).
+- **Positive**: Clean architectural seam between the headless OS execution backend (`magitech-harness`) and domain tools with disk spilling (`mth-components`).
