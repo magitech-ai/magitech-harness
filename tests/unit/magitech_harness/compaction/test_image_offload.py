@@ -159,48 +159,50 @@ def test_projection_uses_existing_and_tool_messages() -> None:
 # -- selection -------------------------------------------------------------
 
 
-def test_offload_oldest_images() -> None:
-    session = SimpleNamespace(
-        event_at=lambda seq: (
-            _event(seq, "user/message", {"content": [_text(), _image()]})
-            if seq == 0
-            else None
+def _derive(event: SessionEvent) -> Any:
+    payload = event.payload
+    return payload if event.type == "user/message" else payload.get("message")
+
+
+def _stub_session(
+    events: dict[int, SessionEvent], appended: list[Any] | None = None
+) -> Any:
+    return SimpleNamespace(
+        event_at=lambda seq: events.get(seq),
+        derive_event_message=_derive,
+        surface_nodes=lambda: list(events),
+        append=lambda event_type, payload: (
+            appended.append((event_type, payload)) if appended is not None else None
         ),
-        append=lambda event_type, payload: None,
     )
+
+
+def test_offload_oldest_images() -> None:
+    events = {0: _event(0, "user/message", {"content": [_text(), _image()]})}
+    session = _stub_session(events)
     assert offload_oldest_images(session, [0], 1) is True
     assert offload_oldest_images(session, [0], 0) is False
     assert offload_oldest_images(session, [5], 1) is False
 
-    already = SimpleNamespace(
-        event_at=lambda seq: _event(
-            seq, "user/message", {"content": [_image(offloaded=True)]}
-        ),
-        append=lambda event_type, payload: None,
+    already = _stub_session(
+        {0: _event(0, "user/message", {"content": [_image(offloaded=True)]})}
     )
     assert offload_oldest_images(already, [0], 1) is False
 
     appended: list[Any] = []
-    session2 = SimpleNamespace(
-        event_at=lambda seq: _event(seq, "user/message", {"content": [_image()]}),
-        append=lambda event_type, payload: appended.append((event_type, payload)),
+    session2 = _stub_session(
+        {0: _event(0, "user/message", {"content": [_image()]})}, appended
     )
     assert offload_oldest_images(session2, [0], 1) is True
     assert appended[0][0] == "image/offload"
     assert appended[0][1]["targets"][0]["imageIndexes"] == [0]
 
-    tool_session = SimpleNamespace(
-        event_at=lambda seq: _event(
-            seq, "tool/result", {"message": {"content": [_image()]}}
-        ),
-        append=lambda event_type, payload: None,
+    tool_session = _stub_session(
+        {0: _event(0, "tool/result", {"message": {"content": [_image()]}})}
     )
     assert offload_oldest_images(tool_session, [0], 1) is True
 
-    bad = SimpleNamespace(
-        event_at=lambda seq: _event(seq, "user/message", {"content": "no"}),
-        append=lambda event_type, payload: None,
-    )
+    bad = _stub_session({0: _event(0, "user/message", {"content": "no"})})
     assert offload_oldest_images(bad, [0], 1) is False
 
 
@@ -218,13 +220,9 @@ async def test_apply_and_listener() -> None:
     apply(ctx)
     await ctx.flush()
     assert registered == [IMAGE_OFFLOAD_PROJECTION]
-
     listener = ctx.events._listeners["agent/request-error"][0].callback
-    session = SimpleNamespace(
-        surface_nodes=lambda: [0],
-        event_at=lambda seq: _event(seq, "user/message", {"content": [_image()]}),
-        append=lambda event_type, payload: None,
-    )
+
+    session = _stub_session({0: _event(0, "user/message", {"content": [_image()]})})
     calls: list[str] = []
 
     def next_fn() -> str:
@@ -255,14 +253,11 @@ async def test_apply_and_listener() -> None:
     assert run({"code": "IMAGE_OFFLOAD_REQUIRED", "offloadImages": 1}) == {
         "kind": "retry"
     }
-    empty_session = SimpleNamespace(
-        surface_nodes=list, event_at=lambda seq: None, append=lambda *a: None
-    )
     assert (
         listener(
             {
                 "failure": {"code": "IMAGE_OFFLOAD_REQUIRED", "offloadImages": 1},
-                "session": empty_session,
+                "session": _stub_session({}),
             },
             next_fn,
         )
@@ -271,16 +266,43 @@ async def test_apply_and_listener() -> None:
 
 
 def test_offload_selection_edge_branches() -> None:
-    bad_message = SimpleNamespace(
-        event_at=lambda seq: _event(seq, "tool/result", {"message": 123}),
-        append=lambda *a: None,
-    )
+    bad_message = _stub_session({0: _event(0, "tool/result", {"message": 123})})
     assert offload_oldest_images(bad_message, [0], 1) is False
 
-    multiple = SimpleNamespace(
-        event_at=lambda seq: _event(
-            seq, "user/message", {"content": [_image("a"), _image("b"), _image("c")]}
-        ),
-        append=lambda *a: None,
+    multiple = _stub_session(
+        {
+            0: _event(
+                0, "user/message", {"content": [_image("a"), _image("b"), _image("c")]}
+            )
+        }
     )
     assert offload_oldest_images(multiple, [0], 1) is True
+
+
+def test_consecutive_failures_advance_indexes() -> None:
+    """A second offload must select the next retained image, not repeat index 0."""
+    from magitech_harness.session.store import Session
+
+    session = Session(
+        "offload-sequence",
+        projections=[IMAGE_OFFLOAD_PROJECTION],
+    )
+    session.append(
+        "user/message",
+        {
+            "role": "user",
+            "content": [_text("a"), _image("one"), _image("two")],
+            "source": {"kind": "user"},
+        },
+        surface_op="append",
+    )
+    first = offload_oldest_images(session, session.surface_nodes(), 1)
+    assert first is True
+    assert session.events[-1].payload["targets"][0]["imageIndexes"] == [0]
+
+    second = offload_oldest_images(session, session.surface_nodes(), 1)
+    assert second is True
+    assert session.events[-1].payload["targets"][0]["imageIndexes"] == [1]
+
+    third = offload_oldest_images(session, session.surface_nodes(), 1)
+    assert third is False

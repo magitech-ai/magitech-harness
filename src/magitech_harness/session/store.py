@@ -674,6 +674,14 @@ class Session:
         """Current surface event sequences in model-visible order."""
         return self._surface_manager.nodes
 
+    def derive_event_message(self, event: SessionEvent) -> dict[str, Any] | None:
+        """Derive the projected message for one event, if it produces one.
+
+        The projection is applied, so durable repairs such as ``image/offload``
+        are visible here even though raw payloads are immutable.
+        """
+        return self._surface_manager.derive_event_message(event)
+
     def event_at(self, seq: int) -> SessionEvent | None:
         """Return the event stored at the given 0-based sequence number, or ``None``."""
         if (

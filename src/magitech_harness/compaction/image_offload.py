@@ -14,13 +14,12 @@ from typing import Any
 
 from animas import Context, EventMode
 
+from magitech_harness.llm.error import IMAGE_OFFLOAD_REQUIRED_CODE
 from magitech_harness.session.events import SessionEvent
 from magitech_harness.session.surface import (
     MessageProjection,
     MessageProjectionContext,
 )
-
-IMAGE_OFFLOAD_REQUIRED_CODE = "IMAGE_OFFLOAD_REQUIRED"
 
 
 def offload_message_images(
@@ -144,8 +143,9 @@ def offload_oldest_images(
         event = session.event_at(seq)
         if event is None or event.type not in ("user/message", "tool/result"):
             continue
-        payload = event.payload
-        message = payload if event.type == "user/message" else payload.get("message")
+        # Read the PROJECTED message so earlier offloads are visible; raw
+        # payloads never carry the derived ``offloaded`` marks.
+        message = session.derive_event_message(event)
         if not isinstance(message, dict):
             continue
         image_indexes: list[int] = []
@@ -172,7 +172,12 @@ IMAGE_OFFLOAD_PROJECTION: MessageProjection = ImageOffloadProjection()
 def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> None:
     """Register the projection and install the request-error recovery listener."""
     del config, kwargs
-    ctx.sessions.store.register_message_projection(IMAGE_OFFLOAD_PROJECTION)
+    dispose_projection = ctx.sessions.store.register_message_projection(
+        IMAGE_OFFLOAD_PROJECTION
+    )
+    ctx.effect(
+        lambda: dispose_projection, "compaction-image-offload: remove projection"
+    )
 
     def _on_error(payload: dict[str, Any], next_fn: Any) -> Any:
         failure = payload.get("failure")
@@ -196,7 +201,7 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
             return {"kind": "retry"}
         return next_fn()
 
-    ctx.on("agent/request-error", _on_error, mode=EventMode.WATERFALL)
+    ctx.on("agent/request-error", _on_error, mode=EventMode.WATERFALL, prepend=True)
 
 
 apply.inject = ["sessions"]  # type: ignore[attr-defined]
