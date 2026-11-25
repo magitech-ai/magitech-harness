@@ -107,7 +107,9 @@ def test_projection_validation() -> None:
                 nodes=[9], events=[source], base_seq=0, messages={}
             ),
         )
-    with pytest.raises((ValueError, TypeError), match="must be user/message or tool/result"):
+    with pytest.raises(
+        (ValueError, TypeError), match="must be user/message or tool/result"
+    ):
         projection.project(
             _event(1, "image/offload", {"targets": [{"seq": 0, "imageIndexes": [0]}]}),
             MessageProjectionContext(
