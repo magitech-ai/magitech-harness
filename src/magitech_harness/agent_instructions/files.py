@@ -25,6 +25,7 @@ class InstructionFile:
     content: str
     digest: str
     trimmed_digest: str
+    key: str = ""  # NUL-separated directory\0candidate scope key
 
 
 @dataclass(frozen=True)
@@ -138,6 +139,7 @@ def load_instruction_files(config: ResolvedConfig, cwd: Path) -> list[Instructio
     seen_trimmed: dict[str, str] = {}
     seen_paths: set[Path] = set()
     result: list[InstructionFile] = []
+    seen_keys: set[str] = set()
     for located in discover_locations(config, cwd):
         try:
             resolved = located.path.resolve()
@@ -154,10 +156,20 @@ def load_instruction_files(config: ResolvedConfig, cwd: Path) -> list[Instructio
             if located.scope in (GLOBAL_SCOPE_USER, GLOBAL_SCOPE_AGENTS)
             else str(Path(located.display_path).parent)
         )
-        key = f"{group}\x00{trimmed}"
-        if key in seen_trimmed:
+        dedup_key = f"{group}\x00{trimmed}"
+        if dedup_key in seen_trimmed:
             continue
-        seen_trimmed[key] = located.display_path
+        candidate = located.path.name
+        directory = (
+            located.display_path
+            if located.scope in (GLOBAL_SCOPE_USER, GLOBAL_SCOPE_AGENTS)
+            else str(Path(located.display_path).parent)
+        )
+        candidate_key = instruction_scope_key(directory, candidate)
+        if candidate_key in seen_keys:
+            continue
+        seen_trimmed[dedup_key] = located.display_path
+        seen_keys.add(candidate_key)
         seen_paths.add(resolved)
         result.append(
             InstructionFile(
@@ -167,6 +179,7 @@ def load_instruction_files(config: ResolvedConfig, cwd: Path) -> list[Instructio
                 content=content,
                 digest=instruction_digest(content),
                 trimmed_digest=trimmed,
+                key=candidate_key,
             )
         )
     return result

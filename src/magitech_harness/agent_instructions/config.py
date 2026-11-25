@@ -31,10 +31,9 @@ class ResolvedConfig:
 
     def identity(self, cwd: Path, project_root: Path) -> str:
         """Stable serialized identity used to gate baseline reuse on resume."""
-        try:
-            relative = str(project_root.relative_to(cwd))
-        except ValueError:
-            relative = "."
+        import os
+
+        relative = os.path.relpath(project_root, cwd)
         return json.dumps(
             {
                 "projectRoot": relative,

@@ -19,9 +19,11 @@ from magitech_harness.agent_instructions.config import (
     resolve_config,
 )
 from magitech_harness.agent_instructions.files import (
+    find_project_root,
     load_instruction_files,
 )
 from magitech_harness.agent_instructions.render import (
+    render_changes,
     render_instruction_chains,
 )
 from magitech_harness.agent_instructions.state import (
@@ -32,7 +34,9 @@ from magitech_harness.agent_instructions.state import (
     visible_baseline,
 )
 
-TOUCH_TOOLS = frozenset({"read_file", "write_file", "edit_file"})
+TOUCH_TOOLS = frozenset(
+    {"read", "write", "edit", "read_file", "write_file", "edit_file"}
+)
 
 
 def _messages(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -80,7 +84,8 @@ class AgentInstructionsPlugin:
         files = load_instruction_files(self.config, cwd)
         messages = [*_session_messages(agent), *_messages(payload)]
         baseline = visible_baseline(messages)
-        identity = self.config.identity(cwd, cwd)
+        project_root = find_project_root(cwd, self.config.project_root_markers)
+        identity = self.config.identity(cwd, project_root)
         if baseline is None or baseline.get("baselineIdentity") != identity:
             changes, _versions = baseline_instruction_state(files)
             if not files:
@@ -99,11 +104,10 @@ class AgentInstructionsPlugin:
         deltas = reconcile(messages, files)
         if not deltas:
             return None
-        text, _ = render_instruction_chains(
-            files, self.config.max_bytes, baseline=False
-        )
+        text, _ = render_changes(deltas, files, self.config.max_bytes)
         if not text:
             return None
+        self.touches.pop(str(id(agent)), None)
         return agent_instructions_message(text, deltas)
 
     async def pre_step(self, payload: Mapping[str, Any], next_fn: Any) -> Any:
@@ -117,7 +121,11 @@ class AgentInstructionsPlugin:
             return decision
         try:
             notice = await self._notice(agent, payload)
-        except Exception:  # noqa: BLE001 -- instruction discovery must not block a step
+        except Exception as error:
+            from magitech_harness.agent.cancellation import AbortError
+
+            if isinstance(error, AbortError):
+                raise
             return decision
         if notice is None:
             return decision
@@ -126,8 +134,13 @@ class AgentInstructionsPlugin:
             "messages": [*decision.get("messages", []), notice],
         }
 
-    def on_tools_result(self, execution: Any, _result: Any) -> None:
+    def on_tools_result(self, execution: Any, result: Any) -> None:
         if not isinstance(execution, Mapping):
+            return
+        if isinstance(result, Mapping) and result.get("isError"):
+            return
+        signal = execution.get("signal")
+        if signal is not None and getattr(signal, "aborted", False):
             return
         name = execution.get("name")
         if name not in TOUCH_TOOLS:

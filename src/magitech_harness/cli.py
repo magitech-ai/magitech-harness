@@ -419,7 +419,9 @@ async def run_repl(
         chunk = frame.get("chunk") or {}
         if isinstance(chunk, dict):
             text = chunk.get("text")
-            if isinstance(text, str):
+            if isinstance(
+                text, str
+            ):  # pragma: no branch - non-string chunk text is ignored
                 out_fn(text, end="", flush=True)
 
     def _on_session_event(subject: Session, event: Any) -> None:

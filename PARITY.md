@@ -116,7 +116,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 55 | skill | `@deepseek-ai/dsh-skill` | packages/skill/skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_registry/component.py` | DONE | `test_skills_registry.py` |
 | 56 | skill-filesystem | `@deepseek-ai/dsh-skill-filesystem` | packages/skill/skill-filesystem/src/index.ts | mth-components | `src/mth_components/bridges/skills_filesystem/component.py` | DONE | `test_skills_filesystem.py` |
 | 57 | tool-skill | `@deepseek-ai/dsh-tool-skill` | packages/skill/tool-skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_loader/component.py` | DONE | `test_skills_loader.py` |
-| 58 | upstream-skills | `@deepseek-ai/dsh-upstream-skills` | packages/connector/upstream-skills/src/index.ts | mth-components | NONE | PARTIAL | upstream skills not mounted |
+| 58 | upstream-skills | `@deepseek-ai/dsh-upstream-skills` | packages/connector/upstream-skills/src/index.ts | mth-components | `src/mth_components/upstream_skills/` | DONE | mth-components #79 (verified pinned tarball download, SHA-256, atomic publish, registry integration) |
 | 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | `src/magitech_harness/commands/` | DONE | `test_commands.py` (durable registry, alias resolution, `command/run`/`command/done` lifecycle, REPL wired through the registry) |
 | 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | magitech-harness | `src/magitech_harness/feedback/` | DONE | `test_commands.py` (`feedback/record` event, `sessionFeedback` service, `/feedback` command) |
 | 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
@@ -219,7 +219,7 @@ registrations remain.
 | `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
 | `sandbox` / `sandbox-policy` | Windows ACL sandbox backend not implemented on Linux; `sandbox_policy` enforcement on all paths is a documented gap (finding #13). | Malcom (ratified plan C1) |
 | `agent-instructions` | Implemented as a durable instruction loader (row 54 DONE). | Resolved by implementation |
-| `upstream-skills` | Upstream skills download nothing until registered; no local files to pin. | Malcom (documented gap) |
+| `upstream-skills` | Implemented as a verified pinned download component (row 58 DONE). | Resolved by implementation |
 | `image-offload` | Implemented as a durable message projection + `agent/request-error` retry (row 84 DONE). | Resolved by implementation |
 | `commands` | Implemented as a durable registry with lifecycle events (row 59 DONE). | Resolved by implementation |
 | `command-feedback` | Implemented as `feedback/record` plus `/feedback` (row 60 DONE). | Resolved by implementation |

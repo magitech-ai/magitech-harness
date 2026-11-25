@@ -93,14 +93,14 @@ def baseline_instruction_state(
     changes = [
         {
             "action": "set",
-            "scope": file.scope,
+            "scope": file.key or file.scope,
             "path": file.display_path,
             "digest": file.digest,
         }
         for file in files
     ]
     versions = {
-        file.scope: {
+        (file.key or file.scope): {
             "path": file.display_path,
             "digest": file.digest,
             "trimmedDigest": file.trimmed_digest,
@@ -115,7 +115,7 @@ def reconcile(
 ) -> list[dict[str, Any]]:
     """Compute replace/remove changes against the currently visible scopes."""
     current = instruction_changes(messages)
-    desired = {file.scope: file for file in files}
+    desired = {(file.key or file.scope): file for file in files}
     changes: list[dict[str, Any]] = []
     for scope, previous in current.items():
         file = desired.get(scope)

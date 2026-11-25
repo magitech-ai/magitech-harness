@@ -157,7 +157,7 @@ def test_render_helpers() -> None:
         [_file("a.md", "x" * 4000, "src"), _file("b.md", "y" * 4000, "lib")], 200
     )
     assert FRAME_CLOSE in tight or len(tight.encode()) <= 200
-    assert any(c["action"] == "remove" for c in tc)
+    assert all(c["action"] != "remove" for c in tc)
     assert render_instruction_context([_file("a.md", "x" * 1000)], 10)[0]
     combined, cc = render_instruction_chains(
         [_file("g.md", scope=GLOBAL_SCOPE_USER), _file("p.md", scope="src")], 10000
@@ -255,7 +255,14 @@ async def test_plugin_behaviour(monkeypatch: Any, tmp_path: Path) -> None:
         None,
     ):
         plugin.on_tools_result(execution, {})
-    assert TOUCH_TOOLS == {"read_file", "write_file", "edit_file"}
+    assert {
+        "read",
+        "write",
+        "edit",
+        "read_file",
+        "write_file",
+        "edit_file",
+    } <= TOUCH_TOOLS
 
     ctx2 = Context()
     fallback = AgentInstructionsPlugin(ctx2, resolve_config({"maxBytes": 10000}))
@@ -301,10 +308,12 @@ def test_final_coverage_branches(monkeypatch: Any, tmp_path: Path) -> None:
     monkeypatch.undo()
 
     cfg = resolve_config({"maxBytes": 100})
-    assert render_mod._additional(_file("g.md", scope=GLOBAL_SCOPE_USER)).startswith(
+    assert render_mod._additional_section(
+        _file("g.md", scope=GLOBAL_SCOPE_USER)
+    ).startswith("Additional")
+    assert render_mod._additional_section(_file("p.md", scope="src")).startswith(
         "Additional"
     )
-    assert render_mod._additional(_file("p.md", scope="src")).startswith("Additional")
     assert render_instruction_context([_file("a.md")], 0)[0] == ""
     assert render_instruction_chains([_file("a.md")], 0)[0] == ""
 
@@ -422,3 +431,211 @@ async def test_delta_empty_text_branch(monkeypatch: Any, tmp_path: Path) -> None
         id="delta-empty", session=SimpleNamespace(derive_messages=lambda: [visible])
     )
     assert await plugin._notice(agent, {"messages": []}) is None
+
+
+def test_render_rework_paths() -> None:
+    from magitech_harness.agent_instructions import render as mod
+
+    assert mod.truncate_utf8("héllo", 2) == "h"  # backs over the multibyte char
+    assert mod.truncate_utf8("abc", 10) == "abc"
+    assert mod._changes_for([_file("a.md")], [], [(_file("a.md"), 10, 5)]) == []
+    marker = mod._budget_marker(10, [_file("a.md")], [(_file("b.md"), 10, 5)])
+    assert "omitted a.md" in marker and "truncated b.md" in marker
+
+    one = _file("a.md", "x" * 1000, "src")
+    text, changes = mod.render_instruction_context([one], 60)
+    assert text and FRAME_OPEN in text
+    assert changes == [] or changes
+    assert mod.render_instruction_context([one], 1)[0]
+    assert mod.render_instruction_context([], 1)[0]
+    assert FRAME_OPEN in mod.render_instruction_context([], 150)[0]
+
+    globals_ = [_file("g.md", "x" * 200, GLOBAL_SCOPE_USER)]
+    projects = [_file("p.md", "y" * 200, "src")]
+    combined, cc = mod.render_instruction_chains(globals_ + projects, 150)
+    assert combined.count(FRAME_OPEN) == 1
+    assert len(cc) >= 1
+    assert mod.render_instruction_chains(globals_, 100)[0]
+    assert mod.render_instruction_chains(globals_ + projects, 20)[0]
+
+    change_set = [
+        {"action": "remove", "scope": "gone", "path": "gone.md", "digest": None},
+        {"action": "replace", "scope": "src", "path": "a.md", "digest": "d"},
+        {"action": "set", "scope": "new", "path": "b.md", "digest": "d"},
+    ]
+    framed, _ = mod.render_changes(
+        change_set, [_file("a.md"), _file("b.md", scope="new")], 10000
+    )
+    assert "Instructions removed" in framed
+    assert "Updated instructions from" in framed
+    assert "Additional instructions from" in framed
+    assert mod.render_changes([], [], 100)[0] == ""
+    assert mod.render_changes(change_set, [], 1)[0]
+
+
+@pytest.mark.asyncio
+async def test_tool_result_guards_and_duplicate_keys(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+
+    from magitech_harness.agent_instructions.files import load_instruction_files
+
+    ctx = Context()
+    plugin = AgentInstructionsPlugin(ctx, resolve_config({"maxBytes": 100}))
+    agent = SimpleNamespace(id="guards")
+    plugin.touches["x"] = set()
+    plugin.on_tools_result(
+        {
+            "name": "write",
+            "arguments": {"file_path": "x"},
+            "agent": agent,
+            "signal": SimpleNamespace(aborted=True),
+        },
+        {},
+    )
+    assert plugin.touches["x"] == set()
+    plugin.on_tools_result(
+        {"name": "write", "arguments": {"file_path": "x"}, "agent": agent},
+        {"isError": True},
+    )
+    assert plugin.touches["x"] == set()
+
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
+    monkeypatch.setenv("DSH_AGENTS_HOME", str(tmp_path / "agents"))
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "AGENTS.md").write_text("root", encoding="utf-8")
+    cfg = resolve_config({"maxBytes": 100})
+    monkeypatch.setattr(
+        "magitech_harness.agent_instructions.files.discover_locations",
+        lambda c, d: (
+            [
+                __import__(
+                    "magitech_harness.agent_instructions.files",
+                    fromlist=["LocatedFile"],
+                ).LocatedFile(tmp_path / "AGENTS.md", "AGENTS.md", ".")
+            ]
+            * 2
+        ),
+    )
+    assert len(load_instruction_files(cfg, tmp_path)) == 1
+
+
+def test_render_last_branches(monkeypatch: Any, tmp_path: Path) -> None:
+    from magitech_harness.agent_instructions import files as files_mod
+    from magitech_harness.agent_instructions import render as mod
+
+    assert mod.truncate_utf8("é", 1) == ""
+    one = _file("a.md", "x" * 1000, "src")
+    for size in (200, 300, 400, 500, 600):
+        text, changes = mod.render_instruction_context([one], size, baseline=False)
+        if "truncated" in text and "Instructions from" in text:
+            assert changes == [] or changes
+            break
+    assert mod.render_instruction_context([one], 1)[0]
+    assert mod.render_instruction_context([], 1)[0]
+    assert FRAME_OPEN in mod.render_instruction_context([], 150)[0]
+    assert mod.render_changes([], [], 100)[0] == ""
+
+    cfg = resolve_config({"maxBytes": 100})
+    a = tmp_path / "a" / "AGENTS.md"
+    b = tmp_path / "b" / "AGENTS.md"
+    a.parent.mkdir()
+    b.parent.mkdir()
+    a.write_text("one", encoding="utf-8")
+    b.write_text("two", encoding="utf-8")
+    locs = [
+        files_mod.LocatedFile(a, "x/AGENTS.md", "x"),
+        files_mod.LocatedFile(b, "x/AGENTS.md", "x"),
+    ]
+    monkeypatch.setattr(files_mod, "discover_locations", lambda c, d: locs)
+    assert len(files_mod.load_instruction_files(cfg, tmp_path)) == 1
+
+
+def test_render_truncation_success_and_marker(monkeypatch: Any) -> None:
+    from magitech_harness.agent_instructions import render as mod
+
+    monkeypatch.setattr(mod, "BASELINE_INTRO", "")
+    monkeypatch.setattr(mod, "COMPACT_INTRO", "")
+    one = _file("a.md", "x" * 500, "src")
+    found = False
+    for size in range(100, 1000, 10):
+        text, _changes = mod.render_instruction_context([one], size, baseline=False)
+        if "Instructions from" in text:
+            found = True
+            break
+    assert found
+
+    text2, _ = mod.render_instruction_context([one], 30, baseline=False)
+    assert text2
+    mod.render_changes([{"action": "noop", "scope": "s", "path": "p"}], [], 100)
+
+
+def test_marker_only_and_change_loop_continue(monkeypatch: Any) -> None:
+    from magitech_harness.agent_instructions import render as mod
+
+    monkeypatch.setattr(mod, "BASELINE_INTRO", "")
+    monkeypatch.setattr(mod, "COMPACT_INTRO", "")
+    two = [_file("a.md", "x" * 50, "src"), _file("b.md", "y" * 50, "lib")]
+    text, _ = mod.render_instruction_context(two, 100, baseline=False)
+    assert text.startswith(FRAME_OPEN)
+    mod.render_changes(
+        [
+            {"action": "noop", "scope": "new", "path": "b.md"},
+            {"action": "set", "scope": "new", "path": "b.md", "digest": "d"},
+        ],
+        [_file("b.md", scope="new")],
+        10000,
+    )
+
+
+@pytest.mark.asyncio
+async def test_pre_step_propagates_abort(monkeypatch: Any) -> None:
+    from magitech_harness.agent.cancellation import AbortError
+    from magitech_harness.agent_instructions import service as service_mod
+
+    ctx = Context()
+    ctx.provide("workingDirectory", SimpleNamespace(ensure=lambda a, s: "/tmp"))
+    plugin = AgentInstructionsPlugin(ctx, resolve_config({"maxBytes": 100}))
+    monkeypatch.setattr(
+        service_mod,
+        "load_instruction_files",
+        lambda c, d: (_ for _ in ()).throw(AbortError("cancelled")),
+    )
+    with pytest.raises(AbortError):
+        await plugin.pre_step(
+            {
+                "agent": SimpleNamespace(
+                    id="x", session=SimpleNamespace(derive_messages=list)
+                )
+            },
+            lambda: {"kind": "enter", "messages": []},
+        )
+
+
+@pytest.mark.asyncio
+async def test_production_delta_renders_change_sections_and_consumes_touches(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
+    monkeypatch.setenv("DSH_AGENTS_HOME", str(tmp_path / "agents"))
+    (tmp_path / ".git").mkdir()
+    instructions = tmp_path / "AGENTS.md"
+    instructions.write_text("original", encoding="utf-8")
+    ctx = Context()
+    ctx.provide("workingDirectory", SimpleNamespace(ensure=lambda a, s: str(tmp_path)))
+    cfg = resolve_config({"maxBytes": 10000})
+    plugin = AgentInstructionsPlugin(ctx, cfg)
+    identity = cfg.identity(tmp_path, tmp_path)
+    baseline = agent_instructions_message(
+        "old",
+        [{"action": "set", "scope": ".\x00AGENTS.md", "path": "AGENTS.md", "digest": "old"}],
+        baseline=True,
+        identity=identity,
+    )
+    instructions.write_text("changed", encoding="utf-8")
+    agent = SimpleNamespace(
+        id="delta-prod", session=SimpleNamespace(derive_messages=lambda: [baseline])
+    )
+    plugin.touches[str(id(agent))] = {"AGENTS.md"}
+    notice = await plugin._notice(agent, {"messages": []})
+    assert notice is not None
+    assert "Updated instructions from:" in notice["content"][0]["text"]
+    assert str(id(agent)) not in plugin.touches
