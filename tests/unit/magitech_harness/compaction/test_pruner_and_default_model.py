@@ -615,3 +615,77 @@ def test_apply_creates_service_when_absent() -> None:
     ToolsService(ctx)
     apply(ctx)
     assert isinstance(ctx.userQuestions, UserQuestionService)
+
+
+@pytest.mark.asyncio
+async def test_user_questions_aborted_signal_refuses_before_logging(
+    tmp_path: Path,
+) -> None:
+    from magitech_harness.agent.cancellation import AbortSignal
+    from magitech_harness.context.user_questions import UserQuestionError
+
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    handle = await ctx.agents.create({})
+    agent = handle["agent"]
+    signal = AbortSignal()
+    signal.abort("stop")
+    with pytest.raises(UserQuestionError, match="aborted before the user answered"):
+        await ctx.userQuestions.ask(
+            [{"id": "q1", "question": "Pick"}], agent=agent, signal=signal
+        )
+    assert not any(event.type == "user/question" for event in agent.session.events)
+
+
+@pytest.mark.asyncio
+async def test_user_questions_abort_after_answer_raises(tmp_path: Path) -> None:
+    from magitech_harness.agent.cancellation import AbortSignal
+    from magitech_harness.context.user_questions import (
+        Answer,
+        UserQuestionError,
+    )
+
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    signal = AbortSignal()
+
+    def answerer(_pending: Any, _signal: Any) -> list[Answer]:
+        signal.abort("late")
+        return [Answer(id="q1", selected=[])]
+
+    ctx.userQuestions.register_answerer(answerer)
+    with pytest.raises(UserQuestionError, match="aborted before the user answered"):
+        await ctx.userQuestions.ask([{"id": "q1", "question": "Pick"}], signal=signal)
+
+
+@pytest.mark.asyncio
+async def test_user_questions_answerer_raises_structured_error(tmp_path: Path) -> None:
+    from magitech_harness.context.user_questions import UserQuestionError
+
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+
+    def answerer(_pending: Any, _signal: Any) -> Any:
+        raise UserQuestionError("declined", "ASK_DECLINED")
+
+    ctx.userQuestions.register_answerer(answerer)
+    with pytest.raises(UserQuestionError, match="declined"):
+        await ctx.userQuestions.ask([{"id": "q1", "question": "Pick"}])
+
+
+@pytest.mark.asyncio
+async def test_user_questions_already_settled_future_is_not_cancelled(
+    tmp_path: Path,
+) -> None:
+    from magitech_harness.context.user_questions import Answer
+
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+
+    def answerer(pending: Any, _signal: Any) -> list[Answer]:
+        pending.future.set_result([Answer(id="q1", selected=[])])
+        return [Answer(id="q1", selected=[])]
+
+    ctx.userQuestions.register_answerer(answerer)
+    answers = await ctx.userQuestions.ask([{"id": "q1", "question": "Pick"}])
+    assert answers[0].id == "q1"

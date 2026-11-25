@@ -6,9 +6,8 @@ Ports dsh's ``@deepseek-ai/dsh-user-questions`` and
 
 The service is the seam a UI answerer registers on. A tool call appends a
 ``user/question`` session event (so the question is reconstructable from the
-log), then awaits a registered answerer. A timed variant returns ``pending:
-true`` after its window closes instead of blocking forever; the answer may
-still arrive as a later user message.
+log), then awaits a registered answerer. An already-aborted call refuses before
+the question is logged; an abort during the wait fails with ``ASK_ABORTED``.
 """
 
 from __future__ import annotations
@@ -25,8 +24,6 @@ from animas import Context, Service
 from magitech_harness.agent.cancellation import AbortSignal
 from magitech_harness.llm.error import HarnessError
 from magitech_harness.tools.schema import define_tool
-
-DEFAULT_TIMEOUT_SECONDS = 120
 
 
 class UserQuestionError(HarnessError):
@@ -166,7 +163,16 @@ class UserQuestionService(Service):
         agent: Any = None,
         signal: AbortSignal | None = None,
     ) -> list[Answer]:
-        """Append the question, then await the first registered answerer."""
+        """Append the question, then await the first registered answerer.
+
+        An aborted call never logs a question: the model must not see a prompt
+        whose answer will not be awaited.
+        """
+        if signal is not None and signal.aborted:
+            raise UserQuestionError(
+                "ask_user_question was aborted before the user answered",
+                "ASK_ABORTED",
+            )
         normalized = _validate_questions(questions)
         call_id = f"ask-{uuid.uuid4().hex[:12]}"
         pending = Pending(
@@ -191,8 +197,20 @@ class UserQuestionService(Service):
                 result = await result
         except asyncio.CancelledError:
             raise
+        except UserQuestionError:
+            raise
         except Exception as error:
             raise UserQuestionError(str(error), "ASK_FAILED") from error
+        finally:
+            # The future is a projection slot, not the answer channel; settle it
+            # so a waiter never remains pending after the call ends.
+            if not pending.future.done():
+                pending.future.cancel()
+        if signal is not None and signal.aborted:
+            raise UserQuestionError(
+                "ask_user_question was aborted before the user answered",
+                "ASK_ABORTED",
+            )
         return self._validate_answers(result, normalized)
 
     @staticmethod
@@ -341,7 +359,6 @@ def apply(ctx: Context, config: Mapping[str, Any] | None = None) -> None:
 apply.inject = ["tools"]  # type: ignore[attr-defined]
 
 __all__ = [
-    "DEFAULT_TIMEOUT_SECONDS",
     "Answer",
     "Pending",
     "UserQuestionError",

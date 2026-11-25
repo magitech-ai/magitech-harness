@@ -5,9 +5,10 @@ Ports dsh's ``@deepseek-ai/dsh-agent-default-model`` at
 transport-independent default provider/model that entry points consult when
 creating an agent without an explicit selection.
 
-The shipped base row leaves both fields empty because this stack mounts no model
-provider by default (ADR 0002 / ADR 0012); a deployment that mounts a provider
-sets them, and creations without ``agentOptions`` then inherit the default.
+The shipped base row names the keyless Kilo free router
+(``provider: kilo``, ``model: kilo-auto/free``) so a fresh installation can
+execute turns without credentials. A deployment may override both fields; an
+explicit ``agentOptions`` selection is never overwritten.
 """
 
 from __future__ import annotations
