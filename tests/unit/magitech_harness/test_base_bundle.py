@@ -39,6 +39,16 @@ from magitech_harness.tools.service import ToolService
 
 EXPECTED_ROWS = [
     {
+        "id": "commands",
+        "name": "magitech_harness.commands.service:CommandsService",
+        "config": {},
+    },
+    {
+        "id": "feedback",
+        "name": "magitech_harness.feedback.service:apply",
+        "config": {},
+    },
+    {
         "id": "system-prompt",
         "name": "magitech_harness.system_prompt.service:SystemPromptService",
         "config": {},

@@ -242,7 +242,7 @@ async def _run_headless(
 
 
 class ReplDispatcher:
-    """Dispatches interactive slash commands in the REPL."""
+    """Dispatches interactive slash commands through ``ctx.commands``."""
 
     def __init__(
         self,
@@ -255,78 +255,120 @@ class ReplDispatcher:
         self.session = session
         self.model = model
         self.out = out
+        self._disposers: list[Any] = []
+        self._install_commands()
 
-    async def dispatch(self, cmd_line: str) -> bool:
-        """Dispatches a slash command. Returns True if REPL should exit."""
-        parts = cmd_line.strip().split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1] if len(parts) > 1 else ""
+    def _install_commands(self) -> None:
+        from magitech_harness.commands.types import CommandDefinition, CommandResult
 
-        if cmd in ("/exit", "/quit"):
-            self.out("Goodbye.")
-            return True
-
-        if cmd == "/help":
-            self.out(
-                "\nAvailable slash commands:\n"
-                "  /help             - Show this help message\n"
-                "  /model [name]     - View or set active model slug\n"
-                "  /session list     - List stored sessions\n"
-                "  /session new      - Start a new session\n"
-                "  /session show <id>- Inspect session events\n"
-                "  /compact          - Trigger context compaction\n"
-                "  /goal [arg]       - Show or manage the session goal\n"
-                "  /clear            - Clear console screen\n"
-                "  /exit, /quit      - Exit REPL\n"
+        def register(
+            name: str, description: str, handler: Any, *, input: Any = None
+        ) -> None:
+            self._disposers.append(
+                self.ctx.commands.register(
+                    CommandDefinition(
+                        name=name, description=description, handler=handler, input=input
+                    )
+                )
             )
-        elif cmd == "/model":
+
+        def help_command(_invocation: Any) -> CommandResult:
+            lines = [
+                "Available slash commands:",
+                "  /help             - Show this help message",
+                "  /model [name]     - View or set active model slug",
+                "  /session list     - List stored sessions",
+                "  /session new      - Start a new session",
+                "  /session show <id>- Inspect session events",
+                "  /compact          - Trigger context compaction",
+                "  /goal [arg]       - Show or manage the session goal",
+                "  /feedback <text>  - Record session feedback",
+                "  /clear            - Clear console screen",
+                "  /exit, /quit      - Exit REPL",
+            ]
+            return CommandResult.success("\n" + "\n".join(lines))
+
+        def model_command(invocation: Any) -> CommandResult:
+            arg = invocation.raw_input.strip()
             if arg:
                 self.model = arg
-                self.out(f"Active model set to: {self.model}")
-            else:
-                self.out(f"Current model: {self.model or '(default)'}")
-        elif cmd == "/clear":
+                return CommandResult.success(f"Active model set to: {self.model}")
+            return CommandResult.success(f"Current model: {self.model or '(default)'}")
+
+        def clear_command(_invocation: Any) -> CommandResult:
             self.out("\033[H\033[J", end="")
-        elif cmd == "/session":
-            subparts = arg.split(maxsplit=1)
+            return CommandResult.success()
+
+        def session_command(invocation: Any) -> CommandResult:
+            subparts = invocation.raw_input.strip().split(maxsplit=1)
             subcmd = subparts[0] if subparts else "list"
             subarg = subparts[1] if len(subparts) > 1 else ""
             if subcmd == "list":
                 sessions = self.ctx.sessions.list_sessions()
-                self.out(
+                return CommandResult.success(
                     f"Sessions ({len(sessions)}): {', '.join(sessions) if sessions else 'none'}"
                 )
-            elif subcmd == "new":
+            if subcmd == "new":
                 self.session = self.ctx.sessions.create()
-                self.out(f"Started new session: {self.session.session_id}")
-            elif subcmd == "show":
+                return CommandResult.success(
+                    f"Started new session: {self.session.session_id}"
+                )
+            if subcmd == "show":
                 sess = self.ctx.sessions.read(subarg) if subarg else self.session
-                if sess:
-                    self.out(f"Session {sess.session_id}: {len(sess.events)} events")
-                    for ev in sess.events:
-                        self.out(f"  [{ev.type}] {ev.payload}")
-                else:
-                    self.out(f"Session not found: {subarg}")
-            else:
-                self.out(f"Unknown session subcommand: {subcmd}")
-        elif cmd == "/goal":
+                if sess is None:
+                    return CommandResult.error(f"Session not found: {subarg}")
+                rows = [f"Session {sess.session_id}: {len(sess.events)} events"]
+                rows.extend(
+                    f"  [{event.type}] {event.payload}" for event in sess.events
+                )
+                return CommandResult.success("\n".join(rows))
+            return CommandResult.error(f"Unknown session subcommand: {subcmd}")
+
+        def goal_command(invocation: Any) -> CommandResult:
             from magitech_harness.goal.command import run_goal_command
 
-            self.out(run_goal_command(self.ctx, self.session, arg))
-        elif cmd == "/compact":
+            return CommandResult.success(
+                run_goal_command(self.ctx, self.session, invocation.raw_input.strip())
+            )
+
+        async def compact_command(_invocation: Any) -> CommandResult:
             self.out("Invoking context compaction...")
             compact_res = await self.ctx.waterfall(
                 "session/compact",
                 {"session": self.session, "status": "requested"},
-                default_handler=lambda p: p,
+                default_handler=lambda payload: payload,
             )
             if compact_res.get("compacted"):
-                self.out(f"Compacted: {compact_res.get('summary', 'Done')}")
-            else:
-                self.out("Compaction completed or no compactable range found.")
-        else:
-            self.out(f"Unknown command: {cmd}. Type /help for available commands.")
+                return CommandResult.success(
+                    f"Compacted: {compact_res.get('summary', 'Done')}"
+                )
+            return CommandResult.success(
+                "Compaction completed or no compactable range found."
+            )
 
+        register("help", "Show this help message", help_command)
+        register("model", "View or set active model slug", model_command)
+        register("clear", "Clear console screen", clear_command)
+        register("session", "List, create or inspect sessions", session_command)
+        register("goal", "Show or manage the session goal", goal_command)
+        register("compact", "Trigger context compaction", compact_command)
+
+    async def dispatch(self, cmd_line: str) -> bool:
+        """Dispatch a slash command through the registry. Returns True to exit."""
+        parts = cmd_line.strip().split(maxsplit=1)
+        if parts and parts[0].lower() in ("/exit", "/quit"):
+            self.out("Goodbye.")
+            return True
+        from types import SimpleNamespace
+
+        agent = SimpleNamespace(id=self.session.session_id, session=self.session)
+        result = await self.ctx.commands.execute(agent, cmd_line)
+        if result is None:
+            self.out(
+                f"Unknown command: {parts[0] if parts else ''}. Type /help for available commands."
+            )
+        elif result.result.text:
+            self.out(result.result.text)
         return False
 
 
