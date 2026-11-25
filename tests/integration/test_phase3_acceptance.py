@@ -188,6 +188,7 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
     assert len(captured_options) == 3
     assert [t["name"] for t in captured_options[0]["tools"]] == [
         "add_nums",
+        "ask_user_question",
         "bash",
         "create_goal",
         "edit_file",

@@ -73,10 +73,10 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 12 | remote-access | `@deepseek-ai/dsh-api-remote-access` | packages/api/remote-access/src/ | DSH-specific | NONE | OUT OF SCOPE | remote access |
 | 13 | session-title | `@deepseek-ai/dsh-session-title` | packages/session/session-title/src/index.ts | magitech-harness | `src/magitech_harness/session/title.py` | DONE | `test_title.py` |
 | 14 | session-title-llm | `@deepseek-ai/dsh-session-title-first-prompt-llm` | packages/session/session-title-first-prompt-llm/src/index.ts | magitech-harness | `src/magitech_harness/session/title_first_prompt.py` | DONE | `test_title_first_prompt.py` |
-| 15 | user-questions | `@deepseek-ai/dsh-user-questions` | packages/interaction/user-questions/src/index.ts | magitech-harness | NONE | MISSING | `ask_user_question` tool |
+| 15 | user-questions | `@deepseek-ai/dsh-user-questions` | packages/interaction/user-questions/src/index.ts | magitech-harness | `src/magitech_harness/context/user_questions.py` | DONE | `test_pruner_and_default_model.py` |
 | 16 | agent | `@deepseek-ai/dsh-agent` | packages/core/agent/src/index.ts | magitech-harness | `src/magitech_harness/agent/registry.py` | DONE | `test_agent_registry.py` |
 | 17 | plugin-package-inventory-deepseek | `@deepseek-ai/dsh-plugin-package-inventory-deepseek` | packages/llm/plugin-package-inventory-deepseek/src/ | DSH-specific | NONE | OUT OF SCOPE | |
-| 18 | agent-default-model | `@deepseek-ai/dsh-agent-default-model` | packages/core/agent-default-model/src/index.ts | magitech-harness | NONE | PARTIAL | no default-model service row |
+| 18 | agent-default-model | `@deepseek-ai/dsh-agent-default-model` | packages/core/agent-default-model/src/index.ts | magitech-harness | `src/magitech_harness/agent/default_model.py` | DONE | `test_pruner_and_default_model.py`; base row defaults to `kilo`/`kilo-auto/free`, verified live with `cost: 0` and no API key |
 | 19 | jobs | `@deepseek-ai/dsh-jobs-local` | packages/jobs/jobs-local/src/index.ts | magitech-harness | `src/magitech_harness/jobs/local.py` | DONE | `test_jobs_local.py` |
 | 20 | llm-retry | `@deepseek-ai/dsh-llm-retry` | packages/llm/llm-retry/src/index.ts | magitech-harness | `src/magitech_harness/llm/retry.py` | DONE | `test_llm_retry.py` |
 | 21 | config-editor | `@deepseek-ai/dsh-config-editor` | packages/boot/config-editor/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
@@ -117,7 +117,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 56 | skill-filesystem | `@deepseek-ai/dsh-skill-filesystem` | packages/skill/skill-filesystem/src/index.ts | mth-components | `src/mth_components/bridges/skills_filesystem/component.py` | DONE | `test_skills_filesystem.py` |
 | 57 | tool-skill | `@deepseek-ai/dsh-tool-skill` | packages/skill/tool-skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_loader/component.py` | DONE | `test_skills_loader.py` |
 | 58 | upstream-skills | `@deepseek-ai/dsh-upstream-skills` | packages/connector/upstream-skills/src/index.ts | mth-components | NONE | PARTIAL | upstream skills not mounted |
-| 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | NONE | MISSING | `/plan`, `/compact` slash commands |
+| 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (REPL dispatcher) | PARTIAL | `/help`, `/model`, `/session`, `/compact`, `/clear`, `/goal` are present; the durable command registry and `command/run`/`command/done` events are not |
 | 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | mth-components | NONE | PARTIAL | command feedback |
 | 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
 | 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | PARTIAL | automatic continuation rounds not wired into the loop; entry/complete/block authority is implemented and probe-tested |
@@ -141,7 +141,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 80 | spill-local | `@deepseek-ai/dsh-spill-local` | packages/spill/spill-local/src/index.ts | magitech-harness | `src/magitech_harness/spill/local.py` | DONE | `test_spill_local.py` |
 | 81 | spill-policy | `@deepseek-ai/dsh-spill-policy` | packages/spill/spill-policy/src/index.ts | magitech-harness | `src/magitech_harness/spill/policy.py` | DONE | `test_spill_policy.py` |
 | 82 | session-checkpoint-policy | `@deepseek-ai/dsh-session-checkpoint-policy` | packages/session/session-checkpoint-policy/src/index.ts | magitech-harness | `src/magitech_harness/session/checkpoint_policy.py` | DONE | `test_checkpoint_policy.py` |
-| 83 | tool-result-pruner | `@deepseek-ai/dsh-compaction-tool-result-pruner` | packages/compaction/compaction-tool-result-pruner/src/index.ts | magitech-harness | NONE | PARTIAL | tool-result pruning not wired |
+| 83 | tool-result-pruner | `@deepseek-ai/dsh-compaction-tool-result-pruner` | packages/compaction/compaction-tool-result-pruner/src/index.ts | magitech-harness | `src/magitech_harness/compaction/pruner.py` | DONE | `test_pruner_and_default_model.py` |
 | 84 | image-offload | `@deepseek-ai/dsh-compaction-image-offload` | packages/compaction/compaction-image-offload/src/index.ts | magitech-harness | NONE | PARTIAL | image offload not wired |
 | 85 | tool-todo | `@deepseek-ai/dsh-tool-todo` | packages/todo/tool-todo/src/index.ts:137 | magitech-harness (base tool) | `src/magitech_harness/tools/todo.py` | DONE | `tests/unit/magitech_harness/tools/test_todo.py` |
 | 86 | tool-goal | `@deepseek-ai/dsh-tool-goal` | packages/goal/tool-goal/src/index.ts:197 | magitech-harness (base tool) | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
@@ -194,7 +194,7 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | MISSING | — |
 | `web_search` | packages/web/tool-web/src/search.ts:367 | — | NONE | MISSING | — |
 | `web_fetch` | packages/web/tool-web/src/fetch.ts:460 | — | NONE | MISSING | — |
-| `ask_user_question` | packages/interaction/tool-ask-user/src/index.ts:40 | — | NONE | MISSING | — |
+| `ask_user_question` | packages/interaction/tool-ask-user/src/index.ts:40 | `ask_user_question` | `src/magitech_harness/context/user_questions.py` | DONE | `test_pruner_and_default_model.py` |
 
 ## Missing capabilities that must be added to magitech-harness (in scope)
 
@@ -225,10 +225,8 @@ registrations remain.
 |---|---|---|
 | `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
 | `sandbox` / `sandbox-policy` | Windows ACL sandbox backend not implemented on Linux; `sandbox_policy` enforcement on all paths is a documented gap (finding #13). | Malcom (ratified plan C1) |
-| `agent-default-model` | No default-model service; provider/model selection is per-request via pi-ai settings. | Malcom (deferred) |
 | `agent-instructions` | Row not mounted; instruction surface is via system-prompt sections. | Malcom (documented gap) |
 | `upstream-skills` | Upstream skills download nothing until registered; no local files to pin. | Malcom (documented gap) |
-| `tool-result-pruner` | Pruner exists conceptually but not wired into the tool pipeline result path. | Malcom (documented gap) |
 | `image-offload` | Image offload not wired; no image-capable route in the Python stack. | Malcom (documented gap) |
 
 ## OUT OF SCOPE (recorded, not counted)

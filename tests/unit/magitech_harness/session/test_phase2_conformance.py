@@ -94,9 +94,9 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
     (
         "EVT-01",
         "done",
-        "63-type event registry reproducing the owner merge",
+        "64-type event registry reproducing the owner merge",
         (
-            "test_events.py::test_registry_is_exactly_63_types",
+            "test_events.py::test_registry_is_exactly_64_types",
             "test_events.py::test_registry_reproduces_the_owner_merge",
             "test_events.py::test_event_type_covers_known_session_event_types",
         ),
@@ -107,7 +107,7 @@ CONFORMANCE_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "done",
         "seq assign-on-append, verify-on-load, reject gaps and duplicates",
         (
-            "test_store.py::test_session_appends_all_63_types_and_replays_in_order",
+            "test_store.py::test_session_appends_all_64_types_and_replays_in_order",
             "test_store.py::test_session_load_refuses_gapped_seq",
             "test_store.py::test_session_load_refuses_duplicated_seq",
         ),
