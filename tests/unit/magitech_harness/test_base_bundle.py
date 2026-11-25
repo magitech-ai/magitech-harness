@@ -239,6 +239,16 @@ EXPECTED_ROWS = [
         "name": "magitech_harness.tools.timeout_guard:apply",
         "config": {},
     },
+    {
+        "id": "tool-todo",
+        "name": "magitech_harness.tools.todo:apply",
+        "config": {"allow_parallel_in_progress": True},
+    },
+    {
+        "id": "tool-jobs",
+        "name": "magitech_harness.tools.jobs:apply",
+        "config": {},
+    },
 ]
 
 

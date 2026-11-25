@@ -186,7 +186,13 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
     await agent1.when_idle()
 
     assert len(captured_options) == 3
-    assert [t["name"] for t in captured_options[0]["tools"]] == ["add_nums"]
+    assert [t["name"] for t in captured_options[0]["tools"]] == [
+        "add_nums",
+        "job_kill",
+        "job_list",
+        "job_output",
+        "todo_write",
+    ]
     assert captured_options[0]["sessionId"] == "replay-sess"
     assert "Compute 20 + 22" in _message_texts(captured_options[0]["messages"])
     assert any(msg.get("role") == "tool" for msg in captured_options[1]["messages"])
