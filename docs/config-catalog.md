@@ -18,6 +18,11 @@ the loader supplies the value.
 | Row | Key | Default | When absent |
 |---|---|---|---|
 | `approval` | `policy` | `ask` | code default `ask` |
+| `goals` | `defaultMaxGoalRounds` | `256` | code default `256` |
+| `tool-goal` | `blocked_after_consecutive_rounds` | `3` | code default `3` |
+| `tool-todo` | `allow_parallel_in_progress` | `true` | code default `true` |
+| `tool-jobs` | `wait_timeout_ms` | `30000` | code default `30000` |
+| `tool-jobs` | `max_wait_timeout_ms` | `600000` | code default `600000` |
 | `sessions` | `base_storage_dir` | `${MAGITECH_SESSIONS_DIR}` | memory-only sessions |
 | `session-persistence-jsonl` | `root` | `${MAGITECH_SESSIONS_DIR}` | hollow persistence service |
 | `session-persistence-jsonl` | `live_batch_delay` | `0.2` | `0.2` |

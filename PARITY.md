@@ -106,12 +106,12 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 45 | approval | `@deepseek-ai/dsh-user-approval` | packages/interaction/user-approval/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` | DONE | `test_approval_service.py` |
 | 46 | permission | `@deepseek-ai/dsh-permission-presets` | packages/interaction/permission-presets/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` (policy) | DONE | `test_approval_presets.py` |
 | 47 | shell-env | `@deepseek-ai/dsh-shell-env` | packages/shell/shell-env/src/index.ts | magitech-harness | `src/magitech_harness/shell_env/service.py` | DONE | `test_shell_env.py` |
-| 48 | tool-bash | `@deepseek-ai/dsh-tool-bash` | packages/shell/tool-bash/src/index.ts:415 | magitech-harness (base tool) | `src/mth_components/tools/bash/component.py` | DONE | `test_bash_tool.py` |
+| 48 | tool-bash | `@deepseek-ai/dsh-tool-bash` | packages/shell/tool-bash/src/index.ts:415 | magitech-harness (base tool) | `src/mth_components/tools/bash/component.py` | PARTIAL | working and probed (`test_bash_tool.py`) but still located in mth-components; relocation per ADR 0022 is the next slice |
 | 49 | tool-pwsh | `@deepseek-ai/dsh-tool-pwsh` | packages/shell/tool-pwsh/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported |
 | 50 | tool-jobs | `@deepseek-ai/dsh-tool-jobs` | packages/jobs/tool-jobs/src/index.ts:435 | magitech-harness (base tool) | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
 | 51 | fs-observation-policy | `@deepseek-ai/dsh-fs-observation-policy` | packages/fs/fs-observation-policy/src/index.ts | magitech-harness | `src/magitech_harness/fs/observation_policy.py` | DONE | `test_observation_policy.py` |
-| 52 | tool-fs | `@deepseek-ai/dsh-tool-fs` | packages/fs/tool-fs/src/index.ts | mth-components | `src/mth_components/tools/fs/` | DONE | `test_fs_tool.py` |
-| 53 | tool-fs-search | `@deepseek-ai/dsh-tool-fs-search` | packages/fs/tool-fs-search/src/index.ts | mth-components (Tier 1) | `src/mth_components/tools/fs_search/component.py` | DONE | `test_fs_search.py` |
+| 52 | tool-fs | `@deepseek-ai/dsh-tool-fs` | packages/fs/tool-fs/src/index.ts | magitech-harness (base tool) | `src/mth_components/tools/{read_file,write_file,edit_file}/` | PARTIAL | working and probed; still located in mth-components and not mounted by `base.yaml`; relocation per ADR 0022 is the next slice |
+| 53 | tool-fs-search | `@deepseek-ai/dsh-tool-fs-search` | packages/fs/tool-fs-search/src/index.ts | magitech-harness (base tool) | `src/mth_components/tools/fs_search/component.py` | PARTIAL | working and probed; still located in mth-components and not mounted by `base.yaml`; relocation per ADR 0022 is the next slice |
 | 54 | agent-instructions | `@deepseek-ai/dsh-agent-instructions` | packages/context/agent-instructions/src/index.ts | magitech-harness | NONE | PARTIAL | agent instructions row not mounted |
 | 55 | skill | `@deepseek-ai/dsh-skill` | packages/skill/skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_registry/component.py` | DONE | `test_skills_registry.py` |
 | 56 | skill-filesystem | `@deepseek-ai/dsh-skill-filesystem` | packages/skill/skill-filesystem/src/index.ts | mth-components | `src/mth_components/bridges/skills_filesystem/component.py` | DONE | `test_skills_filesystem.py` |
@@ -167,12 +167,12 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 
 | DSH tool name | DSH registration file:line | Python name | Python impl | Verdict | Probe |
 |---|---|---|---|---|---|
-| `bash` | packages/shell/tool-bash/src/index.ts:415 | `bash` | `src/mth_components/tools/bash/component.py` | DONE | `test_bash_tool.py` |
-| `read` | packages/fs/tool-fs/src/read.ts:79 | `read_file` | `src/mth_components/tools/read_file/read_file.py` | DONE | `test_read_file.py` |
-| `write` | packages/fs/tool-fs/src/write.ts:75 | `write_file` | `src/mth_components/tools/write_file/write_file.py` | DONE | `test_write_file.py` |
-| `edit` | packages/fs/tool-fs/src/edit.ts:87 | `edit_file` | `src/mth_components/tools/edit_file/edit_file.py` | DONE | `test_edit_file.py` |
-| `glob` | packages/fs/tool-fs-search/src/glob.ts:323 | `glob` | `src/mth_components/tools/fs_search/glob.py` | DONE | `test_fs_search.py` |
-| `grep` | packages/fs/tool-fs-search/src/grep.ts:288 | `grep` | `src/mth_components/tools/fs_search/grep.py` | DONE | `test_fs_search.py` |
+| `bash` | packages/shell/tool-bash/src/index.ts:415 | `bash` | `src/mth_components/tools/bash/component.py` | PARTIAL | `test_bash_tool.py` (location pending) |
+| `read` | packages/fs/tool-fs/src/read.ts:79 | `read_file` | `src/mth_components/tools/read_file/read_file.py` | PARTIAL | `test_read_file.py` (location pending) |
+| `write` | packages/fs/tool-fs/src/write.ts:75 | `write_file` | `src/mth_components/tools/write_file/write_file.py` | PARTIAL | `test_write_file.py` (location pending) |
+| `edit` | packages/fs/tool-fs/src/edit.ts:87 | `edit_file` | `src/mth_components/tools/edit_file/edit_file.py` | PARTIAL | `test_edit_file.py` (location pending) |
+| `glob` | packages/fs/tool-fs-search/src/glob.ts:323 | `glob` | `src/mth_components/tools/fs_search/glob.py` | PARTIAL | `test_fs_search.py` (location pending) |
+| `grep` | packages/fs/tool-fs-search/src/grep.ts:288 | `grep` | `src/mth_components/tools/fs_search/grep.py` | PARTIAL | `test_fs_search.py` (location pending) |
 | `job_output` | packages/jobs/tool-jobs/src/index.ts:550 | `job_output` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
 | `job_list` | packages/jobs/tool-jobs/src/index.ts:572 | `job_list` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
 | `job_kill` | packages/jobs/tool-jobs/src/index.ts:435 | `job_kill` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
@@ -209,6 +209,16 @@ These rows/tools are in DSH base and have no Python implementation. Each needs a
 7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
 10. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
 11. image-offload — probe `test_image_offload.py`
+
+## Transition state (explicit, not silent)
+
+ADR 0022 makes the harness the owner of every base-bundle tool. Six of those
+tools — `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep` — are
+implemented, probed, and passing in `mth-components` today. Relocating them
+(implementation + tests + catalog entry + `base.yaml` row) is the immediate next
+slice; until it lands they are recorded PARTIAL above rather than claimed DONE.
+No default bundle row mounts them yet, so the shipped bundle exposes no
+filesystem or shell tool. This is a recorded gap, not an accepted one.
 
 ## PARTIAL rows with accepted reasons
 

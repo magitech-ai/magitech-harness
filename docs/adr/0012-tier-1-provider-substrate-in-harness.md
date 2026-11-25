@@ -1,8 +1,11 @@
 # 0012. Tier 1 Provider Substrate in Harness
 
 Date: 2026-11-17
-Status: accepted
-Amends: [ADR 0002](0002-zero-builtin-domain-tools-and-providers.md)
+Status: accepted; Tier 1 precedent **broadened** by
+[ADR 0022](0022-supersede-zero-builtin-domain-tools-base-bundle-in-harness.md)
+(2026-11-25). This body stays as history: its `llm-pi-ai` placement is unchanged,
+but the "narrow exception" framing no longer bounds ownership — every dsh
+base-bundle tool row ships here.
 
 ## Context
 

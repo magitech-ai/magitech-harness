@@ -8,8 +8,14 @@ each repository keeps its own source of truth for detail.
 | Repo | Owns | Depends on | Contract it provides | Contract it consumes |
 |---|---|---|---|---|
 | animas | `Context`, `Service`, `Fiber`, event modes, effects/disposers, YAML loader | — | mount / emit / waterfall / effect; profile loading | — |
-| magitech-harness | runtime composition, turn loop, sessions, config-layer resolution, native guards | animas | `ctx.sessions`, `ctx.tools`, `ctx.llm`, `ctx.agents`, `ctx.agentLoop`, `ctx.layers`; native guard seams | animas kernel primitives |
-| mth-components | domain tools, providers, marketplace guards, bridges | animas + harness | `apply(ctx, config)` components via `magitech.components` / `index.json` | harness service seams (`ctx.tools`, `ctx.llm`, `ctx.compaction`) |
+| magitech-harness | runtime composition, turn loop, sessions, config-layer resolution, native guards, **all dsh base-bundle tools and services** | animas | `ctx.sessions`, `ctx.tools`, `ctx.llm`, `ctx.agents`, `ctx.agentLoop`, `ctx.goals`, `ctx.layers`; base-bundle tool rows; native guard seams | animas kernel primitives |
+| mth-components | optional, on-demand, and third-party tools, providers, guards, bridges | animas + harness | `apply(ctx, config)` components via `magitech.components` / `index.json` | harness service seams (`ctx.tools`, `ctx.llm`, `ctx.compaction`) |
+
+Ownership is mechanical, not taste: anything mounted by dsh's
+`packages/bundle/base/cordis.patch.yml` belongs to `magitech-harness`; anything
+shipped as an optional, on-demand, or third-party bundle belongs to
+`mth-components`. [ADR 0022](adr/0022-supersede-zero-builtin-domain-tools-base-bundle-in-harness.md)
+records the decision; [PARITY.md](../PARITY.md) carries the per-row evidence.
 
 ## What is mounted by default
 
@@ -26,8 +32,8 @@ second when both are touched.
 
 ## Versioning and install
 
-All three repositories are at `0.3.0`; the harness and plugins declare
-`animas>=0.3,<0.4`. Editable path sources are for local development; published
+`animas` is at `2.0.0`; the harness and plugins are at `0.3.0` and declare
+`animas>=2,<3`. Editable path sources are for local development; published
 wheels replace them at install time.
 
 ## Repository references

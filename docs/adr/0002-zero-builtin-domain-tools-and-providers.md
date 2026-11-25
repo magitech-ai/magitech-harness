@@ -1,7 +1,9 @@
 # 0002. Zero Built-in Domain Tools and Providers in Core Runtime
 
 Date: 2026-11-07
-Status: accepted (amended by [ADR 0012](0012-tier-1-provider-substrate-in-harness.md))
+Status: **superseded** by [ADR 0022](0022-supersede-zero-builtin-domain-tools-base-bundle-in-harness.md)
+(2026-11-25). This body is preserved as history; ADR 0012 amended it earlier and is
+itself broadened by ADR 0022.
 
 ## Context
 
