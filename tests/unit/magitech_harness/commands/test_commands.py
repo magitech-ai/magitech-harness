@@ -41,7 +41,8 @@ def _agent(ctx: Any, identifier: str = "cmd-root") -> Any:
 def test_parse_and_resolve() -> None:
     assert parse_command("/help") == ("help", "")
     assert parse_command("/model  x") == ("model", "  x")
-    assert parse_command("/Plan off") == ("plan", " off")
+    assert parse_command("/Plan off") is None
+    assert parse_command("/goal\u00a0x") is None
     assert parse_command("help") is None
     assert parse_command("/") is None
     assert parse_command("") is None
@@ -86,9 +87,9 @@ async def test_registry_lifecycle() -> None:
     assert len(events) == 1
     with pytest.raises(CommandError, match="already registered"):
         service.register(definition)
-    with pytest.raises(CommandError, match="invalid command name"):
+    with pytest.raises(CommandError, match="must match"):
         service.register(CommandDefinition("Bad", "x", lambda i: result))
-    with pytest.raises(CommandError, match="callable handler"):
+    with pytest.raises(CommandError, match="handler must be callable"):
         service.register(CommandDefinition("bad", "x", None))
 
     session = SimpleNamespace(append=lambda *a, **k: events.append(a))
@@ -106,8 +107,8 @@ async def test_registry_lifecycle() -> None:
     assert await service.execute(agent, "/unknown") is None
     aborted = AbortSignal()
     aborted.abort()
-    with pytest.raises(CommandError, match="aborted"):
-        await service.execute(agent, "/ping", aborted)
+    with pytest.raises(RuntimeError, match="aborted"):
+        await service.execute(agent, "/ping", signal=aborted)
 
     dispose()
     dispose()
@@ -308,3 +309,176 @@ async def test_handler_error_without_session() -> None:
     service.register(CommandDefinition("bad", "b", lambda i: 1 / 0))
     with pytest.raises(ZeroDivisionError):
         await service.execute(SimpleNamespace(id="no-session"), "/bad")
+
+
+def test_strict_normalization() -> None:
+    from magitech_harness.commands.service import abort_error, normalize_definition
+
+    reason = ValueError("already failed")
+    assert abort_error(SimpleNamespace(reason=reason, aborted=True)) is reason
+    assert str(abort_error(SimpleNamespace(reason="text", aborted=True))) == "text"
+
+    handler = lambda invocation: CommandResult.success()
+    for definition in (
+        CommandDefinition("a", " ", handler),
+        CommandDefinition("b", "ok", handler, input={"hint": "x"}),  # type: ignore[arg-type]
+        CommandDefinition("c", "ok", handler, input=CommandInputDescriptor(" ")),
+        CommandDefinition("d", "ok", handler, input=CommandInputDescriptor("x", 1)),  # type: ignore[arg-type]
+    ):
+        with pytest.raises(CommandError):
+            normalize_definition(definition)
+    assert normalize_definition(CommandDefinition("ok", "ok", handler)) is not None
+
+    for value in (
+        {"kind": "success", "text": 1},
+        {"kind": "success", "sourceEventSeq": -1},
+        {"kind": "error", "text": "  "},
+        {"kind": "weird"},
+        "not a mapping",
+    ):
+        with pytest.raises(CommandError):
+            normalize_result("x", value)
+    assert normalize_result("x", {"kind": "success"}).kind == "success"
+
+
+@pytest.mark.asyncio
+async def test_attachment_and_abort_paths() -> None:
+    ctx = Context()
+    service = CommandsService(ctx)
+    logged: list[Any] = []
+    session = SimpleNamespace(
+        append=lambda event_type, payload: logged.append((event_type, payload))
+    )
+    agent = SimpleNamespace(session=session, id="a")
+
+    service.register(CommandDefinition("plain", "p", lambda i: CommandResult.success()))
+    result = await service.execute(agent, "/plain", [{"type": "image"}])
+    assert result is not None and result.result.kind == "error"
+    assert "does not accept attachments" in result.result.text or ""
+
+    service.register(
+        CommandDefinition(
+            "attach",
+            "a",
+            lambda i: CommandResult.success(),
+            input=CommandInputDescriptor("x", True),
+        )
+    )
+    result = await service.execute(agent, "/attach", [{"type": "image"}])
+    assert result is not None and result.result.kind == "error"
+    assert "unavailable" in result.result.text or ""
+
+    ctx.provide(
+        "attachments",
+        SimpleNamespace(admit=lambda values: values),
+    )
+    result = await service.execute(agent, "/attach", [{"type": "image"}])
+    assert result is not None and result.result.kind == "success"
+
+    ctx.provide(
+        "attachments",
+        SimpleNamespace(admit=lambda values: "not-iterable"),
+    )
+    result = await service.execute(agent, "/attach", [{"type": "image"}])
+    assert result is not None and result.result.kind == "success"
+
+    aborted = AbortSignal()
+    aborted.abort()
+    with pytest.raises(RuntimeError, match="aborted"):
+        await service.execute(agent, "/attach", [{"type": "image"}], signal=aborted)
+
+    # Synchronous handler that observes an abort after registration.
+    live = AbortSignal()
+
+    def handler(invocation: Any) -> CommandResult:
+        live.abort()
+        return CommandResult.success()
+
+    service.register(CommandDefinition("syncabort", "s", handler))
+    with pytest.raises(RuntimeError):
+        await service.execute(agent, "/syncabort", signal=live)
+
+    # Async handler awaiting with no signal and with an already-aborted signal.
+    async def async_handler(invocation: Any) -> dict[str, Any]:
+        return {"kind": "success"}
+
+    service.register(CommandDefinition("async", "a", async_handler))
+    with pytest.raises(RuntimeError):
+        await service.execute(agent, "/async", signal=aborted)
+
+
+class _LateSignal:
+    """Signal that aborts on demand, used to probe admission cancellation."""
+
+    def __init__(self) -> None:
+        self._aborted = False
+        self.reason: Any = None
+
+    @property
+    def aborted(self) -> bool:
+        return self._aborted
+
+    def add_listener(self, callback: Any) -> Any:
+        return lambda: None
+
+    def abort(self) -> None:
+        self._aborted = True
+
+
+@pytest.mark.asyncio
+async def test_remaining_attachment_and_abort_branches() -> None:
+    ctx = Context()
+    service = CommandsService(ctx)
+    session = SimpleNamespace(append=lambda *a, **k: None)
+    agent = SimpleNamespace(session=session, id="a")
+    service.register(
+        CommandDefinition(
+            "attach",
+            "a",
+            lambda i: CommandResult.success(),
+            input=CommandInputDescriptor("x", True),
+        )
+    )
+    ctx.provide("attachments", SimpleNamespace())
+    result = await service.execute(agent, "/attach", [{"type": "image"}])
+    assert result is not None and result.result.kind == "success"
+
+    signal = _LateSignal()
+
+    def admit(_values: Any) -> list[Any]:
+        signal.abort()
+        return []
+
+    ctx.provide("attachments", SimpleNamespace(admit=admit))
+    with pytest.raises(RuntimeError, match="aborted"):
+        await service.execute(agent, "/attach", [{"type": "image"}], signal=signal)
+
+    async def async_handler(invocation: Any) -> dict[str, Any]:
+        return {"kind": "success"}
+
+    service.register(CommandDefinition("async", "a", async_handler))
+    result = await service.execute(agent, "/async", signal=None)
+    assert result is not None and result.result.kind == "success"
+
+    aborted = AbortSignal()
+    aborted.abort()
+    with pytest.raises(RuntimeError):
+        await service.execute(agent, "/async", signal=aborted)
+
+    live = AbortSignal()
+    result = await service.execute(agent, "/async", signal=live)
+    assert result is not None and result.result.kind == "success"
+
+
+@pytest.mark.asyncio
+async def test_with_abort_direct() -> None:
+    from magitech_harness.commands.service import CommandsService
+
+    async def value() -> str:
+        return "ok"
+
+    assert await CommandsService._with_abort(value(), None) == "ok"
+    aborted = AbortSignal()
+    aborted.abort()
+    with pytest.raises(RuntimeError):
+        await CommandsService._with_abort(value(), aborted)

@@ -261,9 +261,13 @@ class ReplDispatcher:
     def _install_commands(self) -> None:
         from magitech_harness.commands.types import CommandDefinition, CommandResult
 
+        existing = {definition.name for definition in self.ctx.commands.descriptors()}
+
         def register(
             name: str, description: str, handler: Any, *, input: Any = None
         ) -> None:
+            if name in existing:
+                return
             self._disposers.append(
                 self.ctx.commands.register(
                     CommandDefinition(
@@ -352,6 +356,15 @@ class ReplDispatcher:
         register("session", "List, create or inspect sessions", session_command)
         register("goal", "Show or manage the session goal", goal_command)
         register("compact", "Trigger context compaction", compact_command)
+        self.ctx.effect(lambda: self._dispose_commands, "cli: dispose commands")
+
+    def _dispose_commands(self) -> Any:
+        def dispose() -> None:
+            for disposer in self._disposers:
+                disposer()
+            self._disposers.clear()
+
+        return dispose
 
     async def dispatch(self, cmd_line: str) -> bool:
         """Dispatch a slash command through the registry. Returns True to exit."""
@@ -369,6 +382,7 @@ class ReplDispatcher:
             )
         elif result.result.text:
             self.out(result.result.text)
+
         return False
 
 

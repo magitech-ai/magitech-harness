@@ -26,6 +26,13 @@ from magitech_harness.feedback.types import (
 USAGE = "Usage: /feedback <text>"
 
 
+def _anonymous_user_id() -> str:
+    """A process-stable anonymous id for product feedback acknowledgements."""
+    import os
+
+    return os.environ.get("MAGITECH_ANONYMOUS_USER_ID", "anonymous")
+
+
 def record_feedback(session: Any, entry: FeedbackRecord | Mapping[str, Any]) -> None:
     """Append one feedback record; blank text is stored as absent."""
     if isinstance(entry, Mapping):
@@ -80,16 +87,18 @@ def apply(ctx: Context, config: Mapping[str, Any] | None = None) -> None:
             return CommandResult.error(f"Feedback text is required. {USAGE}")
         record_feedback(invocation.agent.session, FeedbackRecord(text=raw))
         return CommandResult.success(
-            f"Feedback recorded for session {invocation.agent.session.session_id}"
+            f"Feedback recorded for session {invocation.agent.session.session_id}\n"
+            f"Anonymous user: {_anonymous_user_id()}."
         )
 
     ctx.commands.register(
         CommandDefinition(
             name="feedback",
-            description="Record session feedback",
+            description="Record feedback about this session",
             handler=handler,
             definition_id="@deepseek-ai/dsh-command-feedback",
-            input=CommandInputDescriptor(hint="[text]"),
+            input=CommandInputDescriptor(hint="<text>"),
+            record_input=False,
         )
     )
 
