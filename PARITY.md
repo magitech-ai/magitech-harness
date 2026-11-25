@@ -127,8 +127,8 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 66 | compaction-basic | `@deepseek-ai/dsh-compaction-basic` | packages/compaction/compaction-basic/src/index.ts | magitech-harness | `src/magitech_harness/compaction/service.py` | DONE | `test_compaction_service.py` |
 | 67 | command-compact | `@deepseek-ai/dsh-command-compact` | packages/compaction/command-compact/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (`/compact` → `session/compact` waterfall) | DONE | `test_cli.py` |
 | 68 | subagent | `@deepseek-ai/dsh-subagent` | packages/core/subagent/src/index.ts | magitech-harness | `src/magitech_harness/subagent/service.py` | DONE | `test_manager.py`, `test_surface.py`; lineage logged as `subagent/descriptor` |
-| 69 | agent-team | `@deepseek-ai/dsh-agent-team` | packages/team/agent-team/src/index.ts | magitech-harness | NONE | MISSING | `team_task_*` tools |
-| 70 | tool-agent-team | `@deepseek-ai/dsh-tool-agent-team` | packages/team/tool-agent-team/src/index.ts:119 | magitech-harness (base tool) | NONE | MISSING | team tools |
+| 69 | agent-team | `@deepseek-ai/dsh-agent-team` | packages/team/agent-team/src/index.ts | magitech-harness | `src/magitech_harness/team/` | DONE | `test_team.py` (event-sourced board, CAS revisions, dependency graph, readiness/write-scope views) |
+| 70 | tool-agent-team | `@deepseek-ai/dsh-tool-agent-team` | packages/team/tool-agent-team/src/index.ts:119 | magitech-harness (base tool) | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` (4 tools, conditional admission, Team policy section) |
 | 71 | subagent-spawn-in-process | `@deepseek-ai/dsh-subagent-spawn-in-process` | packages/subagent/subagent-spawn-in-process/src/index.ts | magitech-harness | `src/magitech_harness/subagent/providers.py` | DONE | `test_surface.py` |
 | 72 | subagent-fork-in-process | `@deepseek-ai/dsh-subagent-fork-in-process` | packages/subagent/subagent-fork-in-process/src/index.ts | magitech-harness | `src/magitech_harness/subagent/providers.py` | DONE | `test_surface.py` (replays parent events with surface ops) |
 | 73 | tool-subagent-control | `@deepseek-ai/dsh-tool-subagent-control` | packages/subagent/tool-subagent-control/src/index.ts:45 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_manager.py` |
@@ -184,10 +184,10 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `interrupt_agent` | packages/subagent/tool-subagent-control/src/index.ts:126 | `interrupt_agent` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
 | `list_agents` | packages/subagent/tool-subagent-control/src/list-agents.ts:46 | `list_agents` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
 | `wait_agent` | packages/subagent/tool-subagent-control/src/wait-agent.ts:91 | `wait_agent` | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_review_probes.py` |
-| `team_task_create` | packages/team/tool-agent-team/src/index.ts:119 | — | NONE | MISSING | — |
-| `team_task_list` | packages/team/tool-agent-team/src/index.ts:145 | — | NONE | MISSING | — |
-| `team_task_get` | packages/team/tool-agent-team/src/index.ts:186 | — | NONE | MISSING | — |
-| `team_task_update` | packages/team/tool-agent-team/src/index.ts:202 | — | NONE | MISSING | — |
+| `team_task_create` | packages/team/tool-agent-team/src/index.ts:119 | `team_task_create` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
+| `team_task_list` | packages/team/tool-agent-team/src/index.ts:145 | `team_task_list` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
+| `team_task_get` | packages/team/tool-agent-team/src/index.ts:186 | `team_task_get` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
+| `team_task_update` | packages/team/tool-agent-team/src/index.ts:202 | `team_task_update` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
 | `plan` | packages/plan/plan-mode/src/index.ts:252 | — | NONE | MISSING | — |
 | `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | — | NONE | MISSING | — |
 | `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | MISSING | — |
@@ -200,7 +200,6 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 These rows/tools are in DSH base and have no Python implementation. Each needs an executable probe to reach DONE.
 
 1. `job_output` / `job_list` / `job_kill` — `src/magitech_harness/tools/jobs.py` (new) — probe `test_job_tools.py`
-2. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
 4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
 5. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
 7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`

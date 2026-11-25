@@ -73,6 +73,18 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 |---|---|---|
 | `web_search` | `queries` (req, array of strings) | Searches the web through a registered search provider selected by the current model route. Fails with a `WEB_PROVIDER_*` error when none is registered; results are untrusted data. |
 | `web_fetch` | `url` (req, http(s)) | Fetches an HTTP(S) URL through the anonymous fetcher (which can reach intranet/local addresses), decodes HTML/text within byte/char caps, and treats the body as untrusted data. |
+## Agent Teams
+
+Team tools are admitted only while the shared task board is enabled for the session.
+The board is event-sourced and compare-and-set: every mutation requires the latest
+revision from `team_task_get` or `team_task_list`.
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `team_task_create` | `subject` (req), `description` (req), `blocked_by` [], `write_scopes` [] | Creates an unowned pending task with advisory write scopes and dependency ids. |
+| `team_task_list` | `status`, `unowned`, `ready`, `cursor` (0), `limit` (1–100, default 50) | Lists tasks with readiness, owner, revision, blockers and write-scope warnings; returns `nextCursor` when more pages exist. |
+| `team_task_get` | `task_id` (req) | Reads the complete latest value of one task. |
+| `team_task_update` | `task_id` (req), `expected_revision` (req), `action` (req), plus action-specific fields | Compare-and-set transition: `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, `delete`. |
 
 ## Language and skills
 

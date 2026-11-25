@@ -180,6 +180,14 @@
 - id: tool-subagent-control
   name: magitech_harness.subagent.tools:apply_control
   config: {}
+- id: agent-team
+  name: magitech_harness.team.service:TeamService
+  config:
+    maxTasks: 256
+    defaultEnabled: false
+- id: tool-agent-team
+  name: magitech_harness.team.tools:apply
+  config: {}
 - id: goals
   name: magitech_harness.goal.service:GoalService
   config:
