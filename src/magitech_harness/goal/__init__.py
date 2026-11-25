@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from magitech_harness.goal.round_driver import GoalRoundDriver, render_goal_round_prompt
 from magitech_harness.goal.service import DEFAULT_MAX_GOAL_ROUNDS, GoalService
 from magitech_harness.goal.types import (
     GOAL_CHANGE_VERSION,
@@ -24,7 +25,9 @@ __all__ = [
     "GoalPhase",
     "GoalProjection",
     "GoalRef",
+    "GoalRoundDriver",
     "GoalService",
     "GoalSnapshot",
     "GoalView",
+    "render_goal_round_prompt",
 ]
