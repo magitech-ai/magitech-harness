@@ -768,3 +768,39 @@ async def test_dsh_named_control_tools_success(tmp_path: Any) -> None:
     result = await call("interrupt_agent", {"agent": "worker"})
     assert result["isError"] is False
     assert result["value"] == {"accepted": True}
+
+
+@pytest.mark.asyncio
+async def test_wait_for_tree_work() -> None:
+    from types import SimpleNamespace
+
+    from animas import Context
+
+    from magitech_harness.subagent.service import SubagentService, _Member
+
+    async def idle() -> None:
+        return None
+
+    ctx = Context()
+    ctx.provide(
+        "agents",
+        SimpleNamespace(
+            get=lambda identifier: (
+                SimpleNamespace(when_idle=idle) if identifier == "c1" else None
+            )
+        ),
+    )
+    service = SubagentService(ctx)
+    caller = SimpleNamespace(id="root")
+    await service.wait_for_tree_work(caller)
+
+    service._members.update(
+        {
+            "c1": _Member("c1", "c1", "root", 1, session_id="s1"),
+            "c2": _Member("c2", "c2", "root", 1, session_id="s2"),
+        }
+    )
+    await service.wait_for_tree_work(caller)
+
+    ctx.provide("agents", None)
+    await service.wait_for_tree_work(caller)

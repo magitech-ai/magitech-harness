@@ -347,6 +347,11 @@ EXPECTED_ROWS = [
         "config": {"defaultMaxGoalRounds": 256},
     },
     {
+        "id": "goal-round-driver",
+        "name": "magitech_harness.goal.round_driver:GoalRoundDriver",
+        "config": {},
+    },
+    {
         "id": "agent-loop",
         "name": "magitech_harness.agent.agent_loop:AgentLoop",
         "config": {"agents": []},

@@ -1553,7 +1553,11 @@ async def test_update_goal_bad_revision(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_complete_from_goal_round_authority(tmp_path: Path) -> None:
     """The exact admitted goal round may complete without a human turn."""
-    ctx = await _boot(tmp_path)
+    ctx = create_harness(
+        storage_dir=tmp_path,
+        patches=[[{"id": "goal-round-driver", "disabled": True}]],
+    )
+    await ctx.flush()
     holder: dict[str, Any] = {}
     agent, holder = await _run_tool_turn(
         ctx, "get_goal", {}, "bootstrap", holder=holder
@@ -1584,7 +1588,11 @@ async def test_complete_from_goal_round_authority(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_blocked_from_goal_round_below_threshold(tmp_path: Path) -> None:
-    ctx = await _boot(tmp_path)
+    ctx = create_harness(
+        storage_dir=tmp_path,
+        patches=[[{"id": "goal-round-driver", "disabled": True}]],
+    )
+    await ctx.flush()
     holder: dict[str, Any] = {}
     agent, holder = await _run_tool_turn(
         ctx, "get_goal", {}, "bootstrap", holder=holder
@@ -1902,7 +1910,13 @@ async def test_complete_from_human_tool(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_blocked_from_goal_round_at_threshold(tmp_path: Path) -> None:
     """After three admitted rounds the model may self-report blocked."""
-    ctx = await _boot(tmp_path)
+    # This probe drives rounds by hand, so the automatic round driver is
+    # disabled to keep its own reservations out of the sequence.
+    ctx = create_harness(
+        storage_dir=tmp_path,
+        patches=[[{"id": "goal-round-driver", "disabled": True}]],
+    )
+    await ctx.flush()
     holder: dict[str, Any] = {}
     agent, holder = await _run_tool_turn(
         ctx, "get_goal", {}, "bootstrap", holder=holder
