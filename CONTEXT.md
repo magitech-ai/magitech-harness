@@ -58,6 +58,27 @@ _Avoid_: Magic command, prompt escape, macro
 A visual terminal presentation rendering the pending, active, completed, or failed state of a tool execution.
 _Avoid_: Tool box, output panel, widget
 
+**Goal**:
+A durable, revisioned objective for one session, with a phase (`active`, `paused`,
+`blocked`, `complete`) and a process-local activation (`armed`, `disarmed`) that is
+never persisted.
+_Avoid_: Task, todo, plan
+
+**Goal Round**:
+One admitted automatic-continuation turn of an active goal, counted from the
+`user/message` whose source kind is `goal`.
+_Avoid_: Iteration, attempt, loop
+
+**Todo List**:
+The model's standing task checklist for the current turn, replaced wholesale by
+`todo_write` and cleared when a new turn starts.
+_Avoid_: Task board, backlog, queue
+
+**Base Bundle**:
+The reference's shared composition (`packages/bundle/base/cordis.patch.yml`); every
+row in it is owned by this repository (ADR 0022).
+_Avoid_: Core, defaults, built-ins
+
 **Abort Signal**:
 A cooperative cancellation handle passed into streaming turns and tool runs to signal requested interruption.
 _Avoid_: Cancellation token, interrupt flag, kill switch

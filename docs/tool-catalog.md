@@ -1,10 +1,16 @@
 # Tool catalog
 
 Exhaustive reference for the tools that can be registered on `ctx.tools`.
-Source of truth: registration sites in `mth-components/src/mth_components/` and the
-canonical `define_tool` contract in `src/magitech_harness/tools/schema.py`. This
-page is maintained by hand from source; the docs review checks it against the
-registration calls. Domain tools live in `mth-components`; the harness ships none.
+Source of truth: registration sites in `src/magitech_harness/` and
+`mth-components/src/mth_components/`, plus the canonical `define_tool` contract
+in `src/magitech_harness/tools/schema.py`. This page is maintained by hand from
+source; the docs review checks it against the registration calls.
+
+Ownership follows the dsh base-bundle rule (ADR 0022): every tool in the
+reference's `packages/bundle/base/cordis.patch.yml` ships in this repository and
+is mounted by [`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml);
+optional, on-demand, and third-party tools live in `mth-components`. The
+per-row evidence map is [PARITY.md](../PARITY.md).
 
 All shipped tools are registered with `define_tool` from
 `magitech_harness.tools.schema`. Tools that need approval or a deadline declare
@@ -22,6 +28,23 @@ and cannot be registered.
 
 **[Python]** Reference names are `read` / `write` / `edit`; this port uses the
 suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
+
+## Background jobs
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `job_list` | none | Lists the caller's running and finished jobs with ids, kinds, labels, and statuses. |
+| `job_output` | `job_id` (req), `wait` (bool), `timeout_ms` | Reads output since the previous read (stream jobs) or the finished result; `wait` blocks until settlement or the configured cap. |
+| `job_kill` | `job_id` (req), `reason` | Requests cancellation; reports `cancellation-requested` or `already-finished`. |
+
+## Planning and goals
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `todo_write` | `todos` (req: complete list of `{content, status}`) | Replaces the whole task list and appends one `todo/write` session event; the `todos` projection clears on the next `turn/start`. Rejects duplicate content and an empty status. |
+| `get_goal` | none | Reads the current session goal, including the id and revision `update_goal` requires. |
+| `create_goal` | `objective` (req), `max_goal_rounds` | Creates and arms a durable goal; requires a direct human turn on a top-level agent. A completed goal may be replaced; any other phase must be cleared or resumed. |
+| `update_goal` | `goal_id` (req), `revision` (req), `action` (req), `objective`, `max_goal_rounds`, `blocked_reason` | Compare-and-set mutation. `edit`/`pause`/`resume` require a direct human turn; `complete`/`blocked` also accept the exact admitted goal round; `blocked` is refused before the configured round threshold. |
 
 ## Code execution
 

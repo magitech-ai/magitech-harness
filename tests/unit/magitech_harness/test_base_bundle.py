@@ -225,6 +225,11 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "goals",
+        "name": "magitech_harness.goal.service:GoalService",
+        "config": {"defaultMaxGoalRounds": 256},
+    },
+    {
         "id": "agent-loop",
         "name": "magitech_harness.agent.agent_loop:AgentLoop",
         "config": {"agents": []},
@@ -238,6 +243,21 @@ EXPECTED_ROWS = [
         "id": "timeout-policy-guard",
         "name": "magitech_harness.tools.timeout_guard:apply",
         "config": {},
+    },
+    {
+        "id": "tool-todo",
+        "name": "magitech_harness.tools.todo:apply",
+        "config": {"allow_parallel_in_progress": True},
+    },
+    {
+        "id": "tool-jobs",
+        "name": "magitech_harness.tools.jobs:apply",
+        "config": {},
+    },
+    {
+        "id": "tool-goal",
+        "name": "magitech_harness.goal.tools:apply",
+        "config": {"blocked_after_consecutive_rounds": 3},
     },
 ]
 

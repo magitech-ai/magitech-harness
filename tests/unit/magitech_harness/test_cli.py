@@ -114,6 +114,10 @@ async def test_repl_dispatcher_all_commands(tmp_path: Path) -> None:
     assert dispatcher.model == "custom/model-x"
     assert any("Active model set to: custom/model-x" in line for line in out_lines)
 
+    # /goal (no live agent bound to this hand-built session)
+    assert await dispatcher.dispatch("/goal") is False
+    assert any("/goal requires a live agent" in line for line in out_lines)
+
     # /clear
     assert await dispatcher.dispatch("/clear") is False
 

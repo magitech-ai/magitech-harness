@@ -275,6 +275,7 @@ class ReplDispatcher:
                 "  /session new      - Start a new session\n"
                 "  /session show <id>- Inspect session events\n"
                 "  /compact          - Trigger context compaction\n"
+                "  /goal [arg]       - Show or manage the session goal\n"
                 "  /clear            - Clear console screen\n"
                 "  /exit, /quit      - Exit REPL\n"
             )
@@ -308,6 +309,10 @@ class ReplDispatcher:
                     self.out(f"Session not found: {subarg}")
             else:
                 self.out(f"Unknown session subcommand: {subcmd}")
+        elif cmd == "/goal":
+            from magitech_harness.goal.command import run_goal_command
+
+            self.out(run_goal_command(self.ctx, self.session, arg))
         elif cmd == "/compact":
             self.out("Invoking context compaction...")
             compact_res = await self.ctx.waterfall(

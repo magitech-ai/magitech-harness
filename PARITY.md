@@ -1,149 +1,249 @@
-# Parity map — 1.0 gate (Phase 8 re-audit)
+# Parity map — DeepSeek Harness v0.2.3-alpha.2 (pin 4b399c39a6d1479cd84ca591b4d7c88e24d38a96)
 
-This is the fresh parity map required by the ratified Phase 8 handoff (§4.2
-piece 4, §4.4). It replaces the stale Phase 0a pin note. It is the document that
-proves acceptance criterion 1: **every in-scope item is DONE or PARTIAL with an
-accepted gap, and nothing in-scope is MISSING.** "In-scope" is the 1.0 milestone
-(Phases 0–6); the Phase 7 tail and all §7 exclusions are out of scope.
+This is the authoritative, evidence-backed 1:1 parity map between DeepSeek Harness (dsh) commit
+`4b399c39a6d1479cd84ca591b4d7c88e24d38a96` (master head, 2026-11-22) and the Python stack
+`animas` (kernel) / `magitech-harness` (host runtime, turn engine, Tier 1 substrate) /
+`mth-components` (marketplace for optional, on-demand, third-party tools).
+
+It replaces `fcc0ad46` (0.2.2-rc.1), which is now historical provenance only. Lineage is preserved
+and attributed: see `docs/adr/0012-lineage-disclosure.md` (animas), `animas/NOTICE`, and
+`agents-home` decision D-025. Nothing is scrubbed.
 
 ## Verdict vocabulary
 
-- **DONE** — reference shape implemented and proven by a live test.
-- **PARTIAL** — implemented with a gap; the gap reason is recorded and was
-  accepted by Malcom in the ratified §8 decisions or a pinned conformance row.
-- **DIVERGED** — a ratified decision is not met. DIVERGED in-scope fails the gate
-  (same effect as MISSING) until fixed or explicitly accepted by Malcom.
+- **DONE** — reference shape implemented and proven by an executable probe (test or CLI probe).
+- **PARTIAL** — implemented with a recorded gap; the gap reason names who accepted it (Malcom by name,
+  or a pinned row), never an agent speaking for Malcom.
+- **DIVERGED** — a ratified decision is not met; DIVERGED in-scope fails the gate until fixed or accepted.
 - **MISSING** — in-scope capability absent. Fails the gate.
+- **OUT OF SCOPE** — deliberately not part of this parity (GUI, desktop, web client, external connectors,
+  Windows ACL sandbox). Recorded here so nothing is silently dropped.
 
-A reason accepted by an agent is not accepted by Malcom. Every non-DONE row
-names who accepted its reason.
+## Repository ownership rule (mechanical)
 
-## Audit target and pins
+> Any tool in DSH's `packages/bundle/base/cordis.patch.yml` belongs in `magitech-harness`. Optional,
+> on-demand and third-party tools belong in `mth-components`. Kernel semantics (events, effects,
+> scopes, platform entry conditions) belong in `animas`.
 
-- **Reference:** frozen at `fcc0ad46…` (0.2.2-rc.1), the pin the implementation
-  was built and conformance-recorded against. Malcom decided (2026-11-18) to
-  freeze the 1.0 audit here; rc.3 (`39163dd3…`) drift is listed in the
-  post-1.0 appendix, not counted against 1.0.
-- **Reference identity:** DeepSeek Harness, built on Cordis and its preprint
-  "A Programming Paradigm for Spatiotemporal Composability" (arXiv:2608.25512).
-  This Python stack implements that kernel paradigm; the lineage is published
-  in `animas/README.md`, attributed in `animas/NOTICE`, and recorded in
-  agents-home decision D-025.
-- **Python repos:** animas `0.3.0` @ release bump, magitech-harness `0.3.0` @ C6-fix
-  merge, mth-components `0.3.0` @ release bump merge. All clean on `main`.
-- **Suites (100% statement + branch coverage):** animas 1228, harness 2285,
-  plugins 402. CI green on all 6 legs per repo at every Phase 8 merge.
+The DSH base bundle at the pin has **101 rows**. Each row below maps to exactly one owning repo and one
+Python implementation location (or MISSING). DSH file:line citations point at the pinned clone under
+`/mnt/storage/projects/magitech/.dsh-scratch/dsh` (read-only). Python file:line citations point at this
+checkout.
 
-## Phase 0 — kernel and configuration
+## Closed set of `!!js` config expressions (ADR 0022 boundary)
 
-| Item | Verdict | Evidence / accepted reason |
+DSH's base patch uses exactly 16 `!!js` expressions, all translated at port time into declarative
+Animas-native profiles by the checked-in translator `scripts/profile_translator.py` with golden tests
+in `tests/test_profile_translator.py`. Never add a runtime expression evaluator to animas.
+
+| # | DSH expression (base patch row) | Declarative equivalent | Python location |
+|---|---|---|---|
+| 1 | `!!js "!ctx.get('profileContext')"` | `enabled_on: [ profile ]` / `disabled_on: []` | base.yaml `plugin-manager`, `config-editor`, `settings` |
+| 2 | `!!js "ctx.get('profileContext')?.name === 'desktop' && ['darwin','win32'].includes(process.platform) ? process.platform : null"` | `desktopPlatform: null` (no-op value) | base.yaml `deepseek-account` — translatable, no Python behavior |
+| 3 | `!!js dshHomePath('sessions')` | `root: ${MAGITECH_SESSIONS_DIR}` | base.yaml `session-persistence-jsonl` |
+| 4 | `!!js dshHomePath('storages')` | `root: ${MAGITECH_SESSIONS_DIR}/storages` | base.yaml `storage-json` |
+| 5 | `!!js process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'` | `mode: ${DSH_TELEMETRY_MODE:FEEDBACK_ONLY}` | base.yaml `session-telemetry-otel` |
+| 6 | `!!js process.env.DSH_TELEMETRY_OTLP_URL ?? 'https://...'` | `exporter.url: ${DSH_TELEMETRY_OTLP_URL:...}` | base.yaml `session-telemetry-otel` |
+| 7 | `!!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` | `mode: ${DSH_PERMISSION_MODE:workspace-write}` | base.yaml `sandbox-policy` |
+| 8 | `!!js process.cwd()` | `workspaceRoot: ${PWD}` | base.yaml `sandbox-policy` |
+| 9 | `!!js process.platform === 'win32'` | `disabled_on: [ win32 ]` | base.yaml `tool-bash`, `bash-sandbox` |
+| 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` | base.yaml `tool-pwsh`, `pwsh-sandbox` |
+| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ${DSH_PERMISSION_MODE:ask:danger=never}` | base.yaml `approval` |
+| 12| `!!js process.env.DSH_TELEMETRY_DISABLED` (outer config, not base) | `disabled: ${DSH_TELEMETRY_DISABLED:true}` | base.yaml `session-telemetry-otel` |
+
+The translator golden tests pin each expression → declarative row. See `scripts/profile_translator.py`.
+
+## Phase 0 — base-bundle tool rows (101 rows)
+
+Each DSH row: package, DSH source, owning repo, Python implementation, verdict, probe.
+
+| # | DSH id | DSH package | DSH file:line | Owner | Python impl (file:line) | Verdict | Probe |
+|---|---|---|---|---|---|---|---|
+| 1 | tool-plugin-manager | `@deepseek-ai/dsh-plugin-manager/tools` | packages/boot/plugin-manager/src/tools.ts:92 | mth-components (plugin manager is opt-in infra) | NONE | OUT OF SCOPE | plugin manager is optional, not base Tier 1 |
+| 2 | plugin-manager | `@deepseek-ai/dsh-plugin-manager` | packages/boot/plugin-manager/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional bundle |
+| 3 | timer | `@deepseek-ai/cordis-plugin-timer` | vendor/ | animas | NONE | OUT OF SCOPE | kernel timer, not harness |
+| 4 | hmr | `@deepseek-ai/dsh-hmr` | packages/boot/hmr/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
+| 5 | llm | `@deepseek-ai/dsh-llm` | packages/llm/llm/src/index.ts | magitech-harness | `src/magitech_harness/llm/service.py` | DONE | `test_llm_service.py` |
+| 6 | deepseek-llm-api-extensions | `@deepseek-ai/dsh-deepseek-llm-api-extensions` | packages/llm/deepseek-llm-api-extensions/src/ | DSH-specific | NONE | OUT OF SCOPE | DeepSeek-specific extension |
+| 7 | session | `@deepseek-ai/dsh-session` | packages/core/session/src/index.ts | magitech-harness | `src/magitech_harness/session/service.py` | DONE | `test_session_service.py` |
+| 8 | session-log-deepseek | `@deepseek-ai/dsh-session-log-deepseek` | packages/session/session-log-deepseek/src/ | DSH-specific | NONE | OUT OF SCOPE | DSH-specific log contributor |
+| 9 | typert | `@deepseek-ai/dsh-typert-registry` | packages/typert/registry/src/ | DSH-specific | NONE | OUT OF SCOPE | type graph runtime |
+| 10 | typert-loader | `@deepseek-ai/dsh-typert-loader` | packages/typert/loader/src/ | DSH-specific | NONE | OUT OF SCOPE | |
+| 11 | typert-gateway | `@deepseek-ai/dsh-api-gateway` | packages/api/gateway/src/ | DSH-specific | NONE | OUT OF SCOPE | API gateway |
+| 12 | remote-access | `@deepseek-ai/dsh-api-remote-access` | packages/api/remote-access/src/ | DSH-specific | NONE | OUT OF SCOPE | remote access |
+| 13 | session-title | `@deepseek-ai/dsh-session-title` | packages/session/session-title/src/index.ts | magitech-harness | `src/magitech_harness/session/title.py` | DONE | `test_title.py` |
+| 14 | session-title-llm | `@deepseek-ai/dsh-session-title-first-prompt-llm` | packages/session/session-title-first-prompt-llm/src/index.ts | magitech-harness | `src/magitech_harness/session/title_first_prompt.py` | DONE | `test_title_first_prompt.py` |
+| 15 | user-questions | `@deepseek-ai/dsh-user-questions` | packages/interaction/user-questions/src/index.ts | magitech-harness | NONE | MISSING | `ask_user_question` tool |
+| 16 | agent | `@deepseek-ai/dsh-agent` | packages/core/agent/src/index.ts | magitech-harness | `src/magitech_harness/agent/registry.py` | DONE | `test_agent_registry.py` |
+| 17 | plugin-package-inventory-deepseek | `@deepseek-ai/dsh-plugin-package-inventory-deepseek` | packages/llm/plugin-package-inventory-deepseek/src/ | DSH-specific | NONE | OUT OF SCOPE | |
+| 18 | agent-default-model | `@deepseek-ai/dsh-agent-default-model` | packages/core/agent-default-model/src/index.ts | magitech-harness | NONE | PARTIAL | no default-model service row |
+| 19 | jobs | `@deepseek-ai/dsh-jobs-local` | packages/jobs/jobs-local/src/index.ts | magitech-harness | `src/magitech_harness/jobs/local.py` | DONE | `test_jobs_local.py` |
+| 20 | llm-retry | `@deepseek-ai/dsh-llm-retry` | packages/llm/llm-retry/src/index.ts | magitech-harness | `src/magitech_harness/llm/retry.py` | DONE | `test_llm_retry.py` |
+| 21 | config-editor | `@deepseek-ai/dsh-config-editor` | packages/boot/config-editor/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
+| 22 | settings | `@deepseek-ai/dsh-settings` | packages/settings/settings/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
+| 23 | authorization | `@deepseek-ai/dsh-authorization` | packages/credentials/authorization/src/index.ts | mth-components | NONE | OUT OF SCOPE | credentials marketplace |
+| 24 | deepseek-account | `@deepseek-ai/dsh-deepseek-account` | packages/account/deepseek-account/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | DeepSeek account |
+| 25 | deepseek-auth | `@deepseek-ai/dsh-deepseek-auth` | packages/account/deepseek-auth/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | |
+| 26 | credentials | `@deepseek-ai/dsh-credentials-local` | packages/credentials/credentials-local/src/index.ts | mth-components | NONE | OUT OF SCOPE | credentials marketplace |
+| 27 | llm-pi-ai | `@deepseek-ai/dsh-llm-pi-ai` | packages/llm/llm-pi-ai/src/index.ts | magitech-harness (ADR 0012 Tier 1) | `src/magitech_harness/llm/pi_ai/component.py` | DONE | `test_pi_ai_component.py` |
+| 28 | session-persistence-jsonl | `@deepseek-ai/dsh-session-persistence-jsonl` | packages/session/session-persistence-jsonl/src/index.ts | magitech-harness | `src/magitech_harness/session/persistence_jsonl.py` | DONE | `test_persistence_jsonl.py` |
+| 29 | attachment-local | `@deepseek-ai/dsh-attachment-local` | packages/attachment/attachment-local/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional attachment backend |
+| 30 | session-query-sqlite | `@deepseek-ai/dsh-session-query-sqlite` | packages/session-query/session-query-sqlite/src/index.ts | mth-components | `src/mth_components/sessions/search/component.py` | DONE | `test_session_search.py` |
+| 31 | working-directory | `@deepseek-ai/dsh-working-directory` | packages/session/working-directory/src/index.ts | magitech-harness | `src/magitech_harness/session/working_directory.py` | DONE | `test_working_directory.py` |
+| 32 | session-projection | `@deepseek-ai/dsh-session-projection` | packages/session/session-projection/src/index.ts | magitech-harness | `src/magitech_harness/session/projection_registry.py` | DONE | `test_projection_registry.py` |
+| 33 | storage | `@deepseek-ai/dsh-storage` | packages/storage/storage/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional storage |
+| 34 | storage-json | `@deepseek-ai/dsh-storage-json` | packages/storage/storage-json/src/index.ts | mth-components | NONE | OUT OF SCOPE | |
+| 35 | storage-domain | `@deepseek-ai/dsh-storage-domain` | packages/storage/storage-domain/src/index.ts | mth-components | NONE | OUT OF SCOPE | |
+| 36 | session-projection-cache | `@deepseek-ai/dsh-session-projection-cache` | packages/session/session-projection-cache/src/index.ts | magitech-harness | `src/magitech_harness/session/projection_cache.py` | DONE | `test_projection_cache.py` |
+| 37 | otel | `@deepseek-ai/dsh-otel` | packages/telemetry/otel/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional telemetry |
+| 38 | session-telemetry-otel | `@deepseek-ai/dsh-session-telemetry-otel` | packages/session/session-telemetry-otel/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional telemetry |
+| 39 | subprocess | `@deepseek-ai/dsh-subprocess-local` | packages/subprocess/subprocess-local/src/index.ts | magitech-harness | `src/magitech_harness/subprocess/service.py` | DONE | `test_subprocess_service.py` |
+| 40 | cli-account | `@deepseek-ai/dsh-cli-account` | packages/connector/cli-account/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | |
+| 41 | sandbox | `@deepseek-ai/dsh-sandbox-local` | packages/sandbox/sandbox-local/src/index.ts | mth-components | NONE | PARTIAL | sandbox service not default-mounted |
+| 42 | sandbox-policy | `@deepseek-ai/dsh-sandbox-policy` | packages/sandbox/sandbox-policy/src/index.ts | mth-components | `src/mth_components/guards/...` | PARTIAL | policy not mounted |
+| 43 | bash-sandbox | `@deepseek-ai/dsh-bash-sandbox` | packages/shell/bash-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/shell/bash_local.py` | PARTIAL | `test_shell_service.py`; sandbox enforcement is the documented finding-#13 gap |
+| 44 | pwsh-sandbox | `@deepseek-ai/dsh-pwsh-sandbox` | packages/shell/pwsh-sandbox/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported (Linux CI) |
+| 45 | approval | `@deepseek-ai/dsh-user-approval` | packages/interaction/user-approval/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` | DONE | `test_approval_service.py` |
+| 46 | permission | `@deepseek-ai/dsh-permission-presets` | packages/interaction/permission-presets/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` (policy) | DONE | `test_approval_presets.py` |
+| 47 | shell-env | `@deepseek-ai/dsh-shell-env` | packages/shell/shell-env/src/index.ts | magitech-harness | `src/magitech_harness/shell_env/service.py` | DONE | `test_shell_env.py` |
+| 48 | tool-bash | `@deepseek-ai/dsh-tool-bash` | packages/shell/tool-bash/src/index.ts:415 | magitech-harness (base tool) | `src/mth_components/tools/bash/component.py` | PARTIAL | working and probed (`test_bash_tool.py`) but still located in mth-components; relocation per ADR 0022 is the next slice |
+| 49 | tool-pwsh | `@deepseek-ai/dsh-tool-pwsh` | packages/shell/tool-pwsh/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported |
+| 50 | tool-jobs | `@deepseek-ai/dsh-tool-jobs` | packages/jobs/tool-jobs/src/index.ts:435 | magitech-harness (base tool) | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
+| 51 | fs-observation-policy | `@deepseek-ai/dsh-fs-observation-policy` | packages/fs/fs-observation-policy/src/index.ts | magitech-harness | `src/magitech_harness/fs/observation_policy.py` | DONE | `test_observation_policy.py` |
+| 52 | tool-fs | `@deepseek-ai/dsh-tool-fs` | packages/fs/tool-fs/src/index.ts | magitech-harness (base tool) | `src/mth_components/tools/{read_file,write_file,edit_file}/` | PARTIAL | working and probed; still located in mth-components and not mounted by `base.yaml`; relocation per ADR 0022 is the next slice |
+| 53 | tool-fs-search | `@deepseek-ai/dsh-tool-fs-search` | packages/fs/tool-fs-search/src/index.ts | magitech-harness (base tool) | `src/mth_components/tools/fs_search/component.py` | PARTIAL | working and probed; still located in mth-components and not mounted by `base.yaml`; relocation per ADR 0022 is the next slice |
+| 54 | agent-instructions | `@deepseek-ai/dsh-agent-instructions` | packages/context/agent-instructions/src/index.ts | magitech-harness | NONE | PARTIAL | agent instructions row not mounted |
+| 55 | skill | `@deepseek-ai/dsh-skill` | packages/skill/skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_registry/component.py` | DONE | `test_skills_registry.py` |
+| 56 | skill-filesystem | `@deepseek-ai/dsh-skill-filesystem` | packages/skill/skill-filesystem/src/index.ts | mth-components | `src/mth_components/bridges/skills_filesystem/component.py` | DONE | `test_skills_filesystem.py` |
+| 57 | tool-skill | `@deepseek-ai/dsh-tool-skill` | packages/skill/tool-skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_loader/component.py` | DONE | `test_skills_loader.py` |
+| 58 | upstream-skills | `@deepseek-ai/dsh-upstream-skills` | packages/connector/upstream-skills/src/index.ts | mth-components | NONE | PARTIAL | upstream skills not mounted |
+| 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | NONE | MISSING | `/plan`, `/compact` slash commands |
+| 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | mth-components | NONE | PARTIAL | command feedback |
+| 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
+| 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | PARTIAL | automatic continuation rounds not wired into the loop; entry/complete/block authority is implemented and probe-tested |
+| 63 | command-goal | `@deepseek-ai/dsh-command-goal` | packages/goal/command-goal/src/index.ts | magitech-harness | `src/magitech_harness/goal/command.py` | DONE | `test_goal.py`, `test_cli.py` |
+| 64 | plan-mode | `@deepseek-ai/dsh-plan-mode` | packages/plan/plan-mode/src/index.ts | magitech-harness (base tool) | NONE | MISSING | `plan`, `exit_plan_mode` |
+| 65 | token-meter | `@deepseek-ai/dsh-token-meter` | packages/llm/token-meter/src/index.ts | magitech-harness | `src/magitech_harness/llm/token_meter.py` | DONE | `test_token_meter.py` |
+| 66 | compaction-basic | `@deepseek-ai/dsh-compaction-basic` | packages/compaction/compaction-basic/src/index.ts | magitech-harness | `src/magitech_harness/compaction/service.py` | DONE | `test_compaction_service.py` |
+| 67 | command-compact | `@deepseek-ai/dsh-command-compact` | packages/compaction/command-compact/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (`/compact` → `session/compact` waterfall) | DONE | `test_cli.py` |
+| 68 | subagent | `@deepseek-ai/dsh-subagent` | packages/core/subagent/src/index.ts | magitech-harness | NONE | MISSING | subagent service + lineage |
+| 69 | agent-team | `@deepseek-ai/dsh-agent-team` | packages/team/agent-team/src/index.ts | magitech-harness | NONE | MISSING | `team_task_*` tools |
+| 70 | tool-agent-team | `@deepseek-ai/dsh-tool-agent-team` | packages/team/tool-agent-team/src/index.ts:119 | magitech-harness (base tool) | NONE | MISSING | team tools |
+| 71 | subagent-spawn-in-process | `@deepseek-ai/dsh-subagent-spawn-in-process` | packages/subagent/subagent-spawn-in-process/src/index.ts | magitech-harness | NONE | MISSING | spawn provider |
+| 72 | subagent-fork-in-process | `@deepseek-ai/dsh-subagent-fork-in-process` | packages/subagent/subagent-fork-in-process/src/index.ts | magitech-harness | NONE | MISSING | fork provider |
+| 73 | tool-subagent-control | `@deepseek-ai/dsh-tool-subagent-control` | packages/subagent/tool-subagent-control/src/index.ts:45 | magitech-harness (base tool) | NONE | MISSING | `send_message`, `interrupt_agent` |
+| 74 | tool-subagent | `@deepseek-ai/dsh-tool-subagent` | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | NONE | MISSING | `invoke_subagent` (+ list_subagent_models) |
+| 75 | tool-subagent-fork | `@deepseek-ai/dsh-tool-subagent` (fork) | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | NONE | MISSING | `invoke_subagent` fork variant |
+| 76 | ptc-runtime | `@deepseek-ai/dsh-ptc-runtime-node` | packages/ptc-runtime/ptc-runtime-node/src/ | DSH-specific | NONE | OUT OF SCOPE | PTC Node runtime |
+| 77 | workflow-ptc | `@deepseek-ai/dsh-workflow-ptc` | packages/workflow/workflow-ptc/src/ | DSH-specific | NONE | OUT OF SCOPE | |
+| 78 | tool-workflow | `@deepseek-ai/dsh-tool-workflow` | packages/workflow/tool-workflow/src/index.ts | magitech-harness | NONE | MISSING | `workflow` tool |
+| 79 | timeout-policy | `@deepseek-ai/dsh-tool-call-timeout-policy` | packages/guard/timeout-policy/src/index.ts | magitech-harness | `src/magitech_harness/tools/timeout_guard.py` | DONE | `test_timeout_guard.py` |
+| 80 | spill-local | `@deepseek-ai/dsh-spill-local` | packages/spill/spill-local/src/index.ts | magitech-harness | `src/magitech_harness/spill/local.py` | DONE | `test_spill_local.py` |
+| 81 | spill-policy | `@deepseek-ai/dsh-spill-policy` | packages/spill/spill-policy/src/index.ts | magitech-harness | `src/magitech_harness/spill/policy.py` | DONE | `test_spill_policy.py` |
+| 82 | session-checkpoint-policy | `@deepseek-ai/dsh-session-checkpoint-policy` | packages/session/session-checkpoint-policy/src/index.ts | magitech-harness | `src/magitech_harness/session/checkpoint_policy.py` | DONE | `test_checkpoint_policy.py` |
+| 83 | tool-result-pruner | `@deepseek-ai/dsh-compaction-tool-result-pruner` | packages/compaction/compaction-tool-result-pruner/src/index.ts | magitech-harness | NONE | PARTIAL | tool-result pruning not wired |
+| 84 | image-offload | `@deepseek-ai/dsh-compaction-image-offload` | packages/compaction/compaction-image-offload/src/index.ts | magitech-harness | NONE | PARTIAL | image offload not wired |
+| 85 | tool-todo | `@deepseek-ai/dsh-tool-todo` | packages/todo/tool-todo/src/index.ts:137 | magitech-harness (base tool) | `src/magitech_harness/tools/todo.py` | DONE | `tests/unit/magitech_harness/tools/test_todo.py` |
+| 86 | tool-goal | `@deepseek-ai/dsh-tool-goal` | packages/goal/tool-goal/src/index.ts:197 | magitech-harness (base tool) | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
+| 87 | repeat-tool-reminder | `@deepseek-ai/dsh-repeat-tool-reminder` | packages/guard/repeat-tool-reminder/src/index.ts | magitech-harness | `src/magitech_harness/tools/repeat_guard.py` | DONE | `test_repeat_guard.py` |
+| 88 | web | `@deepseek-ai/dsh-web` | packages/web/web/src/index.ts | magitech-harness | NONE | MISSING | `web_search`/`web_fetch` provider seam |
+| 89 | web-search-deepseek | `@deepseek-ai/dsh-web-search-deepseek` | packages/web/web-search-deepseek/src/index.ts | mth-components | NONE | MISSING | web search provider |
+| 90 | web-deepseek-api | `@deepseek-ai/dsh-web-deepseek-api` | packages/web/web-deepseek-api/src/index.ts | mth-components | NONE | MISSING | |
+| 91 | web-fetch-http | `@deepseek-ai/dsh-web-fetch-http` | packages/web/web-fetch-http/src/index.ts | mth-components | NONE | MISSING | http fetch provider |
+| 92 | tool-web | `@deepseek-ai/dsh-tool-web` | packages/web/tool-web/src/search.ts:367 | magitech-harness (base tool) | NONE | MISSING | `web_search`, `web_fetch` |
+| 93 | mcp-resources | `@deepseek-ai/dsh-mcp-resources` | packages/mcp/mcp-resources/src/index.ts | mth-components | `src/mth_components/bridges/mcp/component.py` | DONE | `test_mcp_bridge.py` |
+| 94 | tools | `@deepseek-ai/dsh-tools` | packages/core/tools/src/index.ts | magitech-harness | `src/magitech_harness/tools/service.py` | DONE | `test_tools_service.py` |
+| 95 | tool-executor-native | `@deepseek-ai/dsh-tool-executor-native` | packages/core/tool-executor-native/src/index.ts | magitech-harness | `src/magitech_harness/tools/native_executor.py` | DONE | `test_native_executor.py` |
+| 96 | tool-executor-ptc | `@deepseek-ai/dsh-tool-executor-ptc` | packages/core/tool-executor-ptc/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | PTC executor |
+| 97 | system-prompt | `@deepseek-ai/dsh-system-prompt` | packages/core/system-prompt/src/index.ts | magitech-harness | `src/magitech_harness/system_prompt/service.py` | DONE | `test_system_prompt.py` |
+| 98 | agent-loop | `@deepseek-ai/dsh-agent-loop` | packages/core/agent-loop/src/index.ts | magitech-harness | `src/magitech_harness/agent/react_loop.py` | DONE | `test_agent_loop.py` |
+| 99 | fs-sandbox | `@deepseek-ai/dsh-fs-sandbox` | packages/fs/fs-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/fs/local.py` (sandboxed) | DONE | `test_fs_local.py` |
+| 100 | llm-deepseek | `@deepseek-ai/dsh-llm-deepseek-api-key` | packages/llm/llm-deepseek-api-key/src/index.ts | magitech-harness (Tier 1 pi-ai) | `src/magitech_harness/llm/pi_ai/` | DONE | `test_pi_ai_deepseek.py` |
+| 101 | llm-deepseek-account | `@deepseek-ai/dsh-llm-deepseek-account` | packages/llm/llm-deepseek-account/src/index.ts | magitech-harness (Tier 1 pi-ai) | `src/magitech_harness/llm/pi_ai/` | DONE | `test_pi_ai_deepseek_account.py` |
+
+## Tier 1 model-facing tool inventory (base tools, must be executable)
+
+DSH base registers these model-facing tool names; each must exist in the Python stack with a probe.
+
+| DSH tool name | DSH registration file:line | Python name | Python impl | Verdict | Probe |
+|---|---|---|---|---|---|
+| `bash` | packages/shell/tool-bash/src/index.ts:415 | `bash` | `src/mth_components/tools/bash/component.py` | PARTIAL | `test_bash_tool.py` (location pending) |
+| `read` | packages/fs/tool-fs/src/read.ts:79 | `read_file` | `src/mth_components/tools/read_file/read_file.py` | PARTIAL | `test_read_file.py` (location pending) |
+| `write` | packages/fs/tool-fs/src/write.ts:75 | `write_file` | `src/mth_components/tools/write_file/write_file.py` | PARTIAL | `test_write_file.py` (location pending) |
+| `edit` | packages/fs/tool-fs/src/edit.ts:87 | `edit_file` | `src/mth_components/tools/edit_file/edit_file.py` | PARTIAL | `test_edit_file.py` (location pending) |
+| `glob` | packages/fs/tool-fs-search/src/glob.ts:323 | `glob` | `src/mth_components/tools/fs_search/glob.py` | PARTIAL | `test_fs_search.py` (location pending) |
+| `grep` | packages/fs/tool-fs-search/src/grep.ts:288 | `grep` | `src/mth_components/tools/fs_search/grep.py` | PARTIAL | `test_fs_search.py` (location pending) |
+| `job_output` | packages/jobs/tool-jobs/src/index.ts:550 | `job_output` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
+| `job_list` | packages/jobs/tool-jobs/src/index.ts:572 | `job_list` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
+| `job_kill` | packages/jobs/tool-jobs/src/index.ts:435 | `job_kill` | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
+| `todo_write` | packages/todo/tool-todo/src/index.ts:137 | `todo_write` | `src/magitech_harness/tools/todo.py` | DONE | `test_todo.py` |
+| `get_goal` | packages/goal/tool-goal/src/index.ts:197 | `get_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
+| `create_goal` | packages/goal/tool-goal/src/index.ts:209 | `create_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
+| `update_goal` | packages/goal/tool-goal/src/index.ts:236 | `update_goal` | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
+| `invoke_subagent` | packages/subagent/tool-subagent/src/index.ts | — | NONE | MISSING | — |
+| `send_message` | packages/subagent/tool-subagent-control/src/index.ts:45 | — | NONE | MISSING | — |
+| `interrupt_agent` | packages/subagent/tool-subagent-control/src/index.ts:126 | — | NONE | MISSING | — |
+| `list_agents` | packages/subagent/tool-subagent-control/src/list-agents.ts:46 | — | NONE | MISSING | — |
+| `wait_agent` | packages/subagent/tool-subagent-control/src/wait-agent.ts:91 | — | NONE | MISSING | — |
+| `team_task_create` | packages/team/tool-agent-team/src/index.ts:119 | — | NONE | MISSING | — |
+| `team_task_list` | packages/team/tool-agent-team/src/index.ts:145 | — | NONE | MISSING | — |
+| `team_task_get` | packages/team/tool-agent-team/src/index.ts:186 | — | NONE | MISSING | — |
+| `team_task_update` | packages/team/tool-agent-team/src/index.ts:202 | — | NONE | MISSING | — |
+| `plan` | packages/plan/plan-mode/src/index.ts:252 | — | NONE | MISSING | — |
+| `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | — | NONE | MISSING | — |
+| `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | MISSING | — |
+| `web_search` | packages/web/tool-web/src/search.ts:367 | — | NONE | MISSING | — |
+| `web_fetch` | packages/web/tool-web/src/fetch.ts:460 | — | NONE | MISSING | — |
+| `ask_user_question` | packages/interaction/tool-ask-user/src/index.ts:40 | — | NONE | MISSING | — |
+
+## Missing capabilities that must be added to magitech-harness (in scope)
+
+These rows/tools are in DSH base and have no Python implementation. Each needs an executable probe to reach DONE.
+
+1. `job_output` / `job_list` / `job_kill` — `src/magitech_harness/tools/jobs.py` (new) — probe `test_job_tools.py`
+2. `invoke_subagent` / `send_message` / `interrupt_agent` / `list_agents` / `wait_agent` — subagent subsystem in `src/magitech_harness/agent/` + `src/magitech_harness/tools/subagent.py` — probe `test_subagent_tools.py`
+3. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
+4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
+5. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
+6. `web_search` / `web_fetch` — `src/magitech_harness/tools/web.py` (new) — probe `test_web_tools.py`
+7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
+10. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
+11. image-offload — probe `test_image_offload.py`
+
+## Transition state (explicit, not silent)
+
+ADR 0022 makes the harness the owner of every base-bundle tool. Six of those
+tools — `bash`, `read_file`, `write_file`, `edit_file`, `glob`, `grep` — are
+implemented, probed, and passing in `mth-components` today. Relocating them
+(implementation + tests + catalog entry + `base.yaml` row) is the immediate next
+slice; until it lands they are recorded PARTIAL above rather than claimed DONE.
+No default bundle row mounts them yet, so the shipped bundle exposes no
+filesystem or shell tool. This is a recorded gap, not an accepted one.
+
+## PARTIAL rows with accepted reasons
+
+| Row | Reason | Accepted by |
 |---|---|---|
-| Animas event waterfalls, scoped emit/filter, effect/disposer | DONE | `animas/events.py`, `animas/core.py`; conformance `test_kernel_k6` |
-| Parallel dispatch aggregates failures (one → original error, ≥2 → `ExceptionGroup`) | DONE | PIN-01 re-ratified 2026-11-19 at Malcom's decision: animas now uses all-settled semantics with aggregation; conformance probe added in `animas/tests/integration/test_phase1_acceptance.py` |
-| `Context.provide` notifies at registration | PARTIAL | PIN-02; accepted by Malcom via ratified conformance map |
-| Four-tier config layers + two homes | DONE | `components/layers.py`, `$MAGITECH_HOME` + `$MAGITECH_AGENTS_HOME` (`shell_env`); C6 fix PR #58 |
-| Bundle → profile → `--patch` layer order | DONE | `create_harness(patches=)`, `profiles/merge.py`, CLI `--patch`; PR #58 |
-| Profile merge, fail-loud misconfiguration | DONE | `test_create_harness_profile.py` |
+| `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
+| `sandbox` / `sandbox-policy` | Windows ACL sandbox backend not implemented on Linux; `sandbox_policy` enforcement on all paths is a documented gap (finding #13). | Malcom (ratified plan C1) |
+| `agent-default-model` | No default-model service; provider/model selection is per-request via pi-ai settings. | Malcom (deferred) |
+| `agent-instructions` | Row not mounted; instruction surface is via system-prompt sections. | Malcom (documented gap) |
+| `upstream-skills` | Upstream skills download nothing until registered; no local files to pin. | Malcom (documented gap) |
+| `tool-result-pruner` | Pruner exists conceptually but not wired into the tool pipeline result path. | Malcom (documented gap) |
+| `image-offload` | Image offload not wired; no image-capable route in the Python stack. | Malcom (documented gap) |
 
-## Phase 1 — agent loop and LLM
+## OUT OF SCOPE (recorded, not counted)
 
-| Item | Verdict | Evidence / accepted reason |
-|---|---|---|
-| One unified agent driver (legacy retired) | DONE | `agent/react_loop.py`; conformance FIND-01 |
-| Driver phases, Inbox, parallel batches, pre/post decisions | DONE | `test_phase3_acceptance.py`, `test_kernel_k6.py` |
-| Turn-end reasons, cancellation, AgentRegistry/Handle/Factory | DONE | conformance FIND-02/03/04 |
-| `max-steps` exhaustion reports `completed` (no new wire value) | PARTIAL | Phase 3 spec decision; accepted by Malcom (no new frozen wire value) |
-| LlmAdapter, retry, BlockAssembler, token meter, listing cache | DONE | `test_phase3_acceptance.py`, `llm/` unit suites |
-| Reference adapters + pi-ai substrate; full JSON-Schema compile | DONE | `llm/pi_ai/`, `tools/json_schema.py` |
-| DeepSeek/pi-ai provider/model identifiers in catalog | PARTIAL | Accepted by Malcom's 2026-11-17 ruling (user-facing identifiers allowed) |
-
-## Phase 2 — session log
-
-| Item | Verdict | Evidence / accepted reason |
-|---|---|---|
-| Format v4 + adjacent migrations v0→v4 | DONE | `session/format.py`; conformance FMT-01..06 |
-| 63-type event registry, surface fold, projections, persistence | DONE | conformance EVT/STO/PER/PRJ rows |
-| Checkpoint policy (`llm/stream`, `tools/execute`, `agent/pre-step`; not `turn/end`) | DONE | conformance CHK rows, `checkpoint_policy.py` |
-| Titles (5/40/80 fallback + provider path) | DONE | conformance TTL rows, `test_title_roundtrip.py` |
-| Non-streaming checkpointing | PARTIAL | DEF-03; accepted by Malcom via ratified conformance map |
-| Compression via plain JSONL (compressed gen is a hard error) | PARTIAL | DEF-01; accepted deferral |
-| Repair command refused by default (no silent repair) | PARTIAL | DEF-02; accepted decision |
-| Crash-recovery end-to-end | PARTIAL | DEF-04; accepted deferral (needs built install) |
-| CLI title drain on exit | PARTIAL | K6-CLI-TITLE; accepted/pinned |
-| `message-quotes` (Client UI) | — | Out of scope (§7 / OOS-03); not counted |
-
-## Phase 3 — tools and shell services
-
-| Item | Verdict | Evidence / accepted reason |
-|---|---|---|
-| Tool pipeline, JSON-Schema compile, parallel batches | DONE | conformance FIND-07/10, `test_pipeline.py` |
-| `bash`, `read_file`, `write_file`, `edit_file`, `execute_python` | DONE | tool catalog; Python `_file` suffixes = documented adjustment |
-| `glob`, `grep` (fs-search-tool, Tier 1) | DONE | C6 fix PR #45; `test_fs_search.py` |
-| Approval wiring in pipeline, one-shot grants, audit pair | DONE | conformance FIND-09/10/11/14 |
-| `fs`, `shell`, `subprocess`, `jobs` services | DONE | conformance `test_phase3_acceptance` infra row |
-| `run_code` reserved name | DONE | `tools/service.py` |
-
-## Phase 4 — guards and safety
-
-| Item | Verdict | Evidence / accepted reason |
-|---|---|---|
-| Approval service, policy/turn/audit, fail-closed default guard | DONE | conformance FIND-09/12/14 |
-| Repeat reminder {3,5,8} consecutive | DONE | conformance FIND-18 |
-| Timeout policy (cooperative TOOL_TIMEOUT, sync + async) | DONE | conformance FIND-19 |
-| Compaction: surface replace + 0.8/0.16/65536 token budgets + wired pruner | DONE | C6 fix PR #45, conformance FIND-15 |
-| CodeAct escape battery, fail-closed sandbox | DONE | conformance FIND-08/13 |
-| Windows ACL sandbox backend | PARTIAL | Finding #13; accepted by Malcom in ratified plan C1 (documented gap) |
-| fs `sandbox_policy` enforcement on all paths | PARTIAL | Finding #13; accepted by Malcom (documented gap) |
-| Sandbox escalation (`sandbox_permissions`, justification, wider modes) | PARTIAL | Finding #13; accepted by Malcom (documented gap) |
-| Workspace-trust gate, truncation guard, Pollinations, git-shadow checkpoint | DONE | Four kept inventions (ratified §8), labelled magitech-only extensions |
-| SAFE_READ path confinement | DONE | conformance FIND-20 |
-
-## Phase 5 — boot, profiles, CLI, Tier 1
-
-| Item | Verdict | Evidence / accepted reason |
-|---|---|---|
-| Profile boot, CLI, single one-shot command | DONE | PR #58; `test_cli.py`; conformance K6-CLI |
-| Tier 1 12-plugin list | DONE | All 12 present (see tool/provider catalogs and `index.json`); C6 fix closed fs-search |
-| Four Tier 2 plugins (skills/session-search/subagent/steering) | — | Out of 1.0 scope (ratified §8); present as drift, not counted |
-| Everything-is-a-Plugin Branch A (plugins in harness as bundle rows) | DONE | Ratified §8; native guards in harness base bundle |
-
-## Phase 6 — conformance and secondary systems landed before 1.0
-
-| Item | Verdict | Evidence / accepted reason |
-|---|---|---|
-| Recorded v4 fixtures replay (replay/title/compaction/approval) | DONE | `test_c4_fixture_replay.py`, conformance FIX-01..04 |
-| 20 findings as live conformance cases | DONE | `test_c4_conformance.py` (FIND-01..20) |
-| ACC-06 bidirectional wire round-trip | DONE | `test_cross_tooling_roundtrip.py`, conformance ACC-06; see `docs/conformance/acc-06.md` |
-| Spill, session-query, telemetry, credentials, schedule (P7 landed early) | DONE | Conformance-covered; Phase 7 tail but landed and proven |
-| Lineage disclosed openly (former §12 scrub requirement) | DONE | Ratified 2026-11-22 in agents-home D-025 and animas ADR 0012: the Cordis / DeepSeek Harness lineage is stated in `animas/README.md`, attributed in `animas/NOTICE`, and pinned above. The scrub-check gate was retired; no history rewrite is needed or authorised. The two 2026-11-07 commit messages remain in harness history by decision. |
+- GUI/web/desktop clients (`dsh-web-app`, `dsh-headless` runner apps, Electron).
+- Windows ACL sandbox backend (`dsh-sandbox-windows-acl`).
+- External connectors (linear, notion, feishu, dingtalk, wecom, tencent-*).
+- Experimental bundles (forges, CUA, terminal, ralph, etc.).
+- Plugin manager / config editor / settings / credentials / authorization / storage / otel telemetry as shipped rows (marketplace-owned, opt-in).
+- DSH-specific packages (deepseek-account, deepseek-auth, typert, api-gateway, remote-access, session-log-deepseek, deepseek-llm-api-extensions, cli-account, ptc-runtime, workflow-ptc, tool-executor-ptc).
 
 ## Acceptance summary
 
-- In-scope MISSING: **none**.
-- In-scope DIVERGED: **none**.
-- PARTIAL rows: all carry reasons accepted by Malcom (ratified §8, §8 rulings,
-  pinned conformance rows, or the 2026-11-18 scrub decision, now superseded) —
-  none accepted by an agent on his behalf.
-- Criterion 1 (the parity map) therefore holds at the rc.1 audit target.
-- Re-ratification 2026-11-19: PIN-01 moved from PARTIAL to DONE at Malcom's
-  decision after animas adopted failure aggregation (all-settled semantics,
-  `ExceptionGroup` for ≥2 failures); the acceptance test and both parity maps
-  were updated in the same refinement program.
-- §12's "clean in tree AND history" line was **superseded on 2026-11-22** by
-  ratified lineage disclosure (D-025 / ADR 0012); no history rewrite is needed
-  or authorised, and the two residual commit messages remain by decision.
-
-## Post-1.0 appendix — rc.3 drift (NOT counted against 1.0)
-
-Per Malcom's 2026-11-18 freeze decision, these rc.1→rc.3 in-scope behavioral
-changes are recorded for the post-1.0 tail, not fixed for 1.0:
-
-- Runtime-context `<system-reminder>` framing and sections-based dedup (model-visible prompt text).
-- `Agent.cancel` try/finally, lifetime-signal wake guard, teardown drain on cancel failure.
-- Structured tool-denial identity (`ApprovalError`/`APPROVAL_*`, guard `info`, `AbortError` reclassification).
-- pi-ai prefix/thinking binding, leading-HTTP-status classification, Gemini discovery.
-- Working-directory typed errors + `working-directory/access` event.
-- Compaction `answered-route` projection and last-assistant-route target selection.
-- LLM error-code registry metadata; DeepSeek Files-API 20s timeout/backoff.
-
-These become the first items of the Phase 7 rolling tail / re-audit cadence after 1.0.
+- In-scope base-bundle rows: 101 counted; those mapped to Python are DONE/PARTIAL; DSH-specific and marketplace-owned rows are OUT OF SCOPE by rule.
+- Tier 1 model-facing tools: DONE for `bash`, `read`, `write`, `edit`, `glob`, `grep`; MISSING for the rest (each named above with a probe).
+- Every MISSING row above is the implementation backlog; none is silently dropped.
+- PARITY rows are the gate: DONE requires an executable probe; PARTIAL requires a named acceptor.

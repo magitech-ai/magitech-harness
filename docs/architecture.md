@@ -74,11 +74,16 @@ The default bundle mounts, in dependency order:
 | Session log, persistence, projections | `ctx.sessions` | [sessions](subsystems/sessions.md) |
 | Retry and token metering | mounted plugins | [llm](subsystems/llm.md) |
 | Agent registry and loop | `ctx.agents`, `ctx.agentLoop` | [agent-loop](subsystems/agent-loop.md) |
+| Same-session goals | `ctx.goals` | [adr/0022](adr/0022-supersede-zero-builtin-domain-tools-base-bundle-in-harness.md) |
 | Repeat/timeout guards | native rows in `base.yaml` | [tools](subsystems/tools.md) |
+| Base-bundle tools (`bash`, fs, fs-search, jobs, todo, goal) | native rows in `base.yaml` | [tool catalog](tool-catalog.md) |
 
-The harness owns no built-in domain tools or providers; those live in
-`mth-components`. See [adr/0002](adr/0002-zero-builtin-domain-tools-and-providers.md)
-and [adr/0012](adr/0012-tier-1-provider-substrate-in-harness.md).
+Ownership follows the reference's base bundle (ADR 0022): every tool in dsh's
+`packages/bundle/base/cordis.patch.yml` ships and is mounted here; optional,
+on-demand, and third-party tools stay in `mth-components`. ADR 0002's
+"zero built-in domain tools" and ADR 0012's narrow Tier 1 exception are
+superseded by [ADR 0022](adr/0022-supersede-zero-builtin-domain-tools-base-bundle-in-harness.md);
+their bodies remain as history.
 
 ## Guard ownership
 
@@ -96,6 +101,9 @@ component, not mounted by the default bundle.
 | Workspace trust | Marketplace `guards/trust` (`workspace-trust-gate`) | No | [approval](subsystems/approval.md#trust-and-workspace-gates) |
 | Compaction | Marketplace `guards/compaction` (`compaction-guard`); native `ctx.compaction` service is mounted separately | Guard: no; service: yes | [compaction](subsystems/compaction.md) |
 | Output truncation | Marketplace `guards/truncation` (`truncation-guard`) | No | [shell and subprocess](subsystems/shell-and-subprocess.md) |
+| Goal mutation | Native `goals` service + `tool-goal` row (`magitech_harness.goal.tools:apply`) | Yes | [tool catalog](tool-catalog.md) |
+| Todo list | Native `tool-todo` row (`magitech_harness.tools.todo:apply`) | Yes | [tool catalog](tool-catalog.md) |
+| Job control | Native `tool-jobs` row (`magitech_harness.tools.jobs:apply`) | Yes | [tool catalog](tool-catalog.md) |
 
 The `mth-components` catalog also lists `approval-guard`, `repeat-tool-reminder`,
 and `timeout-policy`. Those are non-canonical duplicates of the native rows
@@ -161,7 +169,8 @@ and unresolvable dependencies raise at boot.
 | Gate or annotate a tool call | a `tools/*` waterfall listener (guard) |
 | Add a durable fact about a turn | a session event type with an owner |
 | Change derived history | a surface op on a surface event type |
-| Add a domain capability | an `mth-components` tool component |
+| Add a base-bundle capability | a tool row in `src/magitech_harness/` mounted by `base.yaml` |
+| Add an optional/third-party capability | an `mth-components` tool component |
 | Introduce a config knob | the owning service, with a shipped default in the config catalog |
 
 Unresolved questions: none.
