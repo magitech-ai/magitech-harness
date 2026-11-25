@@ -265,6 +265,36 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "subagent",
+        "name": "magitech_harness.subagent.service:SubagentService",
+        "config": {"maxActiveSubagents": 10, "maxDepth": 1},
+    },
+    {
+        "id": "subagent-spawn-in-process",
+        "name": "magitech_harness.subagent.providers:apply_spawn",
+        "config": {},
+    },
+    {
+        "id": "subagent-fork-in-process",
+        "name": "magitech_harness.subagent.providers:apply_fork",
+        "config": {},
+    },
+    {
+        "id": "tool-subagent",
+        "name": "magitech_harness.subagent.tools:apply",
+        "config": {"provider": "spawn", "control": False},
+    },
+    {
+        "id": "tool-subagent-fork",
+        "name": "magitech_harness.subagent.tools:apply",
+        "config": {"provider": "fork", "tool_name": "subagent_fork", "control": False},
+    },
+    {
+        "id": "tool-subagent-control",
+        "name": "magitech_harness.subagent.tools:apply_control",
+        "config": {},
+    },
+    {
         "id": "goals",
         "name": "magitech_harness.goal.service:GoalService",
         "config": {"defaultMaxGoalRounds": 256},
