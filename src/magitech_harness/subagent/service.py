@@ -269,6 +269,28 @@ class SubagentService(Service):
             )
         return member
 
+    async def wait_for_tree_work(self, caller: Any) -> None:
+        """Await every running direct child of the caller becoming idle."""
+        import asyncio
+
+        agent_id = getattr(caller, "id", None)
+        children = [
+            member
+            for member in self._members.values()
+            if member.parent_id == agent_id and member.state == "running"
+        ]
+        if not children:
+            return
+        agents = self.ctx.get("agents", None, strict=False)
+        waits: list[Any] = []
+        for member in children:
+            child = agents.get(member.child_id) if agents is not None else None
+            when_idle = getattr(child, "when_idle", None)
+            if callable(when_idle):
+                waits.append(when_idle())
+        if waits:
+            await asyncio.gather(*waits, return_exceptions=True)
+
     def root_of(self, caller: Any) -> Any:
         """The root agent of the caller's tree (the caller when no parent)."""
         del caller
