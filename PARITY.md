@@ -188,8 +188,6 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `team_task_list` | packages/team/tool-agent-team/src/index.ts:145 | `team_task_list` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
 | `team_task_get` | packages/team/tool-agent-team/src/index.ts:186 | `team_task_get` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
 | `team_task_update` | packages/team/tool-agent-team/src/index.ts:202 | `team_task_update` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
-| `plan` | packages/plan/plan-mode/src/index.ts:252 | — | NONE | MISSING | — |
-| `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | — | NONE | MISSING | — |
 | `plan` | packages/plan/plan-mode/src/index.ts:252 | `plan` | `src/magitech_harness/plan/tools.py` | DONE | `test_plan.py` |
 | `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | `exit_plan_mode` | `src/magitech_harness/plan/tools.py` | DONE | `test_plan.py` |
 | `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | OUT OF SCOPE | Depends on out-of-scope `workflow-ptc` JS runtime (row 77). |
