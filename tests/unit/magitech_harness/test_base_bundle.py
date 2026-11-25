@@ -101,6 +101,22 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "tool-bash",
+        "name": "magitech_harness.tools.bash_tool:apply",
+        "disabled_on": ["win32"],
+        "config": {},
+    },
+    {
+        "id": "tool-fs",
+        "name": "magitech_harness.tools.fs:apply",
+        "config": {"apply_patch": False},
+    },
+    {
+        "id": "tool-fs-search",
+        "name": "magitech_harness.tools.fs_search:apply",
+        "config": {},
+    },
+    {
         "id": "jobs",
         "name": "magitech_harness.jobs.local:LocalJobRegistry",
         "config": {},

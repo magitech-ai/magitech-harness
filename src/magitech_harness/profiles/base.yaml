@@ -36,6 +36,17 @@
   name: magitech_harness.shell.pwsh_local:LocalPwshExecutor
   enabled_on: [win32]
   config: {}
+- id: tool-bash
+  name: magitech_harness.tools.bash_tool:apply
+  disabled_on: [win32]
+  config: {}
+- id: tool-fs
+  name: magitech_harness.tools.fs:apply
+  config:
+    apply_patch: false
+- id: tool-fs-search
+  name: magitech_harness.tools.fs_search:apply
+  config: {}
 - id: jobs
   name: magitech_harness.jobs.local:LocalJobRegistry
   config: {}
