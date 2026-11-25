@@ -472,9 +472,9 @@ class TeamService(Service):
 
     def _resolve_assignee(self, caller: Any, target: str) -> tuple[str, str | None]:
         root_session = self._root_session(caller)
-        if target == getattr(root_session, "session_id", None) or target == self._caller_id(
-            caller
-        ):
+        if target == getattr(
+            root_session, "session_id", None
+        ) or target == self._caller_id(caller):
             return target, self._names(caller).get("self")
         subagents = self._subagents()
         if subagents is None:
