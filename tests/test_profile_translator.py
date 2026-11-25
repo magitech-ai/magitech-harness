@@ -356,3 +356,27 @@ def test_module_cli_via_subprocess() -> None:
     )
     assert proc.returncode == 2
     assert "usage:" in proc.stderr
+
+
+def test_translate_file_with_js_expressions(tmp_path: Path) -> None:
+    """A self-contained fixture proves the tag constructor without the DSH clone.
+
+    CI has no DSH checkout, so this keeps `!!js` capture covered there.
+    """
+    source = tmp_path / "patch.yml"
+    source.write_text(
+        "- insert:\n"
+        "    - id: tool-bash\n"
+        "      name: dsh-tool-bash\n"
+        "      disabled: !!js process.platform === 'win32'\n"
+        "    - id: session-persistence-jsonl\n"
+        "      name: dsh-session-persistence-jsonl\n"
+        "      config:\n"
+        "        root: !!js dshHomePath('sessions')\n"
+    )
+    rows = translate_file(source)
+    by_id = {row["id"]: row for row in rows}
+    assert by_id["tool-bash"]["disabled_on"] == ["win32"]
+    assert by_id["session-persistence-jsonl"]["config"]["root"] == (
+        "${MAGITECH_SESSIONS_DIR}"
+    )
