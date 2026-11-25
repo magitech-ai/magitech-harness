@@ -446,3 +446,45 @@ async def test_immediate_commit_narrates(harness: Any) -> None:
     assert service.set(agent, True) == "committed"
     assert "switched this session to plan mode" in injected[0]["content"][0]["text"]
     assert injected[0]["source"]["form"] == "notice"
+
+
+def test_plan_section_text_and_steering(harness: Any) -> None:
+    from magitech_harness.plan.tools import _plan
+
+    service: PlanModeController = harness.planMode
+    sections: list[Any] = []
+    ctx2 = Context()
+    ctx2.provide("planMode", service)
+    ctx2.provide(
+        "tools",
+        type("T", (), {"register": lambda self, definition, options=None: None})(),
+    )
+    ctx2.provide(
+        "systemPrompt",
+        type(
+            "SP",
+            (),
+            {
+                "section": lambda self, section: sections.append(section),
+                "get_section_order": lambda self, name: 1000,
+            },
+        )(),
+    )
+    apply_tools(ctx2, {})
+    text = sections[0]["text"]
+    assert text({}) == ""
+    agent = _agent(harness, "section-root")
+    assert text({"agent": agent}) == ""
+    agent.session.append("plan/mode", {"active": True})
+    assert text({"agent": agent}) == PLAN_SECTION
+
+    steered: list[Any] = []
+    agent2 = SimpleNamespace(
+        id="steer-root",
+        session=harness.sessions.create("steer-root"),
+        steer=lambda message: steered.append(message),
+    )
+    _plan(service, {"action": "off", "message": "  note  "}, {"agent": agent2})
+    assert "note" in steered[0]["content"][0]["text"]
+    agent3 = SimpleNamespace(id="no-steer", session=harness.sessions.create("no-steer"))
+    _plan(service, {"action": "off", "message": "note"}, {"agent": agent3})

@@ -13,6 +13,7 @@ from typing import Any
 from animas import Context
 
 from magitech_harness.context.user_questions import UserQuestionError
+from magitech_harness.llm.message import create_user_message
 from magitech_harness.plan.service import (
     APPROVE_LABEL,
     EXIT_DESCRIPTION,
@@ -125,7 +126,14 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
             {
                 "name": "tool:plan",
                 "order": system_prompt.get_section_order("TOOL_PLAN"),
-                "text": PLAN_SECTION,
+                "text": lambda context: (
+                    PLAN_SECTION
+                    if (
+                        context.get("agent") is not None
+                        and service.selected_active(context["agent"])
+                    )
+                    else ""
+                ),
             }
         )
 
@@ -140,6 +148,16 @@ def _plan(
     if action not in ("on", "off"):
         raise ToolArgsError(["action must be 'on' or 'off'"])
     status = service.set(agent, action == "on")
+    message = args.get("message")
+    if isinstance(message, str) and message.strip():
+        steer = getattr(agent, "steer", None)
+        if callable(steer):
+            steer(
+                create_user_message(
+                    content=[{"type": "text", "text": message.strip()}],
+                    source={"kind": "user"},
+                )
+            )
     return {"status": status}
 
 

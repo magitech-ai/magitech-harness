@@ -90,6 +90,7 @@ class PlanModeController(Service):
             system_prompt.section(
                 {
                     "name": "plan:status",
+                    "retirement": "Plan mode is inactive.",
                     "order": order + 1,
                     "replacement": "",
                     "text": lambda context: self._status_text(context),
