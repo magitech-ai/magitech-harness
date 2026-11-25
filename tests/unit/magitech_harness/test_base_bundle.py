@@ -305,6 +305,16 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "agent-team",
+        "name": "magitech_harness.team.service:TeamService",
+        "config": {"maxTasks": 256, "defaultEnabled": False},
+    },
+    {
+        "id": "tool-agent-team",
+        "name": "magitech_harness.team.tools:apply",
+        "config": {},
+    },
+    {
         "id": "goals",
         "name": "magitech_harness.goal.service:GoalService",
         "config": {"defaultMaxGoalRounds": 256},
