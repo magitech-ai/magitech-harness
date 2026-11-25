@@ -201,6 +201,7 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
         "job_output",
         "list_agents",
         "list_subagent_models",
+        "plan",
         "read_file",
         "send_message",
         "subagent",

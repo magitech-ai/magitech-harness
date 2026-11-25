@@ -320,6 +320,18 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "plan-mode",
+        "name": "magitech_harness.plan.service:PlanModeController",
+        "config": {
+            "section": "Explore and design before acting. Present the complete plan as markdown for user approval before implementation."
+        },
+    },
+    {
+        "id": "tool-plan",
+        "name": "magitech_harness.plan.tools:apply",
+        "config": {},
+    },
+    {
         "id": "goals",
         "name": "magitech_harness.goal.service:GoalService",
         "config": {"defaultMaxGoalRounds": 256},
