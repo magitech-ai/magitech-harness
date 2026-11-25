@@ -1417,3 +1417,17 @@ async def test_cli_headless_script_with_existing_provider(
     )
     assert code == 0
     assert "OK" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_repl_dispatcher_duplicate_registration_and_dispose(tmp_path: Path) -> None:
+    """A second dispatcher reuses existing registrations and disposal is callable."""
+    ctx = create_harness(storage_dir=tmp_path / "duplicate")
+    await ctx.flush()
+    s = ctx.sessions.create("dupe")
+    out: list[str] = []
+    first = ReplDispatcher(ctx, s, out=lambda *a: out.append(" ".join(map(str, a))))
+    second = ReplDispatcher(ctx, s, out=lambda *a: out.append(" ".join(map(str, a))))
+    assert await second.dispatch("/help") is False
+    disposer = first._dispose_commands()
+    disposer()
