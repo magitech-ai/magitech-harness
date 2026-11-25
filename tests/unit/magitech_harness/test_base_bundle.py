@@ -89,6 +89,11 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "image-offload",
+        "name": "magitech_harness.compaction.image_offload:apply",
+        "config": {},
+    },
+    {
         "id": "tool-result-pruner",
         "name": "magitech_harness.compaction.pruner:apply",
         "config": {
