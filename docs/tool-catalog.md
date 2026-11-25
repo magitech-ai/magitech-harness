@@ -73,6 +73,13 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 |---|---|---|
 | `web_search` | `queries` (req, array of strings) | Searches the web through a registered search provider selected by the current model route. Fails with a `WEB_PROVIDER_*` error when none is registered; results are untrusted data. |
 | `web_fetch` | `url` (req, http(s)) | Fetches an HTTP(S) URL through the anonymous fetcher (which can reach intranet/local addresses), decodes HTML/text within byte/char caps, and treats the body as untrusted data. |
+## Plan mode
+
+| Tool | Arguments | Behavior |
+|---|---|---|
+| `plan` | `action` (`on`/`off`, req), `message` | Enters or leaves plan mode. A mid-turn selection is committed at the next accepted step boundary, before the model request is assembled. |
+| `exit_plan_mode` | `plan` (req, markdown starting with `#`) | Admitted after the session first enters plan mode. Presents the plan for user approval; approval leaves plan mode, and feedback keeps the model planning. |
+
 ## Agent Teams
 
 Team tools are admitted only while the shared task board is enabled for the session.

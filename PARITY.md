@@ -122,7 +122,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
 | 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | PARTIAL | automatic continuation rounds not wired into the loop; entry/complete/block authority is implemented and probe-tested |
 | 63 | command-goal | `@deepseek-ai/dsh-command-goal` | packages/goal/command-goal/src/index.ts | magitech-harness | `src/magitech_harness/goal/command.py` | DONE | `test_goal.py`, `test_cli.py` |
-| 64 | plan-mode | `@deepseek-ai/dsh-plan-mode` | packages/plan/plan-mode/src/index.ts | magitech-harness (base tool) | NONE | MISSING | `plan`, `exit_plan_mode` |
+| 64 | plan-mode | `@deepseek-ai/dsh-plan-mode` | packages/plan/plan-mode/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/plan/` | DONE | `test_plan.py` (durable `plan` projection, step-boundary admission, conditional `exit_plan_mode` with user review) |
 | 65 | token-meter | `@deepseek-ai/dsh-token-meter` | packages/llm/token-meter/src/index.ts | magitech-harness | `src/magitech_harness/llm/token_meter.py` | DONE | `test_token_meter.py` |
 | 66 | compaction-basic | `@deepseek-ai/dsh-compaction-basic` | packages/compaction/compaction-basic/src/index.ts | magitech-harness | `src/magitech_harness/compaction/service.py` | DONE | `test_compaction_service.py` |
 | 67 | command-compact | `@deepseek-ai/dsh-command-compact` | packages/compaction/command-compact/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (`/compact` → `session/compact` waterfall) | DONE | `test_cli.py` |
@@ -190,6 +190,8 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `team_task_update` | packages/team/tool-agent-team/src/index.ts:202 | `team_task_update` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
 | `plan` | packages/plan/plan-mode/src/index.ts:252 | — | NONE | MISSING | — |
 | `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | — | NONE | MISSING | — |
+| `plan` | packages/plan/plan-mode/src/index.ts:252 | `plan` | `src/magitech_harness/plan/tools.py` | DONE | `test_plan.py` |
+| `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | `exit_plan_mode` | `src/magitech_harness/plan/tools.py` | DONE | `test_plan.py` |
 | `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | OUT OF SCOPE | Depends on out-of-scope `workflow-ptc` JS runtime (row 77). |
 | `web_search` | packages/web/tool-web/src/search.ts:367 | `web_search` | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` |
 | `web_fetch` | packages/web/tool-web/src/fetch.ts:460 | `web_fetch` | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` |
@@ -200,7 +202,6 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 These rows/tools are in DSH base and have no Python implementation. Each needs an executable probe to reach DONE.
 
 1. `job_output` / `job_list` / `job_kill` — `src/magitech_harness/tools/jobs.py` (new) — probe `test_job_tools.py`
-4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
 7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
 10. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
 
