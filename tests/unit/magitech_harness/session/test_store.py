@@ -1256,6 +1256,8 @@ def _user_event(seq: int, text: str = "hi") -> SessionEvent:
 
 def _minimal_payload(type: str) -> dict:
     """A payload that passes payload validation for one event type."""
+    if type == "user/question":
+        return {"callId": "q1", "questions": [{"id": "q1", "question": "Pick"}]}
     if type == "user/message":
         return {
             "role": "user",
@@ -1347,7 +1349,7 @@ def _write_v4_file(file_path: Path, session_id: str, rows: list[str]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_session_appends_all_63_types_and_replays_in_order(
+async def test_session_appends_all_64_types_and_replays_in_order(
     tmp_path: Path,
 ) -> None:
     """Verifies a session appends every known type and replays them in order."""
@@ -1366,9 +1368,9 @@ async def test_session_appends_all_63_types_and_replays_in_order(
     )
     # Reloading a log holding image/offload needs its projection supplied.
     service.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
-    session = service.create("all63")
+    session = service.create("all64")
     types = sorted(KNOWN_SESSION_EVENT_TYPES)
-    assert len(types) == 63
+    assert len(types) == 64
     for seq, type in enumerate(types):
         event = service.log_event(
             session,
@@ -1379,23 +1381,23 @@ async def test_session_appends_all_63_types_and_replays_in_order(
         assert event.seq == seq
         assert event.type == type
     assert [event.type for event in session.events] == types
-    assert [event.seq for event in session.events] == list(range(63))
+    assert [event.seq for event in session.events] == list(range(64))
     await service.flush(session)
     # The canonical user/message is title-eligible, so the title service
     # commits a deterministic fallback title for it; drain the deferred
     # work, persist it, and expect it as the log's final event.
     await title.drain()
     await service.flush(session)
-    assert service.close("all63") is True
+    assert service.close("all64") is True
     ctx2 = Context()
     JsonlSessionPersistenceService(ctx2, {"root": tmp_path})
     service2 = SessionService(ctx2, {"base_storage_dir": tmp_path})
     service2.store.register_message_projection(_ImageOffloadProjection())  # type: ignore[arg-type]
-    reloaded = service2.load("all63")
+    reloaded = service2.load("all64")
     assert reloaded is not None
     assert [event.type for event in reloaded.events] == [*types, "session/title"]
-    assert [event.seq for event in reloaded.events] == list(range(64))
-    fallback = reloaded.events[63]
+    assert [event.seq for event in reloaded.events] == list(range(65))
+    fallback = reloaded.events[64]
     assert fallback.payload["title"] == "x"
     assert fallback.payload["source"] == {"kind": "fallback"}
 

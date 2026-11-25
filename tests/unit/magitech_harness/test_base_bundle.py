@@ -89,6 +89,15 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "tool-result-pruner",
+        "name": "magitech_harness.compaction.pruner:apply",
+        "config": {
+            "thresholdChars": 8192,
+            "headChars": 4096,
+            "tailChars": 1024,
+        },
+    },
+    {
         "id": "bash-local",
         "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
         "disabled_on": ["win32"],
@@ -238,6 +247,21 @@ EXPECTED_ROWS = [
     {
         "id": "agent",
         "name": "magitech_harness.agent.registry:AgentRegistry",
+        "config": {},
+    },
+    {
+        "id": "agent-default-model",
+        "name": "magitech_harness.agent.default_model:AgentDefaultModel",
+        "config": {"provider": "kilo", "model": "kilo-auto/free"},
+    },
+    {
+        "id": "user-questions",
+        "name": "magitech_harness.context.user_questions:UserQuestionService",
+        "config": {},
+    },
+    {
+        "id": "tool-ask-user",
+        "name": "magitech_harness.context.user_questions:apply",
         "config": {},
     },
     {

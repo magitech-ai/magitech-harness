@@ -69,6 +69,7 @@ OWNER_EVENT_TYPES: dict[str, tuple[str, ...]] = {
     "jobs/jobs": ("job/registered", "job/settled"),
     "llm/llm-retry": ("llm/retry", "llm/retry-started"),
     "interaction/permission-presets": ("permission/preset",),
+    "interaction/user-questions": ("user/question",),
     "plan/plan-mode": ("plan/mode",),
     "sandbox/sandbox-policy": ("sandbox/mode",),
     "schedule/schedule": ("schedule/change",),
@@ -140,6 +141,7 @@ class EventType(str, Enum):
     STEP_START = "step/start"
     STEP_END = "step/end"
     USER_MESSAGE = "user/message"
+    USER_QUESTION = "user/question"
     ASSISTANT_MESSAGE = "assistant/message"
     TOOL_CALL = "tool/call"
     TOOL_RESULT = "tool/result"

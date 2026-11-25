@@ -492,6 +492,7 @@ RELEASED_V0_EVENT_DISPOSITIONS: dict[str, _PayloadDisposition] = {
     "turn/end": _disp(["turn", "reason"]),
     "turn/start": _disp(["turn"]),
     "user/message": _disp(["role", "id", "content", "source"]),
+    "user/question": _disp(["callId", "questions"]),
     "web/deepseek-search-llm-request": _disp(["endpoint", "apiVersion", "body"]),
 }
 """Exact top-level payload disposition frozen for every released-v0 event type."""
@@ -598,6 +599,7 @@ KNOWN_SESSION_EVENT_TYPES: frozenset[str] = frozenset(
         "job/registered",
         "job/settled",
         "team/mode",
+        "user/question",
         "working-directory/change",
     }
 )

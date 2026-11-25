@@ -166,13 +166,32 @@ class AgentRegistry(Service):
         return self._factory
 
     async def create(self, options: CreateAgentOptions) -> AgentHandle:
-        """Create and publish a new agent attached to the calling context."""
+        """Create and publish a new agent attached to the calling context.
+
+        A creation without ``agentOptions`` inherits the configured default
+        selection when one exists (``ctx.agentDefaultModel``); an explicit
+        selection is never overwritten.
+        """
         owner_ctx = self._caller_ctx()
         target = self._require_factory()
         receiver: Any = (
             _BoundService(target, owner_ctx) if isinstance(target, Service) else target
         )
-        return cast(AgentHandle, await receiver.create_agent(owner_ctx, options))
+        return cast(
+            AgentHandle,
+            await receiver.create_agent(owner_ctx, self._with_default_model(options)),
+        )
+
+    def _with_default_model(self, options: CreateAgentOptions) -> CreateAgentOptions:
+        """Fill missing provider/model keys from the default-model service."""
+        service = self.ctx.get("agentDefaultModel", None, strict=False)
+        if service is None or not hasattr(service, "apply_to"):
+            return options
+        current = options.get("agentOptions")
+        resolved = service.apply_to(current)
+        if resolved == (current or {}):
+            return options
+        return cast(CreateAgentOptions, {**options, "agentOptions": resolved})
 
     async def resume(self, options: ResumeAgentOptions) -> AgentHandle:
         """Resume a persisted session's agent attached to the calling context."""
