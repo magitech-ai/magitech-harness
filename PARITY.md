@@ -117,8 +117,8 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 56 | skill-filesystem | `@deepseek-ai/dsh-skill-filesystem` | packages/skill/skill-filesystem/src/index.ts | mth-components | `src/mth_components/bridges/skills_filesystem/component.py` | DONE | `test_skills_filesystem.py` |
 | 57 | tool-skill | `@deepseek-ai/dsh-tool-skill` | packages/skill/tool-skill/src/index.ts | mth-components | `src/mth_components/bridges/skills_loader/component.py` | DONE | `test_skills_loader.py` |
 | 58 | upstream-skills | `@deepseek-ai/dsh-upstream-skills` | packages/connector/upstream-skills/src/index.ts | mth-components | NONE | PARTIAL | upstream skills not mounted |
-| 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (REPL dispatcher) | PARTIAL | `/help`, `/model`, `/session`, `/compact`, `/clear`, `/goal` are present; the durable command registry and `command/run`/`command/done` events are not |
-| 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | mth-components | NONE | PARTIAL | command feedback |
+| 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | `src/magitech_harness/commands/` | DONE | `test_commands.py` (durable registry, alias resolution, `command/run`/`command/done` lifecycle, REPL wired through the registry) |
+| 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | magitech-harness | `src/magitech_harness/feedback/` | DONE | `test_commands.py` (`feedback/record` event, `sessionFeedback` service, `/feedback` command) |
 | 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
 | 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | PARTIAL | automatic continuation rounds not wired into the loop; entry/complete/block authority is implemented and probe-tested |
 | 63 | command-goal | `@deepseek-ai/dsh-command-goal` | packages/goal/command-goal/src/index.ts | magitech-harness | `src/magitech_harness/goal/command.py` | DONE | `test_goal.py`, `test_cli.py` |
@@ -221,8 +221,8 @@ registrations remain.
 | `agent-instructions` | Row not mounted; instruction surface is via system-prompt sections. | Malcom (documented gap) |
 | `upstream-skills` | Upstream skills download nothing until registered; no local files to pin. | Malcom (documented gap) |
 | `image-offload` | Implemented as a durable message projection + `agent/request-error` retry (row 84 DONE). | Resolved by implementation |
-| `commands` | REPL slash commands exist; the durable command registry and `command/run`/`command/done` events are not. | **No acceptance recorded** — open gap |
-| `command-feedback` | Feedback command not mounted. | **No acceptance recorded** — open gap |
+| `commands` | Implemented as a durable registry with lifecycle events (row 59 DONE). | Resolved by implementation |
+| `command-feedback` | Implemented as `feedback/record` plus `/feedback` (row 60 DONE). | Resolved by implementation |
 | `goal-round-driver` | Automatic continuation rounds are not wired into the loop; entry/complete/block authority is implemented and probed. | **No acceptance recorded** — open gap |
 
 ## OUT OF SCOPE (recorded, not counted)

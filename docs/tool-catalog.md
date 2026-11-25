@@ -93,6 +93,22 @@ revision from `team_task_get` or `team_task_list`.
 | `team_task_get` | `task_id` (req) | Reads the complete latest value of one task. |
 | `team_task_update` | `task_id` (req), `expected_revision` (req), `action` (req), plus action-specific fields | Compare-and-set transition: `claim`, `release`, `edit`, `set_dependencies`, `complete`, `reopen`, `reassign`, `delete`. |
 
+## Human commands
+
+Slash commands are dispatched through `ctx.commands`. A resolved command logs
+`command/run` before its handler and `command/done` after settlement.
+
+| Command | Behavior |
+|---|---|
+| `/help` | Lists available commands. |
+| `/model [name]` | Views or sets the active model slug. |
+| `/session list|new|show <id>` | Lists, creates or inspects sessions. |
+| `/compact` | Triggers context compaction. |
+| `/goal [arg]` | Shows or manages the session goal. |
+| `/feedback <text>` | Records a log-only feedback entry for the session. |
+| `/clear` | Clears the console. |
+| `/exit`, `/quit` | Leaves the REPL. |
+
 ## Language and skills
 
 | Tool | Arguments | Behavior |
