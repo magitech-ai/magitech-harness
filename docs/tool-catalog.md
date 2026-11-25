@@ -71,8 +71,8 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 
 | Tool | Arguments | Behavior |
 |---|---|---|
-| `web_search` | `queries` (req, array of strings) | Searches the web through a registered search provider. Fails with `WEB_SEARCH_UNAVAILABLE` when no provider is registered for the model route; results are untrusted data. |
-| `web_fetch` | `url` (req, http(s)) | Fetches a public HTTP(S) URL through the anonymous fetcher, decodes HTML to text, bounds output, and treats the body as untrusted data. |
+| `web_search` | `queries` (req, array of strings) | Searches the web through a registered search provider selected by the current model route. Fails with a `WEB_PROVIDER_*` error when none is registered; results are untrusted data. |
+| `web_fetch` | `url` (req, http(s)) | Fetches an HTTP(S) URL through the anonymous fetcher (which can reach intranet/local addresses), decodes HTML/text within byte/char caps, and treats the body as untrusted data. |
 
 ## Language and skills
 

@@ -24,6 +24,21 @@ FETCH_SECTION = (
 )
 
 
+def _route_of(exec_view: Any) -> str | None:
+    """Read the provider route of the model request this tool call serves."""
+    agent = exec_view.get("agent") if isinstance(exec_view, dict) else None
+    if agent is None:
+        return None
+    session = getattr(agent, "session", None)
+    context = session.request_context() if session is not None else None
+    if isinstance(context, dict) and isinstance(context.get("provider"), str):
+        return str(context["provider"])
+    options = getattr(agent, "options", None)
+    if isinstance(options, dict) and isinstance(options.get("provider"), str):
+        return str(options["provider"])
+    return None
+
+
 def _render_search(_args: Any, value: dict[str, Any]) -> list[dict[str, str]]:
     parts: list[str] = []
     if value.get("content"):
@@ -55,25 +70,33 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
     """Mount the two web tools over ``ctx.web``."""
     cfg = {**(config or {}), **kwargs}
     web: WebService = ctx.web
-    search_timeout = int(cfg.get("searchTimeoutMs", web.search_timeout_ms))
+    search_timeout = int(cfg.get("searchTimeoutMs", 60_000))
     fetch_enabled = bool(cfg.get("fetch", True))
-    fetch_provider = cfg.get("fetchProvider")
+
+    async def search_when(act_ctx: dict[str, Any]) -> bool:
+        return await web.search_ready(_route_of(act_ctx))
+
+    async def fetch_when(act_ctx: dict[str, Any]) -> bool:
+        return await web.fetch_ready(_route_of(act_ctx))
 
     async def _search(args: dict[str, Any], exec_view: Any) -> dict[str, Any]:
-        provider = (exec_view.get("modelSelection") or {}).get("provider")
-        if not await web.search_ready(provider):
-            from magitech_harness.llm.error import HarnessError
-
-            raise HarnessError(
-                "web_search is unavailable for this route", "WEB_SEARCH_UNAVAILABLE"
+        queries = args.get("queries", [])
+        results = []
+        for query in queries:
+            results.append(
+                await web.search(
+                    {
+                        "query": query,
+                        "maxResults": web.max_results,
+                        "llmProvider": _route_of(exec_view),
+                    }
+                )
             )
-        return await web.search(args.get("queries", []), provider)
+        return _merge_results(results)
 
-    async def _fetch(args: dict[str, Any], _exec_view: Any) -> dict[str, Any]:
-        return await web.fetch(
-            {"url": args.get("url")},
-            fetch_provider if isinstance(fetch_provider, str) else None,
-        )
+    async def _fetch(args: dict[str, Any], exec_view: Any) -> dict[str, Any]:
+        del exec_view
+        return await web.fetch({"url": args.get("url")})
 
     ctx.tools.register(
         define_tool(
@@ -118,7 +141,8 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
             },
             timeoutMs=search_timeout,
             execute=_search,
-        )
+        ),
+        {"when": search_when},
     )
 
     if fetch_enabled:
@@ -184,7 +208,8 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
                     "render": _render_fetch,
                 },
                 execute=_fetch,
-            )
+            ),
+            {"when": fetch_when},
         )
 
     system_prompt = ctx.get("systemPrompt", None, strict=False)
@@ -206,6 +231,36 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
             )
 
 
+def _merge_results(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge per-query results into one bounded model-facing result."""
+    sources: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    content: list[str] = []
+    truncated = False
+    for result in results:
+        if result.get("content"):
+            content.append(str(result["content"]))
+        for source in result.get("sources", []):
+            url = source.get("url")
+            if url and url not in seen:
+                seen.add(url)
+                sources.append(source)
+        truncated = truncated or bool(result.get("truncated", False))
+    return {
+        **({"content": "\n".join(content)} if content else {}),
+        "sources": sources,
+        "truncated": truncated,
+    }
+
+
 apply.inject = ["tools", "web"]  # type: ignore[attr-defined]
 
-__all__ = ["FETCH_SECTION", "SEARCH_SECTION", "apply"]
+__all__ = [
+    "FETCH_SECTION",
+    "SEARCH_SECTION",
+    "_merge_results",
+    "_render_fetch",
+    "_render_search",
+    "_route_of",
+    "apply",
+]
