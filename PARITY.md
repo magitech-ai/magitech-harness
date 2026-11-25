@@ -126,14 +126,14 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 65 | token-meter | `@deepseek-ai/dsh-token-meter` | packages/llm/token-meter/src/index.ts | magitech-harness | `src/magitech_harness/llm/token_meter.py` | DONE | `test_token_meter.py` |
 | 66 | compaction-basic | `@deepseek-ai/dsh-compaction-basic` | packages/compaction/compaction-basic/src/index.ts | magitech-harness | `src/magitech_harness/compaction/service.py` | DONE | `test_compaction_service.py` |
 | 67 | command-compact | `@deepseek-ai/dsh-command-compact` | packages/compaction/command-compact/src/index.ts | magitech-harness | `src/magitech_harness/cli.py` (`/compact` → `session/compact` waterfall) | DONE | `test_cli.py` |
-| 68 | subagent | `@deepseek-ai/dsh-subagent` | packages/core/subagent/src/index.ts | magitech-harness | NONE | MISSING | subagent service + lineage |
+| 68 | subagent | `@deepseek-ai/dsh-subagent` | packages/core/subagent/src/index.ts | magitech-harness | `src/magitech_harness/subagent/service.py` | DONE | `test_manager.py`, `test_surface.py`; lineage logged as `subagent/descriptor` |
 | 69 | agent-team | `@deepseek-ai/dsh-agent-team` | packages/team/agent-team/src/index.ts | magitech-harness | NONE | MISSING | `team_task_*` tools |
 | 70 | tool-agent-team | `@deepseek-ai/dsh-tool-agent-team` | packages/team/tool-agent-team/src/index.ts:119 | magitech-harness (base tool) | NONE | MISSING | team tools |
-| 71 | subagent-spawn-in-process | `@deepseek-ai/dsh-subagent-spawn-in-process` | packages/subagent/subagent-spawn-in-process/src/index.ts | magitech-harness | NONE | MISSING | spawn provider |
-| 72 | subagent-fork-in-process | `@deepseek-ai/dsh-subagent-fork-in-process` | packages/subagent/subagent-fork-in-process/src/index.ts | magitech-harness | NONE | MISSING | fork provider |
-| 73 | tool-subagent-control | `@deepseek-ai/dsh-tool-subagent-control` | packages/subagent/tool-subagent-control/src/index.ts:45 | magitech-harness (base tool) | NONE | MISSING | `send_message`, `interrupt_agent` |
-| 74 | tool-subagent | `@deepseek-ai/dsh-tool-subagent` | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | NONE | MISSING | `invoke_subagent` (+ list_subagent_models) |
-| 75 | tool-subagent-fork | `@deepseek-ai/dsh-tool-subagent` (fork) | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | NONE | MISSING | `invoke_subagent` fork variant |
+| 71 | subagent-spawn-in-process | `@deepseek-ai/dsh-subagent-spawn-in-process` | packages/subagent/subagent-spawn-in-process/src/index.ts | magitech-harness | `src/magitech_harness/subagent/providers.py` | DONE | `test_surface.py` |
+| 72 | subagent-fork-in-process | `@deepseek-ai/dsh-subagent-fork-in-process` | packages/subagent/subagent-fork-in-process/src/index.ts | magitech-harness | `src/magitech_harness/subagent/providers.py` | DONE | `test_surface.py` (replays parent events with surface ops) |
+| 73 | tool-subagent-control | `@deepseek-ai/dsh-tool-subagent-control` | packages/subagent/tool-subagent-control/src/index.ts:45 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`, `test_manager.py` |
+| 74 | tool-subagent | `@deepseek-ai/dsh-tool-subagent` | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_surface.py`; tool name `subagent`, model-discovery tool not ported |
+| 75 | tool-subagent-fork | `@deepseek-ai/dsh-tool-subagent` (fork) | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_manager.py`; tool name `subagent_fork` |
 | 76 | ptc-runtime | `@deepseek-ai/dsh-ptc-runtime-node` | packages/ptc-runtime/ptc-runtime-node/src/ | DSH-specific | NONE | OUT OF SCOPE | PTC Node runtime |
 | 77 | workflow-ptc | `@deepseek-ai/dsh-workflow-ptc` | packages/workflow/workflow-ptc/src/ | DSH-specific | NONE | OUT OF SCOPE | |
 | 78 | tool-workflow | `@deepseek-ai/dsh-tool-workflow` | packages/workflow/tool-workflow/src/index.ts | magitech-harness | NONE | MISSING | `workflow` tool |

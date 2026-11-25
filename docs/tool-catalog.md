@@ -59,7 +59,12 @@ suffixed names. The LSP bridge accepts both spellings in its post-execute hook.
 
 | Tool | Arguments | Behavior |
 |---|---|---|
-| `invoke_subagent` | `role` (req), `prompt` (req), `agent_name`, `model`, `workspace` (`inherit`/`branch`), `allowed_tools` [], `wait` | Spawns a child harness, optionally in a git worktree; copies providers; pins approval to `never`. |
+| `subagent` | `description` (req), `prompt` (req), `name`, `model`, `workspace` (`inherit`/`branch`), `allowed_tools` [], `wait` | Delegates to a managed child through the registered `spawn` provider; the child is registered in the live tree and logged as `subagent/descriptor`. |
+| `subagent_fork` | same as `subagent` | Delegates through the `fork` provider, seeding the child session from the parent's completed events. |
+| `send_message` | `agent` (req), `message` (req) | Delivers a follow-up instruction to an agent in the caller's tree. |
+| `list_agents` | none | Lists the root and all reachable descendants with status and capacity. |
+| `interrupt_agent` | `agent` (req) | Requests cooperative interruption of a live child. |
+| `wait_agent` | `timeout_ms` (10000–3600000, default 30000) | Waits for pending next-step input; reports whether it timed out. |
 | `send_message` | `subagent_id` (req), `message` (req) | Runs another turn on an existing subagent. |
 | `manage_subagents` | `action` (req: `list`/`kill`/`kill_all`), `subagent_ids` [] | Inspects or terminates subagents, aborting tasks and removing worktrees. |
 
