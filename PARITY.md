@@ -136,7 +136,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 75 | tool-subagent-fork | `@deepseek-ai/dsh-tool-subagent` (fork) | packages/subagent/tool-subagent/src/index.ts:103 | magitech-harness (base tool) | `src/magitech_harness/subagent/tools.py` | DONE | `test_manager.py`; tool name `subagent_fork` |
 | 76 | ptc-runtime | `@deepseek-ai/dsh-ptc-runtime-node` | packages/ptc-runtime/ptc-runtime-node/src/ | DSH-specific | NONE | OUT OF SCOPE | PTC Node runtime |
 | 77 | workflow-ptc | `@deepseek-ai/dsh-workflow-ptc` | packages/workflow/workflow-ptc/src/ | DSH-specific | NONE | OUT OF SCOPE | |
-| 78 | tool-workflow | `@deepseek-ai/dsh-tool-workflow` | packages/workflow/tool-workflow/src/index.ts | magitech-harness | NONE | MISSING | `workflow` tool |
+| 78 | tool-workflow | `@deepseek-ai/dsh-tool-workflow` | packages/workflow/tool-workflow/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | The `workflow` tool executes JavaScript orchestration scripts through `@deepseek-ai/dsh-workflow-ptc` (row 77, already out of scope). There is no Python/JS workflow engine in this harness; the seam would have no backend. |
 | 79 | timeout-policy | `@deepseek-ai/dsh-tool-call-timeout-policy` | packages/guard/timeout-policy/src/index.ts | magitech-harness | `src/magitech_harness/tools/timeout_guard.py` | DONE | `test_timeout_guard.py` |
 | 80 | spill-local | `@deepseek-ai/dsh-spill-local` | packages/spill/spill-local/src/index.ts | magitech-harness | `src/magitech_harness/spill/local.py` | DONE | `test_spill_local.py` |
 | 81 | spill-policy | `@deepseek-ai/dsh-spill-policy` | packages/spill/spill-policy/src/index.ts | magitech-harness | `src/magitech_harness/spill/policy.py` | DONE | `test_spill_policy.py` |
@@ -147,8 +147,8 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 86 | tool-goal | `@deepseek-ai/dsh-tool-goal` | packages/goal/tool-goal/src/index.ts:197 | magitech-harness (base tool) | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
 | 87 | repeat-tool-reminder | `@deepseek-ai/dsh-repeat-tool-reminder` | packages/guard/repeat-tool-reminder/src/index.ts | magitech-harness | `src/magitech_harness/tools/repeat_guard.py` | DONE | `test_repeat_guard.py` |
 | 88 | web | `@deepseek-ai/dsh-web` | packages/web/web/src/index.ts | magitech-harness | `src/magitech_harness/web/service.py` | DONE | `test_web.py` (provider protocol, route selection, duplicate-id rejection, `list_providers`, `web/providers-changed`, `WEB_*` taxonomy, central result cap). Typert Remote RPC wrapper is out of scope (row 12). |
-| 89 | web-search-deepseek | `@deepseek-ai/dsh-web-search-deepseek` | packages/web/web-search-deepseek/src/index.ts | mth-components | NONE | MISSING | web search provider |
-| 90 | web-deepseek-api | `@deepseek-ai/dsh-web-deepseek-api` | packages/web/web-deepseek-api/src/index.ts | mth-components | NONE | MISSING | |
+| 89 | web-search-deepseek | `@deepseek-ai/dsh-web-search-deepseek` | packages/web/web-search-deepseek/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | DeepSeek account-sign-in provider: requires `dsh-deepseek-auth`, `dsh-credentials` and `dsh-launch-environment`, none of which exist in this harness (default route is Kilo). The provider-neutral `ctx.web` seam is ported (row 88) and accepts any registered search provider. |
+| 90 | web-deepseek-api | `@deepseek-ai/dsh-web-deepseek-api` | packages/web/web-deepseek-api/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | DeepSeek Search/Fetch API provider with the same `dsh-deepseek-auth` account-credential dependency as row 89; no equivalent account service in this harness. |
 | 91 | web-fetch-http | `@deepseek-ai/dsh-web-fetch-http` | packages/web/web-fetch-http/src/index.ts | magitech-harness | `src/magitech_harness/web/service.py` | DONE | `test_web.py` (byte/char caps, content-type classification, charset, same-origin redirects, bounded timeout, User-Agent) |
 | 92 | tool-web | `@deepseek-ai/dsh-tool-web` | packages/web/tool-web/src/search.ts:367 | magitech-harness (base tool) | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` (`web_search`, `web_fetch`; route-aware `when` admission, untrusted-data guidance) |
 | 93 | mcp-resources | `@deepseek-ai/dsh-mcp-resources` | packages/mcp/mcp-resources/src/index.ts | mth-components | `src/mth_components/bridges/mcp/component.py` | DONE | `test_mcp_bridge.py` |
@@ -190,7 +190,7 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `team_task_update` | packages/team/tool-agent-team/src/index.ts:202 | `team_task_update` | `src/magitech_harness/team/tools.py` | DONE | `test_team.py` |
 | `plan` | packages/plan/plan-mode/src/index.ts:252 | — | NONE | MISSING | — |
 | `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | — | NONE | MISSING | — |
-| `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | MISSING | — |
+| `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | OUT OF SCOPE | Depends on out-of-scope `workflow-ptc` JS runtime (row 77). |
 | `web_search` | packages/web/tool-web/src/search.ts:367 | `web_search` | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` |
 | `web_fetch` | packages/web/tool-web/src/fetch.ts:460 | `web_fetch` | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` |
 | `ask_user_question` | packages/interaction/tool-ask-user/src/index.ts:40 | `ask_user_question` | `src/magitech_harness/context/user_questions.py` | DONE | `test_pruner_and_default_model.py` |
@@ -201,7 +201,6 @@ These rows/tools are in DSH base and have no Python implementation. Each needs a
 
 1. `job_output` / `job_list` / `job_kill` — `src/magitech_harness/tools/jobs.py` (new) — probe `test_job_tools.py`
 4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
-5. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
 7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
 10. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
 
@@ -235,6 +234,8 @@ registrations remain.
 - Experimental bundles (forges, CUA, terminal, ralph, etc.).
 - Plugin manager / config editor / settings / credentials / authorization / storage / otel telemetry as shipped rows (marketplace-owned, opt-in).
 - DSH-specific packages (deepseek-account, deepseek-auth, typert, api-gateway, remote-access, session-log-deepseek, deepseek-llm-api-extensions, cli-account, ptc-runtime, workflow-ptc, tool-executor-ptc).
+- `tool-workflow` (row 78) and its `workflow` tool: require the out-of-scope `workflow-ptc` JavaScript orchestration runtime.
+- DeepSeek account-backed web providers `web-search-deepseek` / `web-deepseek-api` (rows 89–90): require the out-of-scope `deepseek-auth` / account-credential stack; the provider-neutral web seam is ported instead.
 
 ## Acceptance summary
 
