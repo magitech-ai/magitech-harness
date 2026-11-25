@@ -120,7 +120,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 59 | commands | `@deepseek-ai/dsh-commands` | packages/interaction/commands/src/index.ts | magitech-harness | `src/magitech_harness/commands/` | DONE | `test_commands.py` (durable registry, alias resolution, `command/run`/`command/done` lifecycle, REPL wired through the registry) |
 | 60 | command-feedback | `@deepseek-ai/dsh-command-feedback` | packages/feedback/command-feedback/src/index.ts | magitech-harness | `src/magitech_harness/feedback/` | DONE | `test_commands.py` (`feedback/record` event, `sessionFeedback` service, `/feedback` command) |
 | 61 | goal | `@deepseek-ai/dsh-goal` | packages/goal/goal/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/goal/{types,projection,service}.py` | DONE | `test_goal.py` |
-| 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | NONE | PARTIAL | automatic continuation rounds not wired into the loop; entry/complete/block authority is implemented and probe-tested |
+| 62 | goal-round-driver | `@deepseek-ai/dsh-goal-round-driver` | packages/goal/goal-round-driver/src/index.ts | magitech-harness | `src/magitech_harness/goal/round_driver.py` | DONE | `test_round_driver.py` (serialized driver, quiescence gates, round-limit block, checkpoint/subagent fences, disarm) |
 | 63 | command-goal | `@deepseek-ai/dsh-command-goal` | packages/goal/command-goal/src/index.ts | magitech-harness | `src/magitech_harness/goal/command.py` | DONE | `test_goal.py`, `test_cli.py` |
 | 64 | plan-mode | `@deepseek-ai/dsh-plan-mode` | packages/plan/plan-mode/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/plan/` | DONE | `test_plan.py` (durable `plan` projection, step-boundary admission, conditional `exit_plan_mode` with user review) |
 | 65 | token-meter | `@deepseek-ai/dsh-token-meter` | packages/llm/token-meter/src/index.ts | magitech-harness | `src/magitech_harness/llm/token_meter.py` | DONE | `test_token_meter.py` |
@@ -223,7 +223,7 @@ registrations remain.
 | `image-offload` | Implemented as a durable message projection + `agent/request-error` retry (row 84 DONE). | Resolved by implementation |
 | `commands` | Implemented as a durable registry with lifecycle events (row 59 DONE). | Resolved by implementation |
 | `command-feedback` | Implemented as `feedback/record` plus `/feedback` (row 60 DONE). | Resolved by implementation |
-| `goal-round-driver` | Automatic continuation rounds are not wired into the loop; entry/complete/block authority is implemented and probed. | **No acceptance recorded** — open gap |
+| `goal-round-driver` | Automatic continuation rounds are wired into the loop (row 62 DONE). | Resolved by implementation |
 
 ## OUT OF SCOPE (recorded, not counted)
 
