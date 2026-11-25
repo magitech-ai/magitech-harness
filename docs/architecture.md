@@ -77,14 +77,14 @@ The default bundle mounts, in dependency order:
 | Repeat/timeout guards | native rows in `base.yaml` | [tools](subsystems/tools.md) |
 
 The harness owns no built-in domain tools or providers; those live in
-`mth-plugins`. See [adr/0002](adr/0002-zero-builtin-domain-tools-and-providers.md)
+`mth-components`. See [adr/0002](adr/0002-zero-builtin-domain-tools-and-providers.md)
 and [adr/0012](adr/0012-tier-1-provider-substrate-in-harness.md).
 
 ## Guard ownership
 
 This is the single source of truth for which implementation owns each guard.
 "Native" means a row in [`profiles/base.yaml`](../src/magitech_harness/profiles/base.yaml)
-shipped by this repository; "marketplace" means an opt-in `mth-plugins`
+shipped by this repository; "marketplace" means an opt-in `mth-components`
 component, not mounted by the default bundle.
 
 | Guard | Canonical implementation | Default-mounted | Home |
@@ -97,7 +97,7 @@ component, not mounted by the default bundle.
 | Compaction | Marketplace `guards/compaction` (`compaction-guard`); native `ctx.compaction` service is mounted separately | Guard: no; service: yes | [compaction](subsystems/compaction.md) |
 | Output truncation | Marketplace `guards/truncation` (`truncation-guard`) | No | [shell and subprocess](subsystems/shell-and-subprocess.md) |
 
-The `mth-plugins` catalog also lists `approval-guard`, `repeat-tool-reminder`,
+The `mth-components` catalog also lists `approval-guard`, `repeat-tool-reminder`,
 and `timeout-policy`. Those are non-canonical duplicates of the native rows
 above; do not mount them in place of the native rows. ADR 0002, ADR 0009, and
 ADR 0011 record the original placement decision; this table records current
@@ -146,7 +146,7 @@ Behavior is added at a seam, not by editing the kernel:
 - **Observe an event** with `ctx.on(event, listener)`; observers cannot veto.
 - **Wrap a waterfall** with `ctx.on(event, listener, mode=WATERFALL)`; a listener
   calls `next(...)` to continue and may replace the result or decision.
-- **Register a tool** on `ctx.tools`; domain tools live in `mth-plugins`.
+- **Register a tool** on `ctx.tools`; domain tools live in `mth-components`.
 - **Register a projection** on the session projection registry.
 - **Register a compaction engine or pruner** on `ctx.compaction`.
 
@@ -161,7 +161,7 @@ and unresolvable dependencies raise at boot.
 | Gate or annotate a tool call | a `tools/*` waterfall listener (guard) |
 | Add a durable fact about a turn | a session event type with an owner |
 | Change derived history | a surface op on a surface event type |
-| Add a domain capability | an `mth-plugins` tool component |
+| Add a domain capability | an `mth-components` tool component |
 | Introduce a config knob | the owning service, with a shipped default in the config catalog |
 
 Unresolved questions: none.

@@ -1,9 +1,9 @@
 # Subagent
 
-**Source:** `mth-plugins/src/mth_plugins/tools/subagent/`.
+**Source:** `mth-components/src/mth_components/tools/subagent/`.
 
 The subagent tool spawns child harnesses to handle delegated work. It is a
-domain tool from `mth-plugins`, not part of the harness core.
+domain tool from `mth-components`, not part of the harness core.
 
 ## Tools
 

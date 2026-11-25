@@ -1,11 +1,11 @@
 # Compaction
 
-**Source:** `compaction/service.py`, `mth-plugins/src/mth_plugins/guards/compaction/`
+**Source:** `compaction/service.py`, `mth-components/src/mth_components/guards/compaction/`
 (`component.py`, `compaction.py`, `pruner.py`).
 
 Compaction folds historical session events before a balanced cut point into a
 checkpoint summary and exposes a separate tool-result pruner. The guard and
-pruner components are marketplace (`mth-plugins`) modules; the `ctx.compaction`
+pruner components are marketplace (`mth-components`) modules; the `ctx.compaction`
 service they use is native and mounted in the base bundle. See
 [Guard ownership](../architecture.md#guard-ownership).
 

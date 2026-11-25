@@ -30,7 +30,7 @@ names who accepted its reason.
   in `animas/README.md`, attributed in `animas/NOTICE`, and recorded in
   agents-home decision D-025.
 - **Python repos:** animas `0.3.0` @ release bump, magitech-harness `0.3.0` @ C6-fix
-  merge, mth-plugins `0.3.0` @ release bump merge. All clean on `main`.
+  merge, mth-components `0.3.0` @ release bump merge. All clean on `main`.
 - **Suites (100% statement + branch coverage):** animas 1228, harness 2285,
   plugins 402. CI green on all 6 legs per repo at every Phase 8 merge.
 

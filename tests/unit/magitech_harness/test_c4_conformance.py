@@ -4,7 +4,7 @@ One row per acceptance item. A row is ``done`` only when every node it cites
 exists and passes; node ids are resolved by static inspection, so the map cannot
 go stale without this suite failing. Harness node ids are resolved under
 ``tests/``; plugins-owned rows name their cross-repo proof in the note, matching
-the phase 2 conformance convention (harness CI does not check out mth-plugins).
+the phase 2 conformance convention (harness CI does not check out mth-components).
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ C4_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "done",
         "CodeAct escape battery fails closed",
         (),
-        "mth-plugins: tests/unit/mth_plugins/tools/codeact/test_sandbox_escape.py::test_escape_code_rejected",
+        "mth-components: tests/unit/mth_components/tools/codeact/test_sandbox_escape.py::test_escape_code_rejected",
     ),
     (
         "FIND-09",
@@ -114,21 +114,21 @@ C4_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "done",
         "one-shot grants are bound and never blanket-persisted",
         (),
-        "mth-plugins: tests/unit/mth_plugins/guards/approval/test_guard.py::test_project_grant_not_persisted_by_default",
+        "mth-components: tests/unit/mth_components/guards/approval/test_guard.py::test_project_grant_not_persisted_by_default",
     ),
     (
         "FIND-12",
         "done",
         "guards accept both pipeline and legacy payload shapes",
         (),
-        "mth-plugins: tests/unit/mth_plugins/guards/approval/test_guard.py::test_guard_tool_pre_execute_interception",
+        "mth-components: tests/unit/mth_components/guards/approval/test_guard.py::test_guard_tool_pre_execute_interception",
     ),
     (
         "FIND-13",
         "done",
         "sandbox enforcement defaults on (fail closed)",
         (),
-        "mth-plugins: tests/unit/mth_plugins/sandbox/test_ladder.py::test_sandbox_enforce_defaults_to_true",
+        "mth-components: tests/unit/mth_components/sandbox/test_ladder.py::test_sandbox_enforce_defaults_to_true",
     ),
     (
         "FIND-14",
@@ -144,21 +144,21 @@ C4_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         "done",
         "compaction surface replace, token budgets (0.8/0.16), and wired pruner",
         (),
-        "mth-plugins: tests/unit/mth_plugins/guards/test_compaction.py::test_compact_session_with_token_spec, tests/unit/mth_plugins/guards/compaction/test_config.py::test_budget_formulas, tests/unit/mth_plugins/guards/test_compaction.py::test_component_registers_pruner_and_prunes_session; harness: unit/magitech_harness/compaction/test_service.py::test_compaction_service_registers_engines_and_pruners",
+        "mth-components: tests/unit/mth_components/guards/test_compaction.py::test_compact_session_with_token_spec, tests/unit/mth_components/guards/compaction/test_config.py::test_budget_formulas, tests/unit/mth_components/guards/test_compaction.py::test_component_registers_pruner_and_prunes_session; harness: unit/magitech_harness/compaction/test_service.py::test_compaction_service_registers_engines_and_pruners",
     ),
     (
         "FIND-16",
         "done",
         "shell/truncation output is marked, never silent",
         (),
-        "mth-plugins: tests/unit/mth_plugins/guards/test_truncation.py::test_truncation_new_pipeline_path_truncates_text_blocks",
+        "mth-components: tests/unit/mth_components/guards/test_truncation.py::test_truncation_new_pipeline_path_truncates_text_blocks",
     ),
     (
         "FIND-17",
         "done",
         "subagent children run with the mounted bundle seams",
         (),
-        "mth-plugins: tests/integration/test_subagent_bundle_child.py::test_subagent_turn_on_bundle_child_persists",
+        "mth-components: tests/integration/test_subagent_bundle_child.py::test_subagent_turn_on_bundle_child_persists",
     ),
     (
         "FIND-18",
@@ -167,7 +167,7 @@ C4_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         (
             "integration/test_loop_hygiene_guards.py::test_repeat_chain_consecutive_reset",
         ),
-        "mth-plugins: tests/unit/mth_plugins/guards/repeat_tool_reminder/test_guard.py::test_default_thresholds",
+        "mth-components: tests/unit/mth_components/guards/repeat_tool_reminder/test_guard.py::test_default_thresholds",
     ),
     (
         "FIND-19",
@@ -176,14 +176,14 @@ C4_ROWS: tuple[tuple[str, str, str, tuple[str, ...], str], ...] = (
         (
             "integration/test_loop_hygiene_guards.py::test_timeout_guard_structures_timeout_for_sync_tool",
         ),
-        "mth-plugins: tests/unit/mth_plugins/guards/timeout_policy/test_policy.py::test_on_execute_timeout_replaces_result",
+        "mth-components: tests/unit/mth_components/guards/timeout_policy/test_policy.py::test_on_execute_timeout_replaces_result",
     ),
     (
         "FIND-20",
         "done",
         "filesystem tools confine paths to the workspace",
         (),
-        "mth-plugins: tests/unit/mth_plugins/tools/test_path_confinement.py::test_confined_path_rejects_dotdot_and_symlink",
+        "mth-components: tests/unit/mth_components/tools/test_path_confinement.py::test_confined_path_rejects_dotdot_and_symlink",
     ),
     # --- recorded v4 fixtures replayed through the harness ---
     (
@@ -277,7 +277,7 @@ def test_c4_done_rows_have_proof() -> None:
     unproven = [
         row[0]
         for row in C4_ROWS
-        if row[1] == "done" and not row[3] and "mth-plugins:" not in row[4]
+        if row[1] == "done" and not row[3] and "mth-components:" not in row[4]
     ]
     assert unproven == [], f"done rows without a live probe: {unproven}"
 

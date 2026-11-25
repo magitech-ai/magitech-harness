@@ -34,7 +34,7 @@ workspace trust gate (adr/0011); there is no Electron desktop approval UI.
 
 ## Trust and workspace gates
 
-Workspace trust is handled by a separate marketplace gate in `mth-plugins`
+Workspace trust is handled by a separate marketplace gate in `mth-components`
 (`guards/trust`, opt-in, not mounted by the default bundle — see [Guard ownership](../architecture.md#guard-ownership)),
 backed by a JSON trust store. Trust and approval are distinct: trust decides
 whether a workspace is accepted; approval decides whether a specific call

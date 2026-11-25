@@ -1,10 +1,10 @@
 # Filesystem
 
-**Source:** `fs/local.py`, `mth-plugins/src/mth_plugins/tools/fs/path_guard.py`,
-`mth-plugins/src/mth_plugins/tools/{read_file,write_file,edit_file}/`.
+**Source:** `fs/local.py`, `mth-components/src/mth_components/tools/fs/path_guard.py`,
+`mth-components/src/mth_components/tools/{read_file,write_file,edit_file}/`.
 
 The harness provides a local filesystem service (`ctx.fs`). Domain file tools
-live in `mth-plugins`. Their names are `read_file`, `write_file`, and
+live in `mth-components`. Their names are `read_file`, `write_file`, and
 `edit_file`.
 
 **[Python]** The reference tool names are `read` / `write` / `edit`. This port

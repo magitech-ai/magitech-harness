@@ -5,7 +5,7 @@
 
 The tools subsystem registers model-facing tools and runs them through a scoped
 three-phase waterfall. The harness owns no domain tools; all tools come from
-`mth-plugins` components. The exhaustive list is in the
+`mth-components` components. The exhaustive list is in the
 [tool catalog](../tool-catalog.md).
 
 ## Definition API
