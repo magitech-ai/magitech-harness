@@ -146,11 +146,11 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 85 | tool-todo | `@deepseek-ai/dsh-tool-todo` | packages/todo/tool-todo/src/index.ts:137 | magitech-harness (base tool) | `src/magitech_harness/tools/todo.py` | DONE | `tests/unit/magitech_harness/tools/test_todo.py` |
 | 86 | tool-goal | `@deepseek-ai/dsh-tool-goal` | packages/goal/tool-goal/src/index.ts:197 | magitech-harness (base tool) | `src/magitech_harness/goal/tools.py` | DONE | `test_goal.py` |
 | 87 | repeat-tool-reminder | `@deepseek-ai/dsh-repeat-tool-reminder` | packages/guard/repeat-tool-reminder/src/index.ts | magitech-harness | `src/magitech_harness/tools/repeat_guard.py` | DONE | `test_repeat_guard.py` |
-| 88 | web | `@deepseek-ai/dsh-web` | packages/web/web/src/index.ts | magitech-harness | NONE | MISSING | `web_search`/`web_fetch` provider seam |
+| 88 | web | `@deepseek-ai/dsh-web` | packages/web/web/src/index.ts | magitech-harness | `src/magitech_harness/web/service.py` | DONE | `test_web.py` (provider seam, readiness, bounded results) |
 | 89 | web-search-deepseek | `@deepseek-ai/dsh-web-search-deepseek` | packages/web/web-search-deepseek/src/index.ts | mth-components | NONE | MISSING | web search provider |
 | 90 | web-deepseek-api | `@deepseek-ai/dsh-web-deepseek-api` | packages/web/web-deepseek-api/src/index.ts | mth-components | NONE | MISSING | |
-| 91 | web-fetch-http | `@deepseek-ai/dsh-web-fetch-http` | packages/web/web-fetch-http/src/index.ts | mth-components | NONE | MISSING | http fetch provider |
-| 92 | tool-web | `@deepseek-ai/dsh-tool-web` | packages/web/tool-web/src/search.ts:367 | magitech-harness (base tool) | NONE | MISSING | `web_search`, `web_fetch` |
+| 91 | web-fetch-http | `@deepseek-ai/dsh-web-fetch-http` | packages/web/web-fetch-http/src/index.ts | magitech-harness | `src/magitech_harness/web/service.py` | DONE | `test_web.py` (anonymous HTTP(S) fetcher, HTML→text, size cap) |
+| 92 | tool-web | `@deepseek-ai/dsh-tool-web` | packages/web/tool-web/src/search.ts:367 | magitech-harness (base tool) | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` (`web_search`, `web_fetch`) |
 | 93 | mcp-resources | `@deepseek-ai/dsh-mcp-resources` | packages/mcp/mcp-resources/src/index.ts | mth-components | `src/mth_components/bridges/mcp/component.py` | DONE | `test_mcp_bridge.py` |
 | 94 | tools | `@deepseek-ai/dsh-tools` | packages/core/tools/src/index.ts | magitech-harness | `src/magitech_harness/tools/service.py` | DONE | `test_tools_service.py` |
 | 95 | tool-executor-native | `@deepseek-ai/dsh-tool-executor-native` | packages/core/tool-executor-native/src/index.ts | magitech-harness | `src/magitech_harness/tools/native_executor.py` | DONE | `test_native_executor.py` |
@@ -191,8 +191,8 @@ DSH base registers these model-facing tool names; each must exist in the Python 
 | `plan` | packages/plan/plan-mode/src/index.ts:252 | — | NONE | MISSING | — |
 | `exit_plan_mode` | packages/plan/plan-mode/src/index.ts | — | NONE | MISSING | — |
 | `workflow` | packages/workflow/tool-workflow/src/index.ts | — | NONE | MISSING | — |
-| `web_search` | packages/web/tool-web/src/search.ts:367 | — | NONE | MISSING | — |
-| `web_fetch` | packages/web/tool-web/src/fetch.ts:460 | — | NONE | MISSING | — |
+| `web_search` | packages/web/tool-web/src/search.ts:367 | `web_search` | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` |
+| `web_fetch` | packages/web/tool-web/src/fetch.ts:460 | `web_fetch` | `src/magitech_harness/web/tools.py` | DONE | `test_web.py` |
 | `ask_user_question` | packages/interaction/tool-ask-user/src/index.ts:40 | `ask_user_question` | `src/magitech_harness/context/user_questions.py` | DONE | `test_pruner_and_default_model.py` |
 
 ## Missing capabilities that must be added to magitech-harness (in scope)
@@ -203,7 +203,6 @@ These rows/tools are in DSH base and have no Python implementation. Each needs a
 2. `team_task_create` / `team_task_list` / `team_task_get` / `team_task_update` — `src/magitech_harness/tools/team.py` (new) — probe `test_team_tools.py`
 4. `plan` / `exit_plan_mode` — `src/magitech_harness/tools/plan.py` (new) — probe `test_plan_tools.py`
 5. `workflow` — `src/magitech_harness/tools/workflow.py` (new) — probe `test_workflow_tool.py`
-6. `web_search` / `web_fetch` — `src/magitech_harness/tools/web.py` (new) — probe `test_web_tools.py`
 7. `ask_user_question` — `src/magitech_harness/tools/ask_user.py` (new) — probe `test_ask_user.py`
 10. tool-result pruner (`tool-result-pruner`) — wire into pipeline — probe `test_tool_result_pruner.py`
 11. image-offload — probe `test_image_offload.py`

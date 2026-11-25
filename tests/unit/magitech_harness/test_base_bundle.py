@@ -265,6 +265,16 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "web",
+        "name": "magitech_harness.web.service:apply",
+        "config": {"fetch_timeout_seconds": 30, "search_timeout_ms": 60000},
+    },
+    {
+        "id": "tool-web",
+        "name": "magitech_harness.web.tools:apply",
+        "config": {"fetch": True, "searchTimeoutMs": 60000},
+    },
+    {
         "id": "subagent",
         "name": "magitech_harness.subagent.service:SubagentService",
         "config": {"maxActiveSubagents": 10, "maxDepth": 1},
