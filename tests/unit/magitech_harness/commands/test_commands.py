@@ -62,7 +62,7 @@ def test_parse_and_resolve() -> None:
 
 def test_normalize_result() -> None:
     value = CommandResult.success("ok", 3)
-    assert normalize_result("x", value) is value
+    assert normalize_result("x", value) == value
     assert normalize_result("x", {"kind": "success", "text": "ok"}).text == "ok"
     assert normalize_result("x", {"kind": "error", "text": "bad"}).kind == "error"
     with pytest.raises(CommandError):
@@ -96,7 +96,7 @@ async def test_registry_lifecycle() -> None:
     agent = SimpleNamespace(session=session, id="a")
     execution = await service.execute(agent, "/ping")
     assert execution is not None
-    assert execution.result is result
+    assert execution.result == result
     assert execution.to_dict()["commandId"] == execution.command_id
     assert [event[0] for event in events if isinstance(event, tuple)] == [
         "command/run",
@@ -482,3 +482,92 @@ async def test_with_abort_direct() -> None:
     aborted.abort()
     with pytest.raises(RuntimeError):
         await CommandsService._with_abort(value(), aborted)
+
+
+@pytest.mark.asyncio
+async def test_async_observers_and_live_abort() -> None:
+    import asyncio
+
+    ctx = Context()
+    service = CommandsService(ctx)
+    completed: list[str] = []
+
+    async def failing_observer() -> None:
+        raise RuntimeError("observer failed")
+
+    async def cancelled_observer() -> None:
+        await asyncio.sleep(10)
+
+    def observer() -> None:
+        completed.append("sync")
+
+    ctx.on("commands/change", failing_observer, global_=True)
+    ctx.on("commands/change", cancelled_observer, global_=True)
+    ctx.on("commands/change", observer, global_=True)
+    service.unregister("missing")
+    service.register(CommandDefinition("x", "x", lambda i: CommandResult.success()))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert completed == ["sync"]
+
+    gate = asyncio.Event()
+
+    async def hanging(invocation: Any) -> dict[str, Any]:
+        await gate.wait()
+        return {"kind": "success"}
+
+    service.register(CommandDefinition("hang", "h", hanging))
+    signal = AbortSignal()
+
+    async def abort_later() -> None:
+        await asyncio.sleep(0.01)
+        signal.abort("operator cancelled")
+
+    task = asyncio.create_task(abort_later())
+    with pytest.raises(RuntimeError, match="operator cancelled"):
+        await service.execute(
+            SimpleNamespace(session=None, id="a"), "/hang", signal=signal
+        )
+    await task
+
+
+@pytest.mark.asyncio
+async def test_observer_success_and_double_abort() -> None:
+    import asyncio
+
+    from magitech_harness.commands.service import CommandsService
+
+    ctx = Context()
+    service = CommandsService(ctx)
+
+    async def ok_observer() -> None:
+        return None
+
+    ctx.on("commands/change", ok_observer, global_=True)
+    service.register(CommandDefinition("x", "x", lambda i: CommandResult.success()))
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    class DoubleSignal:
+        def __init__(self) -> None:
+            self._cb: Any = None
+            self.reason: Any = "twice"
+
+        @property
+        def aborted(self) -> bool:
+            return False
+
+        def add_listener(self, callback: Any) -> Any:
+            self._cb = callback
+            return lambda: None
+
+    signal = DoubleSignal()
+
+    async def value() -> str:
+        return "ok"
+
+    # The task finishes before abort, so on_abort never fires here; invoke it
+    # twice manually to cover the idempotent branch.
+    assert await CommandsService._with_abort(value(), signal) == "ok"
+    signal._cb()
+    signal._cb()  # idempotent after the abort future is already settled

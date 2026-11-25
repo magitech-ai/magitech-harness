@@ -8,6 +8,7 @@ veto a registry mutation.
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import re
 import uuid
@@ -133,7 +134,7 @@ def normalize_definition(definition: CommandDefinition) -> CommandDefinition:
 def normalize_result(command: str, value: Any) -> CommandResult:
     """Validate and detach a handler's result at the registry boundary."""
     if isinstance(value, CommandResult):
-        return value
+        value = value.to_dict()
     if not isinstance(value, Mapping) or "kind" not in value:
         raise CommandError(
             f'command "{command}" handler must return a CommandResult',
@@ -190,9 +191,22 @@ class CommandsService(Service):
         listeners = list(self.ctx.events._listeners.get("commands/change", []))
         for listener in listeners:
             try:
-                listener.callback()
-            except Exception:  # noqa: BLE001, S110 -- observer failure cannot veto a registry mutation
-                pass
+                returned = listener.callback()
+                if inspect.isawaitable(returned):
+                    task = asyncio.ensure_future(returned)
+
+                    def observe(future: Any) -> None:
+                        if future.cancelled():
+                            return
+                        error = future.exception()
+                        if error is not None:
+                            self.ctx.logger.warning(
+                                "commands: a commands/change observer failed"
+                            )
+
+                    task.add_done_callback(observe)
+            except Exception:  # noqa: BLE001 -- observer failure cannot veto a registry mutation
+                self.ctx.logger.warning("commands: a commands/change observer failed")
 
     def register(self, definition: CommandDefinition) -> Callable[[], None]:
         """Register one validated command; reject duplicates."""
@@ -211,6 +225,11 @@ class CommandsService(Service):
                 self._emit_change()
 
         return dispose
+
+    def unregister(self, name: str) -> None:
+        """Remove a registration by name, notifying observers."""
+        if self._definitions.pop(name, None) is not None:
+            self._emit_change()
 
     def descriptors(self) -> list[CommandDescriptor]:
         """Return handler-free descriptors sorted by name."""
@@ -314,9 +333,23 @@ class CommandsService(Service):
         cancelled = cancellation_of(signal)
         if cancelled is not None:
             raise cancelled
-        dispose = signal.add_listener(lambda: None)
+        loop = asyncio.get_running_loop()
+        aborted: asyncio.Future[None] = loop.create_future()
+
+        def on_abort() -> None:
+            if not aborted.done():
+                aborted.set_result(None)
+
+        dispose = signal.add_listener(on_abort)
+        task = asyncio.ensure_future(output)
         try:
-            return await output
+            finished, _pending = await asyncio.wait(
+                {task, aborted}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if task in finished:
+                return task.result()
+            task.cancel()
+            raise abort_error(signal)
         finally:
             dispose()
 

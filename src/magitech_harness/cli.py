@@ -261,20 +261,24 @@ class ReplDispatcher:
     def _install_commands(self) -> None:
         from magitech_harness.commands.types import CommandDefinition, CommandResult
 
-        existing = {definition.name for definition in self.ctx.commands.descriptors()}
+        self._disposers_by_name: dict[str, Any] = {}
 
         def register(
             name: str, description: str, handler: Any, *, input: Any = None
         ) -> None:
-            if name in existing:
-                return
-            self._disposers.append(
-                self.ctx.commands.register(
-                    CommandDefinition(
-                        name=name, description=description, handler=handler, input=input
-                    )
+            # A newer dispatcher replaces the registration so its handlers
+            # bind to the active REPL's session and model.
+            if name in {
+                definition.name for definition in self.ctx.commands.descriptors()
+            }:
+                self.ctx.commands.unregister(name)
+            disposer = self.ctx.commands.register(
+                CommandDefinition(
+                    name=name, description=description, handler=handler, input=input
                 )
             )
+            self._disposers_by_name[name] = disposer
+            self._disposers.append(disposer)
 
         def help_command(_invocation: Any) -> CommandResult:
             lines = [

@@ -1420,7 +1420,9 @@ async def test_cli_headless_script_with_existing_provider(
 
 
 @pytest.mark.asyncio
-async def test_repl_dispatcher_duplicate_registration_and_dispose(tmp_path: Path) -> None:
+async def test_repl_dispatcher_duplicate_registration_and_dispose(
+    tmp_path: Path,
+) -> None:
     """A second dispatcher reuses existing registrations and disposal is callable."""
     ctx = create_harness(storage_dir=tmp_path / "duplicate")
     await ctx.flush()
