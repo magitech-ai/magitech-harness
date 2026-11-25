@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from magitech_harness.llm.error import HarnessError
-
-PlanPhase = Literal["inactive", "active"]
 
 
 class PlanError(HarnessError):

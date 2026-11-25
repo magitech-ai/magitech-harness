@@ -158,6 +158,10 @@ class PlanModeController(Service):
             }
             return "queued" if active != wanted else "cancelled"
         session.append("plan/mode", {"active": active})
+        self._pending.pop(self._session_key(agent), None)
+        inject = getattr(agent, "inject", None)
+        if callable(inject):
+            inject(self._narration(active))
         return "committed"
 
     def _in_open_turn(self, session: Any) -> bool:
@@ -167,10 +171,7 @@ class PlanModeController(Service):
         boundary = getattr(agents, "turn_boundary_of", None)
         if boundary is None:
             return False
-        try:
-            value = boundary(session)
-        except Exception:  # noqa: BLE001 -- a probe failure must not block the step
-            return False
+        value = boundary(session)
         return bool((value or {}).get("openTurnStartSeq") is not None)
 
     def _on_pre_step(self, payload: Mapping[str, Any], next_fn: Any) -> Any:
@@ -189,34 +190,38 @@ class PlanModeController(Service):
                 return decision
             if agent is None:
                 return decision
-            pending = self._pending.pop(self._session_key(agent), None)
+            key = self._session_key(agent)
+            pending = self._pending.get(key)
             if pending is None:
                 return decision
+            # Delete only after the append succeeds so a later accepted
+            # in-turn pre-step can retry a failed durable write.
             try:
                 agent.session.append("plan/mode", {"active": pending["active"]})
             except Exception:  # noqa: BLE001 -- a failed append stays pending for a later step
                 return decision
+            self._pending.pop(key, None)
             if not pending["narrate"]:
                 return decision
-            message = create_user_message(
-                content=[
-                    {
-                        "type": "text",
-                        "text": (
-                            "Plan mode is active. Follow the plan-mode instructions."
-                            if pending["active"]
-                            else "Plan mode is inactive. The plan-mode instructions no longer apply."
-                        ),
-                    }
-                ],
-                source={"kind": "plan-mode"},
-            )
+            message = self._narration(pending["active"])
             return {
                 **decision,
                 "messages": [*decision.get("messages", []), message],
             }
 
         return asyncio.ensure_future(wrap()) if callable(next_fn) else wrap()
+
+    @staticmethod
+    def _narration(target: bool) -> dict[str, Any]:
+        text = (
+            "The user switched this session to plan mode."
+            if target
+            else "The user switched this session back to the default mode."
+        )
+        return create_user_message(
+            content=[{"type": "text", "text": text}],
+            source={"kind": "plan-mode", "form": "notice", "summary": text},
+        )
 
     # -- prompt sections ---------------------------------------------------
 

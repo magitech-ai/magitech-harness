@@ -39,11 +39,13 @@ def apply_event(state: dict[str, Any], event: SessionEvent) -> dict[str, Any]:
         and state["running"] is not None
         and payload.get("commandId") == state["running"]["commandId"]
     ):
-        wanted = (
-            payload.get("kind") == "success"
-            and state["running"]["wanted"] != state["active"]
+        target = state["running"]["wanted"]
+        next_wanted = (
+            target
+            if payload.get("kind") == "success" and target != state["active"]
+            else None
         )
-        return {**state, "wanted": wanted if wanted else None, "running": None}
+        return {**state, "wanted": next_wanted, "running": None}
     if event.type == "plan/mode":
         active = payload.get("active")
         if not isinstance(active, bool):

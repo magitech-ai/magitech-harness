@@ -239,7 +239,8 @@ async def test_open_turn_detection() -> None:
             turn_boundary_of=lambda session: (_ for _ in ()).throw(ValueError())
         ),
     )
-    assert service._in_open_turn(agent.session) is False
+    with pytest.raises(ValueError):
+        service._in_open_turn(agent.session)
     bare.provide("agents", SimpleNamespace())
     assert service._in_open_turn(agent.session) is False
 
@@ -429,3 +430,19 @@ async def test_exit_cancelled_without_conclude(harness: Any) -> None:
     assert await _exit(harness, service, {"plan": "# P"}, {"agent": agent}) == {
         "approved": False
     }
+
+
+@pytest.mark.asyncio
+async def test_immediate_commit_narrates(harness: Any) -> None:
+    service: PlanModeController = harness.planMode
+    injected: list[Any] = []
+    agent = SimpleNamespace(
+        id="narrate-root",
+        session=harness.sessions.create("narrate-root"),
+        inject=lambda message: injected.append(message),
+    )
+    agent.session.append("plan/mode", {"active": True})
+    service._pending[id(agent.session)] = {"active": False, "narrate": True}
+    assert service.set(agent, True) == "committed"
+    assert "switched this session to plan mode" in injected[0]["content"][0]["text"]
+    assert injected[0]["source"]["form"] == "notice"

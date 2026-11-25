@@ -198,7 +198,7 @@ async def _exit(
             signal=exec_view.get("signal"),
         )
     except UserQuestionError as error:
-        if getattr(error, "code", None) == "ASK_CANCELLED":
+        if getattr(error, "code", None) in ("ASK_CANCELLED", "ASK_ABORTED"):
             conclude = (
                 exec_view.get("concludeTurn") if isinstance(exec_view, dict) else None
             )
