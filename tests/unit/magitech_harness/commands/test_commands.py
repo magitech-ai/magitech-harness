@@ -53,8 +53,6 @@ def test_parse_and_resolve() -> None:
         CommandDescriptor("plan", "p", definition_id="@deepseek-ai/dsh-plan-mode"),
     ]
     assert resolve_command("goal", descriptors).name == "goal"
-    assert resolve_command("目标", descriptors).name == "goal"
-    assert resolve_command("计划", descriptors).name == "plan"
     assert resolve_command("unknown", descriptors) is None
     assert resolve_command("compact", descriptors) is None
     assert set(BUILTINS) <= set(TOKEN_ALIASES)

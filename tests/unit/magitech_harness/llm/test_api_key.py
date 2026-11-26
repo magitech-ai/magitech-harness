@@ -27,8 +27,8 @@ def test_normalize_api_key_rejects_empty(raw: str) -> None:
     "raw",
     [
         "sk-\U0001f600abc",
-        "sk-你好",
-        "sk-abc，",
+        "sk-\u03a9abc",
+        "sk-abc\u00b7",
         "sk-abc def",
         "sk-abc\x01",
         "sk-café",

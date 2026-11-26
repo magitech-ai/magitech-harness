@@ -39,17 +39,11 @@ BUILTINS = {
 }
 TOKEN_ALIASES = {
     "goal": "goal",
-    "目标": "goal",
     "plan": "plan",
-    "计划": "plan",
     "feedback": "feedback",
-    "反馈": "feedback",
     "compact": "compact",
-    "压缩": "compact",
     "permission": "permission",
-    "权限": "permission",
     "export": "export",
-    "导出": "export",
 }
 
 

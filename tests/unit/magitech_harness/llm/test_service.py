@@ -869,7 +869,7 @@ async def test_list_models_and_resolve_model_info_validation_and_detach() -> Non
     """Catalog discovery and exact model resolution validate metadata and detach structures."""
     _, llm = _setup_runtime()
 
-    badge_translations = {"en": "Fast", "zh": "快"}
+    badge_translations = {"en": "Fast", "es": "Rapido"}
     modalities = ["text", "image"]
     adapter = _CatalogAdapter(
         _sample_script(),
@@ -913,7 +913,10 @@ async def test_list_models_and_resolve_model_info_validation_and_detach() -> Non
 
     listed = await llm.list_models("cat")
     assert len(listed) == 2
-    assert listed[0]["badge"] == {"text": {"en": "Fast", "zh": "快"}, "tone": "info"}
+    assert listed[0]["badge"] == {
+        "text": {"en": "Fast", "es": "Rapido"},
+        "tone": "info",
+    }
     badge_translations["en"] = "HACKED"
     modalities.append("HACKED")
     assert listed[0]["badge"]["text"]["en"] == "Fast"  # type: ignore[index]
