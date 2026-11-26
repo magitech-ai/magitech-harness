@@ -234,10 +234,52 @@ def _register_read(ctx: Context, cfg: dict[str, Any]) -> None:
     )
 
 
+def _tool_path_denied(ctx: Context, exec_view: Any, path_str: str) -> str | None:
+    """Return a denial reason when the resolved sandbox policy forbids a write."""
+    policy_service = ctx.get("sandboxPolicy", None, strict=False)
+    if policy_service is None:
+        return None
+    agent = exec_view.get("agent") if isinstance(exec_view, dict) else None
+    session = getattr(agent, "session", None)
+    if session is None and isinstance(exec_view, dict):
+        session = exec_view.get("session")
+    policy = policy_service.resolve(session)
+    mode = str(policy.get("mode", "read-only"))
+    if mode == "danger-full-access":
+        return None
+    try:
+        path = Path(path_str).resolve(strict=False)
+    except OSError:
+        path = Path(path_str)
+    roots = []
+    if mode == "workspace-write":
+        roots.extend(
+            [
+                str(Path(str(policy.get("workspaceRoot", ""))).resolve(strict=False)),
+                *(
+                    str(Path(str(extra)).resolve(strict=False))
+                    for extra in policy.get("additionalWritableRoots") or ()
+                ),
+                "/tmp",
+            ]
+        )
+    roots.append("/dev/null")
+    for root in roots:
+        try:
+            path.relative_to(root)
+            return None
+        except ValueError:
+            continue
+    return f"[sandbox: file access denied under {mode} mode]"
+
+
 def _register_write(ctx: Context, cfg: dict[str, Any]) -> None:
     configured_root = cfg.get("workspace_root")
 
-    async def _execute(args: dict[str, Any]) -> str:
+    async def _execute(args: dict[str, Any], exec_view: Any = None) -> str:
+        denied = _tool_path_denied(ctx, exec_view, str(args.get("path", "")))
+        if denied is not None:
+            return f"Error: {denied}"
         root = configured_root or getattr(ctx, "workspace_dir", None)
         return await handle_write_file(args, workspace_root=root)
 
@@ -263,6 +305,12 @@ def _register_write(ctx: Context, cfg: dict[str, Any]) -> None:
 
 
 def _register_edit(ctx: Context) -> None:
+    async def _execute(args: dict[str, Any], exec_view: Any = None) -> str:
+        denied = _tool_path_denied(ctx, exec_view, str(args.get("path", "")))
+        if denied is not None:
+            return f"Error: {denied}"
+        return await handle_edit_file(args)
+
     ctx.tools.register(
         define_tool(
             name="edit_file",
@@ -284,7 +332,7 @@ def _register_edit(ctx: Context) -> None:
                     "required": True,
                 },
             },
-            execute=handle_edit_file,
+            execute=_execute,
         )
     )
 

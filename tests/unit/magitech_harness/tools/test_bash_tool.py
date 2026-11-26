@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import pytest
 from animas import Context
@@ -14,6 +14,38 @@ from magitech_harness.shell.service import LocalShellService
 from magitech_harness.system_prompt.service import SystemPromptService
 from magitech_harness.tools.bash_tool import apply, handle_bash
 from magitech_harness.tools.service import ToolService
+
+
+class _LocalShell:
+    """Test shell stub mirroring the former raw-subprocess fallback."""
+
+    async def run(self, command: str, **kwargs: Any) -> Any:
+        import asyncio
+
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=kwargs.get("cwd"),
+        )
+        out, err = await asyncio.wait_for(
+            proc.communicate(), timeout=kwargs.get("timeout_seconds", 30)
+        )
+        return SimpleNamespace(
+            exit_code=proc.returncode,
+            stdout=out.decode("utf-8", errors="replace"),
+            stderr=err.decode("utf-8", errors="replace"),
+            timed_out=False,
+            truncated=False,
+            stdout_spill_path=None,
+            stderr_spill_path=None,
+        )
+
+
+def _shell_ctx() -> Context:
+    ctx = Context()
+    ctx.provide("shell", _LocalShell())
+    return ctx
 
 
 @pytest.mark.asyncio
@@ -41,7 +73,7 @@ async def test_handle_bash_validation(tmp_path: Path) -> None:
 async def test_handle_bash_success_and_empty(tmp_path: Path) -> None:
     """Verifies successful command execution and empty output case."""
     # Standard output (unquoted: cmd.exe does not strip single quotes)
-    res = await handle_bash({"command": "echo Magitech Harness"})
+    res = await handle_bash({"command": "echo Magitech Harness"}, ctx=_shell_ctx())
     assert res == "Magitech Harness"
 
     # Command with explicit valid cwd (python3 prints the native cwd on
@@ -50,12 +82,13 @@ async def test_handle_bash_success_and_empty(tmp_path: Path) -> None:
         {
             "command": 'python3 -c "import os; print(os.getcwd())"',
             "cwd": str(tmp_path),
-        }
+        },
+        ctx=_shell_ctx(),
     )
     assert res_cwd == str(tmp_path)
 
     # Command with no output
-    res_empty = await handle_bash({"command": "true"})
+    res_empty = await handle_bash({"command": "true"}, ctx=_shell_ctx())
     assert res_empty == "(Command executed with no output)"
 
 
@@ -63,17 +96,21 @@ async def test_handle_bash_success_and_empty(tmp_path: Path) -> None:
 async def test_handle_bash_failure() -> None:
     """Verifies handling of non-zero exit codes."""
     # Failure with stderr (&& chains in both sh and cmd.exe; ';' does not)
-    res = await handle_bash({"command": "echo an error 1>&2 && exit 1"})
+    res = await handle_bash(
+        {"command": "echo an error 1>&2 && exit 1"}, ctx=_shell_ctx()
+    )
     assert "Command failed with exit code 1:" in res
     assert "an error" in res
 
     # Failure with stdout
-    res_stdout = await handle_bash({"command": "echo stdout fail && exit 2"})
+    res_stdout = await handle_bash(
+        {"command": "echo stdout fail && exit 2"}, ctx=_shell_ctx()
+    )
     assert "Command failed with exit code 2:" in res_stdout
     assert "stdout fail" in res_stdout
 
     # Failure with neither stderr nor stdout
-    res_none = await handle_bash({"command": "exit 3"})
+    res_none = await handle_bash({"command": "exit 3"}, ctx=_shell_ctx())
     assert "Command failed with exit code 3:" in res_none
     assert "No output produced" in res_none
 
@@ -81,25 +118,15 @@ async def test_handle_bash_failure() -> None:
 @pytest.mark.asyncio
 async def test_handle_bash_timeout() -> None:
     """Verifies handling when a command times out."""
-    res = await handle_bash({"command": "sleep 2", "timeout_ms": 10})
+
+    class TimeoutShell:
+        async def run(self, command: str, **kwargs: Any) -> Any:
+            raise TimeoutError()
+
+    ctx = Context()
+    ctx.provide("shell", TimeoutShell())
+    res = await handle_bash({"command": "sleep 2", "timeout_ms": 10}, ctx=ctx)
     assert "Command timed out" in res
-
-
-@pytest.mark.asyncio
-async def test_handle_bash_timeout_kill_oserror() -> None:
-    """Verifies handling when proc.kill raises OSError during timeout."""
-    mock_proc = Mock()
-    mock_proc.kill = Mock(side_effect=OSError("Process already dead"))
-
-    async def _mock_timeout(coro, timeout: float) -> None:
-        raise TimeoutError()
-
-    with (
-        patch("asyncio.create_subprocess_shell", return_value=mock_proc),
-        patch("asyncio.wait_for", side_effect=_mock_timeout),
-    ):
-        res = await handle_bash({"command": "sleep 10", "timeout_ms": 50})
-        assert "Command timed out" in res
 
 
 @pytest.mark.asyncio

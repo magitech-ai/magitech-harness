@@ -526,3 +526,103 @@ def test_fs_policy_helper_branches(monkeypatch: Any) -> None:
         {"targetKey": "/etc/hosts", "displayPath": "/etc/hosts"},
         "write",
     )
+
+
+@pytest.mark.asyncio
+async def test_fs_tools_enforce_policy(tmp_path: Path) -> None:
+    from magitech_harness import create_harness
+    from magitech_harness.agent.cancellation import AbortSignal
+    from magitech_harness.session.events import ToolCallData
+
+    ctx = create_harness(storage_dir=tmp_path / "fs-tools")
+    await ctx.flush()
+    agent_handle = await ctx.agents.create({})
+    agent = agent_handle["agent"]
+    session = agent.session
+    session.append("sandbox/mode", {"mode": "read-only"})
+
+    target = tmp_path / "note.txt"
+    target.write_text("original", encoding="utf-8")
+    result = await ctx.tools.execute(
+        ToolCallData(
+            call_id="w1",
+            name="write_file",
+            arguments={"path": str(target), "content": "changed"},
+        ),
+        session=session,
+        signal=AbortSignal(),
+    )
+    assert result.content.startswith("Error: [sandbox: file access denied")
+    assert target.read_text() == "original"
+
+    result = await ctx.tools.execute(
+        ToolCallData(
+            call_id="e1",
+            name="edit_file",
+            arguments={"path": str(target), "target": "original", "replacement": "x"},
+        ),
+        session=session,
+        signal=AbortSignal(),
+    )
+    assert result.content.startswith("Error: [sandbox: file access denied")
+
+    session.append("sandbox/mode", {"mode": "danger-full-access"})
+    result = await ctx.tools.execute(
+        ToolCallData(
+            call_id="w2",
+            name="write_file",
+            arguments={"path": str(target), "content": "allowed"},
+        ),
+        session=session,
+        signal=AbortSignal(),
+    )
+    assert result.content.startswith("Successfully")
+
+
+@pytest.mark.asyncio
+async def test_tool_policy_helper_edges(tmp_path: Path, monkeypatch: Any) -> None:
+    from pathlib import Path as P
+
+    from magitech_harness.fs.local import _assert_sandbox_write_allowed
+    from magitech_harness.fs.types import FsError
+    from magitech_harness.tools.fs import _tool_path_denied
+
+    ctx = Context()
+    ctx.provide(
+        "sandboxPolicy",
+        SimpleNamespace(
+            resolve=lambda session: {
+                "mode": "workspace-write",
+                "workspaceRoot": str(tmp_path),
+                "additionalWritableRoots": ["/etc"],
+            }
+        ),
+    )
+    assert _tool_path_denied(ctx, None, str(tmp_path / "ok.txt")) is None
+    assert _tool_path_denied(ctx, {}, "/etc/hosts") is None
+    assert "denied" in (_tool_path_denied(ctx, None, "/var/hosts") or "")
+
+    original = P.resolve
+
+    original_tool = P.resolve
+
+    def failing_tool(self: P, *args: Any, **kwargs: Any) -> P:
+        if str(self) == "x":
+            raise OSError("nope")
+        return original_tool(self, *args, **kwargs)
+
+    monkeypatch.setattr(P, "resolve", failing_tool)
+    assert _tool_path_denied(ctx, None, "x") is not None
+    monkeypatch.setattr(P, "resolve", original)
+
+    with pytest.raises(FsError):
+        _assert_sandbox_write_allowed(
+            "bad", {"targetKey": "x", "displayPath": "x"}, "write"
+        )
+
+
+@pytest.mark.asyncio
+async def test_bash_without_shell_is_error() -> None:
+    from magitech_harness.tools.bash_tool import handle_bash
+
+    assert "no shell executor" in await handle_bash({"command": "echo hi"})

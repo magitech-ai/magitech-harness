@@ -97,9 +97,13 @@ def _assert_sandbox_write_allowed(
     """Enforce the resolved file policy at the filesystem provider boundary."""
     from collections.abc import Mapping
 
-    if sandbox_policy is None or not isinstance(sandbox_policy, Mapping):
+    from magitech_harness.fs.types import FsError
+
+    if sandbox_policy is None:
         return
-    mode = sandbox_policy.get("mode", "danger-full-access")
+    if not isinstance(sandbox_policy, Mapping):
+        raise FsError("invalid sandbox policy", "FS_SANDBOX_DENIED")
+    mode = sandbox_policy.get("mode", "read-only")
     if mode == "danger-full-access":
         return
     raw = str(target.get("targetKey", ""))

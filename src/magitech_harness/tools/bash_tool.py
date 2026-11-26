@@ -10,7 +10,6 @@ result names the spill file.
 
 from __future__ import annotations
 
-import asyncio
 import uuid
 from pathlib import Path
 from typing import Any
@@ -111,7 +110,10 @@ async def handle_bash(
         }
         if sandbox_policy is not None:
             run_kwargs["sandboxPolicy"] = sandbox_policy
-        res = await ctx.shell.run(command, **run_kwargs)
+        try:
+            res = await ctx.shell.run(command, **run_kwargs)
+        except TimeoutError:
+            return f"Command timed out after {timeout_seconds} seconds."
         exit_code = res.exit_code
         stdout = res.stdout.strip()
         stderr = res.stderr.strip()
@@ -132,27 +134,7 @@ async def handle_bash(
             if p
         ]
     else:
-        try:
-            proc = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
-            )
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                proc.communicate(),
-                timeout=timeout_seconds,
-            )
-            exit_code = proc.returncode if proc.returncode is not None else -1
-            stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
-            stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
-            timed_out = False
-        except TimeoutError:
-            try:
-                proc.kill()
-            except OSError:
-                pass
-            return f"Command timed out after {timeout_seconds} seconds."
+        return "Error: no shell executor is mounted on ctx.shell"
 
     if timed_out:
         return f"Command timed out after {timeout_seconds} seconds."

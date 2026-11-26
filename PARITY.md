@@ -44,7 +44,7 @@ in `tests/test_profile_translator.py`. Never add a runtime expression evaluator 
 | 4 | `!!js dshHomePath('storages')` | `root: ${MAGITECH_SESSIONS_DIR}/storages` | base.yaml `storage-json` |
 | 5 | `!!js process.env.DSH_TELEMETRY_MODE || 'FEEDBACK_ONLY'` | `mode: ${DSH_TELEMETRY_MODE:FEEDBACK_ONLY}` | base.yaml `session-telemetry-otel` |
 | 6 | `!!js process.env.DSH_TELEMETRY_OTLP_URL ?? 'https://...'` | `exporter.url: ${DSH_TELEMETRY_OTLP_URL:...}` | base.yaml `session-telemetry-otel` |
-| 7 | `!!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` | `mode: ${DSH_PERMISSION_MODE:workspace-write}` | base.yaml `sandbox-policy` |
+| 7 | `!!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` | `mode: ${MAGITECH_PERMISSION_MODE:workspace-write}` | base.yaml `sandbox-policy` |
 | 8 | `!!js process.cwd()` | `workspaceRoot: ${PWD}` | base.yaml `sandbox-policy` |
 | 9 | `!!js process.platform === 'win32'` | `disabled_on: [ win32 ]` | base.yaml `tool-bash`, `bash-sandbox` |
 | 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` | base.yaml `tool-pwsh`, `pwsh-sandbox` |
@@ -217,7 +217,7 @@ registrations remain.
 | Row | Reason | Accepted by |
 |---|---|---|
 | `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
-| `sandbox` / `sandbox-policy` | Linux bwrap-backed confinement implemented (rows 41–43 DONE) with per-call policy, session mode, approval escalation and fs-provider enforcement; finding #13 closed for the shell and fs paths. Windows ACL backend remains a platform gap (row 44). | Resolved by implementation |
+| `sandbox` / `sandbox-policy` | Linux bwrap-backed confinement implemented (rows 41–43 DONE) with per-call policy, session mode, approval escalation, shell-executor enforcement and fs-provider/tool enforcement. finding #13 is closed for the shell and fs paths; Windows ACL backend remains a platform gap (row 44). | Resolved by implementation |
 | `agent-instructions` | Implemented as a durable instruction loader (row 54 DONE). | Resolved by implementation |
 | `upstream-skills` | Implemented as a verified pinned download component (row 58 DONE). | Resolved by implementation |
 | `image-offload` | Implemented as a durable message projection + `agent/request-error` retry (row 84 DONE). | Resolved by implementation |
