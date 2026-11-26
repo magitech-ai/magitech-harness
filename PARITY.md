@@ -84,7 +84,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 23 | authorization | `@deepseek-ai/dsh-authorization` | packages/credentials/authorization/src/index.ts | mth-components | NONE | OUT OF SCOPE | credentials marketplace |
 | 24 | deepseek-account | `@deepseek-ai/dsh-deepseek-account` | packages/account/deepseek-account/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | DeepSeek account |
 | 25 | deepseek-auth | `@deepseek-ai/dsh-deepseek-auth` | packages/account/deepseek-auth/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | |
-| 26 | credentials | `@deepseek-ai/dsh-credentials-local` | packages/credentials/credentials-local/src/index.ts | mth-components | NONE | OUT OF SCOPE | credentials marketplace |
+| 26 | credentials | `@deepseek-ai/dsh-credentials-local` | packages/credentials/credentials-local/src/index.ts | mth-components | `src/mth_components/credentials_local/provider.py` | DONE | mth-components: `tests/unit/mth_components/credentials_local/test_provider.py` (versioned YAML, strict refs/records validation, env precedence, owner-only 0600/0700 atomic writes, foreign-key preservation, write-side validation, service hydration/lifecycle); harness: `tests/unit/magitech_harness/credentials/test_engine.py` (provider seam). Cross-process writer lock, hot-reload watcher and comment-preserving YAML edits remain unported and are documented in the component docstring. |
 | 27 | llm-pi-ai | `@deepseek-ai/dsh-llm-pi-ai` | packages/llm/llm-pi-ai/src/index.ts | magitech-harness (ADR 0012 Tier 1) | `src/magitech_harness/llm/pi_ai/component.py` | DONE | `tests/unit/magitech_harness/llm/pi_ai/test_pi_ai_component.py` |
 | 28 | session-persistence-jsonl | `@deepseek-ai/dsh-session-persistence-jsonl` | packages/session/session-persistence-jsonl/src/index.ts | magitech-harness | `src/magitech_harness/session/persistence_jsonl.py` | DONE | `tests/unit/magitech_harness/session/test_persistence_jsonl.py` |
 | 29 | attachment-local | `@deepseek-ai/dsh-attachment-local` | packages/attachment/attachment-local/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional attachment backend |
@@ -231,7 +231,7 @@ registrations remain.
 - Windows ACL sandbox backend (`dsh-sandbox-windows-acl`).
 - External connectors (linear, notion, feishu, dingtalk, wecom, tencent-*).
 - Experimental bundles (forges, CUA, terminal, ralph, etc.).
-- Plugin manager / config editor / settings / credentials / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage hub, JSON backend and domain form (rows 33–35) are now ported as opt-in mth-components.
+- Plugin manager / config editor / settings / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage stack (rows 33–35) and the core local credentials provider (row 26) are now ported as opt-in mth-components.
 - DSH-specific packages (deepseek-account, deepseek-auth, typert, api-gateway, remote-access, session-log-deepseek, deepseek-llm-api-extensions, cli-account, ptc-runtime, workflow-ptc, tool-executor-ptc).
 - `tool-workflow` (row 78) and its `workflow` tool: require the out-of-scope `workflow-ptc` JavaScript orchestration runtime.
 - DeepSeek account-backed web providers `web-search-deepseek` / `web-deepseek-api` (rows 89–90): require the out-of-scope `deepseek-auth` / account-credential stack; the provider-neutral web seam is ported instead.
