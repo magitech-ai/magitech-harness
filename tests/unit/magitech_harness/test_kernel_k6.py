@@ -304,7 +304,7 @@ async def test_check_bundle_entries_fails_before_flush_on_loop_path() -> None:
     with pytest.raises(RuntimeError, match="no bundle entries"):
         check_bundle_entries(ctx)
     await ctx.flush()
-    assert len(list(loader.entries())) == 64
+    assert len(list(loader.entries())) == 66
     check_bundle_entries(ctx)
 
 
@@ -320,10 +320,10 @@ def test_check_bundle_entries_sync_path_settles_at_load() -> None:
     loader = LoaderService(ctx, {"filename": _base_bundle_path()})
     loader.load(_base_bundle_path())
     entries = list(loader.entries())
-    assert len(entries) == 64
+    assert len(entries) == 66
     enabled = [entry for entry in entries if not entry.disabled]
     disabled = [entry for entry in entries if entry.disabled]
-    assert len(enabled) == 63
+    assert len(enabled) == 65
     assert len(disabled) == 1
     assert all(
         entry.fiber is not None and entry.fiber.state is FiberState.ACTIVE
@@ -436,7 +436,7 @@ async def test_disabling_shell_row_unmounts_slot(tmp_path: Path) -> None:
     ctx = create_harness(storage_dir=tmp_path)
     await ctx.flush()
     loader = ctx.get("loader", None, strict=False)
-    await loader.disable("pwsh-local" if sys.platform == "win32" else "bash-local")
+    await loader.disable("pwsh-local" if sys.platform == "win32" else "bash-sandbox")
     await ctx.flush()
     assert not ctx.has("shell")
     assert ctx.has("sessions")

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any
 
 from animas import Context, Service
 
@@ -43,12 +44,15 @@ class ShellExecutor(Service, ABC):
         timeout_seconds: float | None = None,
         signal: AbortSignal | None = None,
         max_output_bytes: int = 64 * 1024,
+        sandboxPolicy: Any = None,
     ) -> ShellResult:
         """Execute *command* to completion and project to :class:`ShellResult`."""
         request: ShellExecRequest = {
             "command": command,
             "stdoutMaxBytes": max_output_bytes,
         }
+        if sandboxPolicy is not None:
+            request["sandboxPolicy"] = sandboxPolicy
         if cwd is not None:
             request["workdir"] = str(cwd)
         if signal is not None:
@@ -79,6 +83,7 @@ class ShellExecutor(Service, ABC):
             ),
             stdout_spill_path=stdout_data.get("spillPath"),
             stderr_spill_path=stderr_data.get("spillPath"),
+            sandbox=res.get("sandbox"),
         )
 
 
