@@ -10,6 +10,8 @@ lists every selectable preset. The write side is the ``/permission`` command.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -570,10 +572,29 @@ class PermissionPresetService(Service):
         )
 
     def _emit_catalog_changed(self) -> None:
-        try:
-            self.ctx.emit("permission-presets/catalog-changed", {})
-        except Exception:  # noqa: BLE001, S110 -- observer failure cannot veto
-            pass
+        """Dispatch to every observer independently so none can veto the change."""
+        event = "permission-presets/catalog-changed"
+        listeners = list(self.ctx.events._listeners.get(event, []))
+        for listener in listeners:
+            try:
+                returned = listener.callback()
+                if inspect.isawaitable(returned):
+                    task = asyncio.ensure_future(returned)
+
+                    def observe(future: Any) -> None:
+                        if future.cancelled():
+                            return
+                        error = future.exception()
+                        if error is not None:
+                            self.ctx.logger.warning(
+                                f"permission: catalog-changed listener failed: {error}"
+                            )
+
+                    task.add_done_callback(observe)
+            except Exception as error:  # noqa: BLE001 -- isolation from dsh
+                self.ctx.logger.warning(
+                    f"permission: catalog-changed listener failed: {error}"
+                )
 
     # -- command -----------------------------------------------------------
 

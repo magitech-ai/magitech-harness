@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from typing import Any
 
@@ -417,15 +418,35 @@ def test_register_auto_catalog_and_conflict(harness: Any) -> None:
     dispose()
 
 
-def test_catalog_changed_listener_failure_is_contained(harness: Any) -> None:
+@pytest.mark.asyncio
+async def test_catalog_changed_listener_failure_is_contained(harness: Any) -> None:
+    await harness.flush()
     service: PermissionPresetService = harness.permissionPresets
+    seen: list[str] = []
 
     def explode() -> None:
         raise RuntimeError("listener failure")
 
+    async def async_explode() -> None:
+        raise RuntimeError("async listener failure")
+
+    async def async_ok() -> None:
+        seen.append("async-ok")
+
+    async def async_cancel() -> None:
+        raise asyncio.CancelledError
+
     harness.on("permission-presets/catalog-changed", explode)
+    harness.on("permission-presets/catalog-changed", lambda: seen.append("ok"))
+    harness.on("permission-presets/catalog-changed", async_explode)
+    harness.on("permission-presets/catalog-changed", async_ok)
+    harness.on("permission-presets/catalog-changed", async_cancel)
     dispose = service.register_auto(lambda: None)
+    await asyncio.sleep(0)
+    assert seen == ["ok", "async-ok"]
     dispose()
+    await asyncio.sleep(0)
+    assert seen == ["ok", "async-ok", "ok", "async-ok"]
 
 
 # -- service: writes -------------------------------------------------------
