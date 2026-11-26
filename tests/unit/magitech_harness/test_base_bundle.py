@@ -118,10 +118,20 @@ EXPECTED_ROWS = [
         },
     },
     {
-        "id": "bash-local",
-        "name": "magitech_harness.shell.bash_local:LocalBashExecutor",
-        "disabled_on": ["win32"],
+        "id": "sandbox",
+        "name": "magitech_harness.sandbox.service:apply",
         "config": {},
+    },
+    {
+        "id": "sandbox-policy",
+        "name": "magitech_harness.sandbox.policy:apply",
+        "config": {"mode": "workspace-write"},
+    },
+    {
+        "id": "bash-sandbox",
+        "name": "magitech_harness.shell.bash_sandbox:SandboxBashExecutor",
+        "disabled_on": ["win32"],
+        "config": {"timeoutMs": 60000},
     },
     {
         "id": "pwsh-local",

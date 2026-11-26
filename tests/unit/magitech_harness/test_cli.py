@@ -1230,13 +1230,13 @@ async def test_component_list_reflects_evaluated_disabled_state(
     import sys as _sys
 
     if _sys.platform == "win32":
-        assert "- bash-local [bundle row]" in captured and "disabled" in captured
+        assert "- bash-sandbox [bundle row]" in captured and "disabled" in captured
     else:
         bash_line = next(
             (
                 l
                 for l in captured.splitlines()
-                if l.strip().startswith("- bash-local [bundle row]")
+                if l.strip().startswith("- bash-sandbox [bundle row]")
             ),
             "",
         )

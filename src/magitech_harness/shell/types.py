@@ -32,6 +32,7 @@ class ShellResult:
     truncated: bool = False
     stdout_spill_path: str | None = None
     stderr_spill_path: str | None = None
+    sandbox: Any = None
 
     def __iter__(self) -> Iterator[Any]:
         """Support 3-element tuple unpacking for backwards compatibility."""

@@ -79,6 +79,7 @@ class ShellExecutor(Service, ABC):
             ),
             stdout_spill_path=stdout_data.get("spillPath"),
             stderr_spill_path=stderr_data.get("spillPath"),
+            sandbox=res.get("sandbox"),
         )
 
 
