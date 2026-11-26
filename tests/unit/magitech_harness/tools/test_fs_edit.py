@@ -121,14 +121,18 @@ async def test_edit_component_without_system_prompt_service() -> None:
     assert ctx.has("tools")
 
 
-def test_apply_rejects_apply_patch() -> None:
-    """The patch tool is not ported; asking for it fails loud at mount."""
-    from animas import Context
-
+@pytest.mark.asyncio
+async def test_apply_gates_apply_patch() -> None:
+    """The patch tool mounts only when the config opt-in is set, as in dsh."""
     from magitech_harness.tools.fs import apply as fs_apply
     from magitech_harness.tools.service import ToolsService
 
     ctx = Context()
     ToolsService(ctx)
-    with pytest.raises(ValueError, match="apply_patch is not ported"):
-        fs_apply(ctx, {"apply_patch": True})
+    fs_apply(ctx, {"apply_patch": False})
+    assert "apply_patch" not in [tool["name"] for tool in ctx.tools.definitions()]
+
+    enabled = Context()
+    ToolsService(enabled)
+    fs_apply(enabled, {"apply_patch": True})
+    assert "apply_patch" in [tool["name"] for tool in enabled.tools.definitions()]
