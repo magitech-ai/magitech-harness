@@ -48,7 +48,7 @@ in `tests/test_profile_translator.py`. Never add a runtime expression evaluator 
 | 8 | `!!js process.cwd()` | `workspaceRoot: ${PWD}` | base.yaml `sandbox-policy` |
 | 9 | `!!js process.platform === 'win32'` | `disabled_on: [ win32 ]` | base.yaml `tool-bash`, `bash-sandbox` |
 | 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` for `pwsh-local`; `tool-pwsh` is mounted unconditionally so Linux pwsh 7 can run (dsh gates it win32) | base.yaml `pwsh-local`, `tool-pwsh` |
-| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ${MAGITECH_PERMISSION_MODE:ask:danger=never}` | base.yaml `approval` |
+| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ask` (static default). The `never` behaviour is realised per-session through the sandbox policy: a `danger-full-access` session needs no escalation approval, and `approval.set_policy(agent, "never")` is available as a durable override. No global env-driven policy switch exists. | base.yaml `approval`; `approval/service.py`, `sandbox/policy.py` |
 | 12| `!!js process.env.DSH_TELEMETRY_DISABLED` (outer config, not base) | `disabled: ${DSH_TELEMETRY_DISABLED:true}` | base.yaml `session-telemetry-otel` |
 
 The translator golden tests pin each expression → declarative row. See `scripts/profile_translator.py`.
