@@ -303,3 +303,36 @@ def test_credential_config_typed_dict() -> None:
     """CredentialConfig accepts optional fields."""
     config: CredentialConfig = {}
     assert config == {}
+
+
+def test_provider_seam_delegates_and_disposes() -> None:
+    from animas import Context
+
+    from magitech_harness.credentials import CredentialService
+
+    ctx = Context()
+    service = CredentialService(ctx)
+    ref = service.credential_ref("PROVIDED_KEY")
+    service.set(ref, "in-memory")
+
+    class Provider:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def resolve(self, credential_ref: object) -> dict[str, str] | None:
+            self.calls.append(str(credential_ref))
+            return {"value": "from-provider", "source": "environment"}
+
+    provider = Provider()
+    dispose = service.set_provider(provider)  # type: ignore[arg-type]
+    resolved = service.resolve(ref)
+    assert resolved == {"value": "from-provider", "source": "environment"}
+    assert provider.calls == [str(ref)]
+
+    dispose()
+    assert service.resolve(ref) == {"value": "in-memory", "source": "stored"}
+    # A stale disposer must not remove a successor provider.
+    successor = Provider()
+    service.set_provider(successor)  # type: ignore[arg-type]
+    dispose()
+    assert service.resolve(ref) == {"value": "from-provider", "source": "environment"}
