@@ -2,9 +2,8 @@
 
 Ports dsh's ``@deepseek-ai/dsh-tool-pwsh`` at ``packages/shell/tool-pwsh/src``.
 The PowerShell dialect is native: ``pwsh -Command``, ``$env:NAME`` variables,
-and Windows-style path examples. Commands run through ``ctx.shell`` when a
-PowerShell executor is mounted, inheriting its output caps, spill recovery and
-cooperative abort.
+and Windows-style path examples. Commands run in a fresh ``pwsh -Command``
+subprocess with bounded output, spill recovery and cooperative cancellation.
 """
 
 from __future__ import annotations
@@ -48,9 +47,12 @@ async def handle_pwsh(
     ctx: Context | None = None,
     spill_dir: Path | None = None,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+    timeout_cap_ms: int = 3_600_000,
+    exec_view: Any = None,
 ) -> str:
     """Execute one PowerShell command and render its result."""
     import asyncio
+    import math
     import uuid
 
     from magitech_harness.shell.pwsh_local import (
@@ -63,9 +65,14 @@ async def handle_pwsh(
         return "Error: 'command' argument is required."
 
     timeout_ms = args.get("timeoutMs", args.get("timeout_ms", DEFAULT_TIMEOUT_MS))
-    if isinstance(timeout_ms, bool) or not isinstance(timeout_ms, (int, float)):
-        return "Error: 'timeoutMs' must be a number."
-    timeout_seconds = max(0.001, float(timeout_ms) / 1000)
+    if (
+        isinstance(timeout_ms, bool)
+        or not isinstance(timeout_ms, (int, float))
+        or not math.isfinite(timeout_ms)
+        or timeout_ms <= 0
+    ):
+        return "Error: 'timeoutMs' must be a finite positive number."
+    timeout_seconds = min(float(timeout_ms), timeout_cap_ms) / 1000
 
     workdir = args.get("workdir", args.get("cwd"))
     cwd = Path(workdir) if workdir else None
@@ -73,8 +80,11 @@ async def handle_pwsh(
         return f"Error: Working directory does not exist: {workdir}"
 
     configured = None
-    if ctx is not None and ctx.has("pwshConfig"):
-        configured = ctx.get("pwshConfig", None, strict=False)
+    if ctx is not None:
+        for key in ("pwshConfig", "pwshPath"):
+            if ctx.has(key):
+                configured = ctx.get(key, None, strict=False)
+                break
     executable = resolve_pwsh_path(configured)
     argv = [
         executable,
@@ -84,6 +94,14 @@ async def handle_pwsh(
         "-Command",
         ENCODING_PREAMBLE + str(command),
     ]
+    signal = args.get("signal")
+    if ctx is not None and ctx.has("sandbox") and ctx.has("sandboxPolicy"):
+        agent = exec_view.get("agent") if isinstance(exec_view, dict) else None
+        session = getattr(agent, "session", None)
+        policy = ctx.sandboxPolicy.resolve(session)
+        if policy.get("mode") != "danger-full-access":
+            confined = ctx.sandbox.confine(argv, policy, signal)
+            argv = confined.argv
     try:
         process = await asyncio.create_subprocess_exec(
             *argv,
@@ -91,33 +109,61 @@ async def handle_pwsh(
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
         )
+        communicate = asyncio.ensure_future(process.communicate())
+        if signal is not None and hasattr(signal, "add_listener"):
+            aborted = asyncio.get_running_loop().create_future()
+
+            def on_abort() -> None:
+                if not aborted.done():
+                    aborted.set_result(None)
+
+            dispose = signal.add_listener(on_abort)
+            try:
+                done, _pending = await asyncio.wait(
+                    {communicate, aborted}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if aborted in done:
+                    communicate.cancel()
+                    process.kill()
+                    await process.wait()
+                    return "Command aborted."
+            finally:
+                dispose()
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            process.communicate(), timeout=timeout_seconds
+            asyncio.shield(communicate) if not communicate.done() else communicate,
+            timeout=timeout_seconds,
         )
     except TimeoutError:
-        process.kill()
-        await process.wait()
-        return f"Command timed out after {timeout_seconds} seconds."
+        try:
+            process.kill()
+            await process.wait()
+        except OSError:
+            pass
+        return f"Command timed out after {timeout_seconds} seconds. [timed out after {int(timeout_seconds * 1000)}ms]"
     except OSError as error:
         return f"Error: could not start PowerShell: {error}"
 
     exit_code = process.returncode if process.returncode is not None else -1
-    stdout = stdout_bytes.decode("utf-8", errors="replace").strip()
-    stderr = stderr_bytes.decode("utf-8", errors="replace").strip()
     spills: list[str] = []
-    truncated = (
-        len(stdout_bytes) > max_output_bytes or len(stderr_bytes) > max_output_bytes
-    )
-    if truncated:
+    stdout_truncated = len(stdout_bytes) > max_output_bytes
+    stderr_truncated = len(stderr_bytes) > max_output_bytes
+    if stdout_truncated or stderr_truncated:
         target_dir = spill_dir or (Path.home() / ".magitech" / "spill")
-        try:
-            target_dir.mkdir(parents=True, exist_ok=True)
-            for name, data in (("stdout", stdout_bytes), ("stderr", stderr_bytes)):
+        for name, data, exceeded in (
+            ("stdout", stdout_bytes, stdout_truncated),
+            ("stderr", stderr_bytes, stderr_truncated),
+        ):
+            if not exceeded:
+                continue
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
                 path = target_dir / f"{uuid.uuid4()}.{name}"
                 path.write_bytes(data)
                 spills.append(str(path))
-        except OSError:
-            pass
+            except OSError:
+                pass
+    stdout = stdout_bytes[:max_output_bytes].decode("utf-8", errors="replace").strip()
+    stderr = stderr_bytes[:max_output_bytes].decode("utf-8", errors="replace").strip()
 
     body = stdout
     if stderr:
@@ -126,7 +172,7 @@ async def handle_pwsh(
         body = (
             f"{body}\n[exit code: {exit_code}]" if body else f"[exit code: {exit_code}]"
         )
-    if spills or truncated:
+    if spills or stdout_truncated or stderr_truncated:
         body += (
             f"\n[output truncated; full output: "
             f"{', '.join(spills) if spills else '(unavailable)'}]"
@@ -138,8 +184,8 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
     """Mount the ``pwsh`` tool onto ``ctx.tools``."""
     del config, kwargs
 
-    async def _execute(args: dict[str, Any]) -> str:
-        return await handle_pwsh(args, ctx=ctx)
+    async def _execute(args: dict[str, Any], exec_view: Any = None) -> str:
+        return await handle_pwsh(args, ctx=ctx, exec_view=exec_view)
 
     ctx.tools.register(
         define_tool(
@@ -158,7 +204,7 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
                 },
                 "timeoutMs": {
                     "type": "number",
-                    "description": "Timeout in milliseconds; the executor applies its configured cap.",
+                    "description": "Timeout in milliseconds (bounded to one hour); the command is killed on expiry.",
                 },
                 "workdir": {
                     "type": "string",

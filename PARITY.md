@@ -216,7 +216,7 @@ registrations remain.
 
 | Row | Reason | Accepted by |
 |---|---|---|
-| `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
+| `pwsh-sandbox` | PowerShell tool ported and confined through the harness sandbox seam (rows 44 and 49 DONE). Windows ACL backend remains a platform gap. | Resolved by implementation |
 | `sandbox` / `sandbox-policy` | Linux bwrap-backed confinement implemented (rows 41–43 DONE) with per-call policy, session mode, approval escalation, shell-executor enforcement and fs-provider/tool enforcement. finding #13 is closed for the shell and fs paths; Windows ACL backend remains a platform gap (row 44). | Resolved by implementation |
 | `agent-instructions` | Implemented as a durable instruction loader (row 54 DONE). | Resolved by implementation |
 | `upstream-skills` | Implemented as a verified pinned download component (row 58 DONE). | Resolved by implementation |

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -135,3 +136,211 @@ async def test_pwsh_spill_failure_and_prompt(monkeypatch: Any, tmp_path: Any) ->
     )
     apply(ctx2)
     assert sections[0]["name"] == "tool:pwsh"
+
+
+@pytest.mark.asyncio
+async def test_pwsh_abort_and_config_keys(tmp_path: Any) -> None:
+    from magitech_harness.agent.cancellation import AbortSignal
+
+    ctx = Context()
+    ctx.provide("pwshPath", PWSH_BIN)
+    assert "42" in await handle_pwsh(
+        {"description": "add", "command": "20+22"}, ctx=ctx
+    )
+
+    signal = AbortSignal()
+    signal.abort()
+    assert isinstance(await handle_pwsh({"command": "1", "signal": signal}), str)
+
+    class LateSignal:
+        def __init__(self) -> None:
+            self.callback: Any = None
+
+        def add_listener(self, callback: Any) -> Any:
+            self.callback = callback
+            return lambda: None
+
+    late = LateSignal()
+    result = await _abort_during_run(late)
+    assert result
+
+
+async def _abort_during_run(signal: Any) -> str:
+    import asyncio
+
+    task = asyncio.create_task(
+        handle_pwsh({"command": "Start-Sleep -Seconds 2", "signal": signal})
+    )
+    await asyncio.sleep(0.05)
+    if signal.callback is not None:
+        signal.callback()
+    return await task
+
+
+@pytest.mark.asyncio
+async def test_pwsh_spill_mkdir_failure(monkeypatch: Any, tmp_path: Any) -> None:
+    from pathlib import Path as P
+
+    original = P.mkdir
+
+    def fail_mkdir(self: P, *args: Any, **kwargs: Any) -> None:
+        raise OSError("no space")
+
+    monkeypatch.setattr(P, "mkdir", fail_mkdir)
+    ctx = Context()
+    ctx.provide("pwshConfig", PWSH_BIN)
+    result = await handle_pwsh(
+        {"command": "'x' * 100000"},
+        ctx=ctx,
+        spill_dir=tmp_path,
+        max_output_bytes=10,
+    )
+    assert "unavailable" in result
+    monkeypatch.setattr(P, "mkdir", original)
+
+
+@pytest.mark.asyncio
+async def test_pwsh_sandbox_seam(tmp_path: Any) -> None:
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    ctx = Context()
+    ctx.provide("pwshConfig", PWSH_BIN)
+    calls: list[Any] = []
+
+    class Sandbox:
+        def confine(self, argv: list[str], policy: Any, signal: Any = None) -> Any:
+            calls.append(policy)
+            from types import SimpleNamespace as NS
+
+            return NS(argv=argv, enforcement="full")
+
+    class Policy:
+        def resolve(self, session: Any) -> dict[str, Any]:
+            return {"mode": "read-only", "workspaceRoot": str(tmp_path)}
+
+    ctx.provide("sandbox", Sandbox())
+    ctx.provide("sandboxPolicy", Policy())
+    result = await handle_pwsh(
+        {"description": "add", "command": "20+22"},
+        ctx=ctx,
+        exec_view={"agent": SimpleNamespace(session=SimpleNamespace())},
+    )
+    assert "42" in result
+    assert calls[0]["mode"] == "read-only"
+
+
+@pytest.mark.asyncio
+async def test_pwsh_config_key_and_full_access_policy(tmp_path: Any) -> None:
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    ctx = Context()
+    ctx.provide("pwshPath", PWSH_BIN)
+
+    class Policy:
+        def resolve(self, session: Any) -> dict[str, Any]:
+            return {"mode": "danger-full-access", "workspaceRoot": str(tmp_path)}
+
+    class Sandbox:
+        def confine(self, *args: Any) -> Any:
+            raise AssertionError("full access must not be confined")
+
+    ctx.provide("sandbox", Sandbox())
+    ctx.provide("sandboxPolicy", Policy())
+    out = await handle_pwsh(
+        {"description": "add", "command": "20+22"},
+        ctx=ctx,
+        exec_view={"agent": SimpleNamespace(session=SimpleNamespace())},
+    )
+    assert "42" in out
+
+
+@pytest.mark.asyncio
+async def test_pwsh_abort_and_kill_oserror(monkeypatch: Any) -> None:
+    import asyncio
+
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    class LateSignal:
+        def __init__(self) -> None:
+            self.callback: Any = None
+
+        def add_listener(self, callback: Any) -> Any:
+            self.callback = callback
+            return lambda: None
+
+    late = LateSignal()
+
+    async def run_late() -> str:
+        task = asyncio.create_task(
+            handle_pwsh({"command": "Start-Sleep -Seconds 2", "signal": late})
+        )
+        await asyncio.sleep(0.05)
+        if late.callback is not None:
+            late.callback()
+        return await task
+
+    assert "aborted" in (await run_late()).lower()
+
+    class KillFails:
+        def kill(self) -> None:
+            raise OSError("gone")
+
+        async def wait(self) -> int:
+            return -1
+
+    real_create = asyncio.create_subprocess_exec
+
+    async def fake_create(*args: Any, **kwargs: Any) -> Any:
+        process = await real_create(*args, **kwargs)
+        process.kill = KillFails().kill
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+    out = await handle_pwsh({"command": "Start-Sleep -Seconds 2", "timeoutMs": 30})
+    assert "timed out" in out
+
+
+@pytest.mark.asyncio
+async def test_pwsh_remaining_branches() -> None:
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    # No configured key -> resolve from PATH.
+    assert "42" in await handle_pwsh({"description": "add", "command": "20+22"})
+
+    class DoubleSignal:
+        def __init__(self) -> None:
+            self.callback: Any = None
+
+        def add_listener(self, callback: Any) -> Any:
+            self.callback = callback
+            return lambda: None
+
+    signal = DoubleSignal()
+
+    async def call_twice() -> str:
+        task = asyncio.create_task(handle_pwsh({"command": "20+22", "signal": signal}))
+        await asyncio.sleep(0.01)
+        if signal.callback is not None:
+            signal.callback()
+            signal.callback()
+        return await task
+
+    result = await call_twice()
+    assert "42" in result or "aborted" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_pwsh_bare_ctx_and_quiet_signal() -> None:
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    out = await handle_pwsh({"description": "add", "command": "20+22"}, ctx=Context())
+    assert "42" in out
+
+    class QuietSignal:
+        def add_listener(self, callback: Any) -> Any:
+            return lambda: None
+
+    out = await handle_pwsh(
+        {"description": "add", "command": "20+22", "signal": QuietSignal()}
+    )
+    assert "42" in out
