@@ -19,6 +19,7 @@ from magitech_harness.components.service import ComponentService
 from magitech_harness.fs.local import LocalFileSystem
 from magitech_harness.jobs.local import LocalJobRegistry
 from magitech_harness.llm.service import LLMService
+from magitech_harness.permission.service import PermissionPresetService
 from magitech_harness.session.persistence_jsonl import (
     JsonlSessionPersistenceService,
 )
@@ -179,6 +180,24 @@ EXPECTED_ROWS = [
         "id": "approval-guard",
         "name": "magitech_harness.approval.guard:apply",
         "config": {},
+    },
+    {
+        "id": "permission",
+        "name": "magitech_harness.permission.service:PermissionPresetService",
+        "disabled_on": ["win32"],
+        "config": {
+            "presets": {
+                "read-only": {"sandbox": "read-only", "approval": "ask"},
+                "workspace-write": {
+                    "sandbox": "workspace-write",
+                    "approval": "ask",
+                },
+                "danger-full-access": {
+                    "sandbox": "danger-full-access",
+                    "approval": "never",
+                },
+            }
+        },
     },
     {
         "id": "layers",
@@ -431,6 +450,8 @@ def test_bundle_slots_are_row_services() -> None:
     assert isinstance(ctx.jobs, LocalJobRegistry)
     assert isinstance(ctx.workingDirectory, WorkingDirectoryService)
     assert isinstance(ctx.approval, ApprovalService)
+    if sys.platform != "win32":
+        assert isinstance(ctx.permissionPresets, PermissionPresetService)
     assert isinstance(ctx.layers, LayerResolutionService)
     assert isinstance(ctx.components, ComponentService)
     assert isinstance(ctx.sessionProjections, SessionProjectionRegistry)
