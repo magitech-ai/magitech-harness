@@ -16,6 +16,7 @@ from typing import Any
 
 from animas import Context
 
+from magitech_harness.sandbox.roots import writable_roots
 from magitech_harness.tools.path_guard import PathEscapeError, confined_path
 from magitech_harness.tools.schema import define_tool
 
@@ -251,19 +252,7 @@ def _tool_path_denied(ctx: Context, exec_view: Any, path_str: str) -> str | None
         path = Path(path_str).resolve(strict=False)
     except OSError:
         path = Path(path_str)
-    roots = []
-    if mode == "workspace-write":
-        roots.extend(
-            [
-                str(Path(str(policy.get("workspaceRoot", ""))).resolve(strict=False)),
-                *(
-                    str(Path(str(extra)).resolve(strict=False))
-                    for extra in policy.get("additionalWritableRoots") or ()
-                ),
-                "/tmp",
-            ]
-        )
-    roots.append("/dev/null")
+    roots = writable_roots(policy) if mode == "workspace-write" else []
     for root in roots:
         try:
             path.relative_to(root)

@@ -620,6 +620,26 @@ async def test_fs_tools_enforce_policy(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_policy_read_only_denies_dev_null(tmp_path: Path) -> None:
+    from magitech_harness.tools.fs import _tool_path_denied
+
+    ctx = Context()
+    ctx.provide(
+        "sandboxPolicy",
+        SimpleNamespace(
+            resolve=lambda _session: {
+                "mode": "read-only",
+                "workspaceRoot": str(tmp_path),
+            }
+        ),
+    )
+    for path in ("/dev/null", "/tmp/x", str(tmp_path / "x")):
+        reason = _tool_path_denied(ctx, None, path)
+        assert reason is not None and "denied" in reason
+    assert _tool_path_denied(ctx, None, "/etc/hosts") is not None
+
+
+@pytest.mark.asyncio
 async def test_tool_policy_helper_edges(tmp_path: Path, monkeypatch: Any) -> None:
     from pathlib import Path as P
 
