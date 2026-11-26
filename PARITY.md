@@ -47,8 +47,8 @@ in `tests/test_profile_translator.py`. Never add a runtime expression evaluator 
 | 7 | `!!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` | `mode: ${MAGITECH_PERMISSION_MODE:workspace-write}` | base.yaml `sandbox-policy` |
 | 8 | `!!js process.cwd()` | `workspaceRoot: ${PWD}` | base.yaml `sandbox-policy` |
 | 9 | `!!js process.platform === 'win32'` | `disabled_on: [ win32 ]` | base.yaml `tool-bash`, `bash-sandbox` |
-| 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` | base.yaml `tool-pwsh`, `pwsh-sandbox` |
-| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ${DSH_PERMISSION_MODE:ask:danger=never}` | base.yaml `approval` |
+| 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` for `pwsh-local`; `tool-pwsh` is mounted unconditionally so Linux pwsh 7 can run (dsh gates it win32) | base.yaml `pwsh-local`, `tool-pwsh` |
+| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ${MAGITECH_PERMISSION_MODE:ask:danger=never}` | base.yaml `approval` |
 | 12| `!!js process.env.DSH_TELEMETRY_DISABLED` (outer config, not base) | `disabled: ${DSH_TELEMETRY_DISABLED:true}` | base.yaml `session-telemetry-otel` |
 
 The translator golden tests pin each expression → declarative row. See `scripts/profile_translator.py`.
@@ -102,12 +102,12 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 41 | sandbox | `@deepseek-ai/dsh-sandbox-local` | packages/sandbox/sandbox-local/src/index.ts | magitech-harness | `src/magitech_harness/sandbox/service.py` | DONE | `test_sandbox.py` (fail-closed `confine`, bwrap backend, denial/runner signatures, full enforcement) |
 | 42 | sandbox-policy | `@deepseek-ai/dsh-sandbox-policy` | packages/sandbox/sandbox-policy/src/index.ts | magitech-harness | `src/magitech_harness/sandbox/policy.py` | DONE | `test_sandbox.py` (three modes, session `sandbox/mode` projection, precedence, writable roots, escalation) |
 | 43 | bash-sandbox | `@deepseek-ai/dsh-bash-sandbox` | packages/shell/bash-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/shell/bash_sandbox.py` | DONE | `test_sandbox.py` (real bwrap confinement, denial facts, runner-failure taxonomy, model-facing escalation; closes finding #13) |
-| 44 | pwsh-sandbox | `@deepseek-ai/dsh-pwsh-sandbox` | packages/shell/pwsh-sandbox/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported (Linux CI) |
+| 44 | pwsh-sandbox | `@deepseek-ai/dsh-pwsh-sandbox` | packages/shell/pwsh-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/tools/pwsh_tool.py` | DONE | `test_pwsh_tool.py` (argv confined through `ctx.sandbox`, bwrap backend, denial marker) |
 | 45 | approval | `@deepseek-ai/dsh-user-approval` | packages/interaction/user-approval/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` | DONE | `test_approval_service.py` |
 | 46 | permission | `@deepseek-ai/dsh-permission-presets` | packages/interaction/permission-presets/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` (policy) | DONE | `test_approval_presets.py` |
 | 47 | shell-env | `@deepseek-ai/dsh-shell-env` | packages/shell/shell-env/src/index.ts | magitech-harness | `src/magitech_harness/shell_env/service.py` | DONE | `test_shell_env.py` |
 | 48 | tool-bash | `@deepseek-ai/dsh-tool-bash` | packages/shell/tool-bash/src/index.ts:415 | magitech-harness (base tool) | `src/magitech_harness/tools/bash_tool.py` | DONE | `tests/unit/magitech_harness/tools/test_bash_tool.py` |
-| 49 | tool-pwsh | `@deepseek-ai/dsh-tool-pwsh` | packages/shell/tool-pwsh/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported |
+| 49 | tool-pwsh | `@deepseek-ai/dsh-tool-pwsh` | packages/shell/tool-pwsh/src/index.ts | magitech-harness | `src/magitech_harness/tools/pwsh_tool.py` | DONE | `test_pwsh_tool.py` (PowerShell dialect, `-Command` execution via local pwsh 7, timeout/spill/exit markers) |
 | 50 | tool-jobs | `@deepseek-ai/dsh-tool-jobs` | packages/jobs/tool-jobs/src/index.ts:435 | magitech-harness (base tool) | `src/magitech_harness/tools/jobs.py` | DONE | `test_jobs.py` |
 | 51 | fs-observation-policy | `@deepseek-ai/dsh-fs-observation-policy` | packages/fs/fs-observation-policy/src/index.ts | magitech-harness | `src/magitech_harness/fs/observation_policy.py` | DONE | `test_observation_policy.py` |
 | 52 | tool-fs | `@deepseek-ai/dsh-tool-fs` | packages/fs/tool-fs/src/index.ts | magitech-harness (base tool) | `src/magitech_harness/tools/fs.py` | DONE | `test_fs_{read,write,edit}.py`; `apply_patch` stays unported and refuses to mount |
@@ -216,7 +216,7 @@ registrations remain.
 
 | Row | Reason | Accepted by |
 |---|---|---|
-| `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
+| `pwsh-sandbox` | PowerShell tool ported and confined through the harness sandbox seam (rows 44 and 49 DONE). Windows ACL backend remains a platform gap. | Resolved by implementation |
 | `sandbox` / `sandbox-policy` | Linux bwrap-backed confinement implemented (rows 41–43 DONE) with per-call policy, session mode, approval escalation, shell-executor enforcement and fs-provider/tool enforcement. finding #13 is closed for the shell and fs paths; Windows ACL backend remains a platform gap (row 44). | Resolved by implementation |
 | `agent-instructions` | Implemented as a durable instruction loader (row 54 DONE). | Resolved by implementation |
 | `upstream-skills` | Implemented as a verified pinned download component (row 58 DONE). | Resolved by implementation |
