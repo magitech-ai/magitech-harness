@@ -240,6 +240,7 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
         EventType.STEP_START,
         EventType.USER_MESSAGE,
         EventType.USER_MESSAGE,
+        EventType.USER_MESSAGE,
         EventType.REQUEST_HEADER,
         EventType.REQUEST_CONTEXT,
         EventType.ASSISTANT_MESSAGE,
