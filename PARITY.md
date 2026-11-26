@@ -61,7 +61,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 |---|---|---|---|---|---|---|---|
 | 1 | tool-plugin-manager | `@deepseek-ai/dsh-plugin-manager/tools` | packages/boot/plugin-manager/src/tools.ts:92 | mth-components (plugin manager is opt-in infra) | NONE | OUT OF SCOPE | plugin manager is optional, not base Tier 1 |
 | 2 | plugin-manager | `@deepseek-ai/dsh-plugin-manager` | packages/boot/plugin-manager/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional bundle |
-| 3 | timer | `@deepseek-ai/cordis-plugin-timer` | vendor/ | animas | NONE | OUT OF SCOPE | kernel timer, not harness |
+| 3 | timer | `@deepseek-ai/cordis-plugin-timer` | `vendor/timer/src/index.ts` | animas | `src/animas/timer.py` | DONE | animas: `tests/unit/animas/test_timer.py` (kernel `timeout`, `interval`, `throttle`, `debounce` with fiber-scoped disposal; owned by animas, not the harness) |
 | 4 | hmr | `@deepseek-ai/dsh-hmr` | packages/boot/hmr/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
 | 5 | llm | `@deepseek-ai/dsh-llm` | packages/llm/llm/src/index.ts | magitech-harness | `src/magitech_harness/llm/service.py` | DONE | `tests/unit/magitech_harness/llm/test_service.py` |
 | 6 | deepseek-llm-api-extensions | `@deepseek-ai/dsh-deepseek-llm-api-extensions` | packages/llm/deepseek-llm-api-extensions/src/ | DSH-specific | NONE | OUT OF SCOPE | DeepSeek-specific extension |
