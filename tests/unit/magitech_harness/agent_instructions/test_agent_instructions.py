@@ -364,13 +364,13 @@ def test_remaining_file_and_service_branches(monkeypatch: Any, tmp_path: Path) -
     cfg = resolve_config({"maxBytes": 100})
     loc = files_mod.LocatedFile(target, "x.md", "src")
     monkeypatch.setattr(Path, "resolve", lambda self: (_ for _ in ()).throw(OSError()))
-    monkeypatch.setattr(files_mod, "discover_locations", lambda c, d: [loc])
+    monkeypatch.setattr(files_mod, "discover_locations", lambda c, d, extra=None: [loc])
     assert files_mod.load_instruction_files(cfg, tmp_path) == []
     monkeypatch.setattr(Path, "resolve", lambda self: self)
     monkeypatch.setattr(
         files_mod,
         "discover_locations",
-        lambda c, d: [loc, loc],
+        lambda c, d, extra=None: [loc, loc],
     )
     assert len(files_mod.load_instruction_files(cfg, tmp_path)) == 1
 
@@ -507,7 +507,7 @@ async def test_tool_result_guards_and_duplicate_keys(
     cfg = resolve_config({"maxBytes": 100})
     monkeypatch.setattr(
         "magitech_harness.agent_instructions.files.discover_locations",
-        lambda c, d: (
+        lambda c, d, extra=None: (
             [
                 __import__(
                     "magitech_harness.agent_instructions.files",
@@ -547,7 +547,7 @@ def test_render_last_branches(monkeypatch: Any, tmp_path: Path) -> None:
         files_mod.LocatedFile(a, "x/AGENTS.md", "x"),
         files_mod.LocatedFile(b, "x/AGENTS.md", "x"),
     ]
-    monkeypatch.setattr(files_mod, "discover_locations", lambda c, d: locs)
+    monkeypatch.setattr(files_mod, "discover_locations", lambda c, d, extra=None: locs)
     assert len(files_mod.load_instruction_files(cfg, tmp_path)) == 1
 
 
@@ -599,7 +599,7 @@ async def test_pre_step_propagates_abort(monkeypatch: Any) -> None:
     monkeypatch.setattr(
         service_mod,
         "load_instruction_files",
-        lambda c, d: (_ for _ in ()).throw(AbortError("cancelled")),
+        lambda c, d, extra=None: (_ for _ in ()).throw(AbortError("cancelled")),
     )
     with pytest.raises(AbortError):
         await plugin.pre_step(
@@ -613,7 +613,9 @@ async def test_pre_step_propagates_abort(monkeypatch: Any) -> None:
 
 
 @pytest.mark.asyncio
-async def test_production_delta_renders_change_sections_and_consumes_touches(monkeypatch: Any, tmp_path: Path) -> None:
+async def test_production_delta_renders_change_sections_and_consumes_touches(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
     monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
     monkeypatch.setenv("DSH_AGENTS_HOME", str(tmp_path / "agents"))
     (tmp_path / ".git").mkdir()
@@ -626,7 +628,14 @@ async def test_production_delta_renders_change_sections_and_consumes_touches(mon
     identity = cfg.identity(tmp_path, tmp_path)
     baseline = agent_instructions_message(
         "old",
-        [{"action": "set", "scope": ".\x00AGENTS.md", "path": "AGENTS.md", "digest": "old"}],
+        [
+            {
+                "action": "set",
+                "scope": ".\x00AGENTS.md",
+                "path": "AGENTS.md",
+                "digest": "old",
+            }
+        ],
         baseline=True,
         identity=identity,
     )
@@ -639,3 +648,53 @@ async def test_production_delta_renders_change_sections_and_consumes_touches(mon
     assert notice is not None
     assert "Updated instructions from:" in notice["content"][0]["text"]
     assert str(id(agent)) not in plugin.touches
+
+
+def test_descendant_probe_and_extra_dirs(monkeypatch: Any, tmp_path: Path) -> None:
+    from magitech_harness.agent_instructions.files import (
+        descendant_dirs_between,
+        load_instruction_files,
+    )
+
+    cwd = tmp_path / "project" / "src"
+    cwd.mkdir(parents=True)
+    deep = cwd / "deep"
+    deep.mkdir()
+    (deep / "AGENTS.md").write_text("deep rule", encoding="utf-8")
+    assert cwd in descendant_dirs_between(cwd, str(deep / "AGENTS.md"))
+    assert deep in descendant_dirs_between(cwd, str(deep / "AGENTS.md"))
+    assert descendant_dirs_between(cwd, str(tmp_path / "outside")) == []
+
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
+    monkeypatch.setenv("DSH_AGENTS_HOME", str(tmp_path / "agents"))
+    cfg = resolve_config({"maxBytes": 10000})
+    files = load_instruction_files(cfg, cwd, [deep, deep])
+    assert any("deep rule" == file.content for file in files)
+
+
+def test_descendant_edge_branches(monkeypatch: Any, tmp_path: Path) -> None:
+    from pathlib import Path as P
+
+    from magitech_harness.agent_instructions.files import (
+        descendant_dirs_between,
+        load_instruction_files,
+    )
+
+    original = P.resolve
+
+    def flaky(self: P) -> P:
+        if str(self) == "x":
+            raise OSError()
+        return original(self)
+
+    monkeypatch.setattr(P, "resolve", flaky)
+    assert descendant_dirs_between(tmp_path, "x") == []
+    monkeypatch.undo()
+
+    monkeypatch.setenv("DSH_HOME", str(tmp_path / "dsh"))
+    monkeypatch.setenv("DSH_AGENTS_HOME", str(tmp_path / "agents"))
+    cfg = resolve_config({"maxBytes": 10000})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "AGENTS.md").write_text("outside", encoding="utf-8")
+    load_instruction_files(cfg, tmp_path / "cwd", [outside])

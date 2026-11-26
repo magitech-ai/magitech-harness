@@ -105,7 +105,30 @@ def _read_bounded(path: Path, max_bytes: int) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
-def discover_locations(config: ResolvedConfig, cwd: Path) -> list[LocatedFile]:
+def descendant_dirs_between(cwd: Path, touched: str) -> list[Path]:
+    """Directories from ``cwd`` toward a touched path, inclusive of its parent."""
+    base = cwd.resolve()
+    try:
+        target = Path(touched).resolve()
+    except OSError:
+        return []
+    candidate = target if target.is_dir() else target.parent
+    try:
+        candidate.relative_to(base)
+    except ValueError:
+        return []
+    chain: list[Path] = []
+    current = candidate
+    while current != base:
+        chain.append(current)
+        current = current.parent
+    chain.append(base)
+    return list(reversed(chain))
+
+
+def discover_locations(
+    config: ResolvedConfig, cwd: Path, extra_dirs: list[Path] | None = None
+) -> list[LocatedFile]:
     """Enumerate global and project candidate locations in precedence order."""
     locations: list[LocatedFile] = []
     roots = [
@@ -129,10 +152,26 @@ def discover_locations(config: ResolvedConfig, cwd: Path) -> list[LocatedFile]:
             locations.append(
                 LocatedFile(path, relative, scope_for_display_path(relative))
             )
+    seen = {str(location.path) for location in locations}
+    for directory in extra_dirs or []:
+        for candidate in config.instruction_file_candidates:
+            path = directory / candidate
+            if str(path) in seen:
+                continue
+            seen.add(str(path))
+            try:
+                relative = path.relative_to(cwd).as_posix()
+            except ValueError:
+                relative = path.name
+            locations.append(
+                LocatedFile(path, relative, scope_for_display_path(relative))
+            )
     return locations
 
 
-def load_instruction_files(config: ResolvedConfig, cwd: Path) -> list[InstructionFile]:
+def load_instruction_files(
+    config: ResolvedConfig, cwd: Path, extra_dirs: list[Path] | None = None
+) -> list[InstructionFile]:
     """Discover, read, validate and per-group deduplicate instruction files."""
     if config.max_bytes <= 0:
         return []
@@ -140,7 +179,7 @@ def load_instruction_files(config: ResolvedConfig, cwd: Path) -> list[Instructio
     seen_paths: set[Path] = set()
     result: list[InstructionFile] = []
     seen_keys: set[str] = set()
-    for located in discover_locations(config, cwd):
+    for located in discover_locations(config, cwd, extra_dirs):
         try:
             resolved = located.path.resolve()
         except OSError:

@@ -19,6 +19,7 @@ from magitech_harness.agent_instructions.config import (
     resolve_config,
 )
 from magitech_harness.agent_instructions.files import (
+    descendant_dirs_between,
     find_project_root,
     load_instruction_files,
 )
@@ -81,7 +82,10 @@ class AgentInstructionsPlugin:
         from pathlib import Path
 
         cwd = Path(await self._cwd(agent, payload.get("signal")))
-        files = load_instruction_files(self.config, cwd)
+        extra_dirs: list[Any] = []
+        for touched in self.touches.get(str(id(agent)), ()):
+            extra_dirs.extend(descendant_dirs_between(cwd, touched))
+        files = load_instruction_files(self.config, cwd, extra_dirs)
         messages = [*_session_messages(agent), *_messages(payload)]
         baseline = visible_baseline(messages)
         project_root = find_project_root(cwd, self.config.project_root_markers)
