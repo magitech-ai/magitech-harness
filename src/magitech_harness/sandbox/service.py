@@ -6,13 +6,15 @@ fail-closed: it returns enforcing argv or raises ``SANDBOX_UNAVAILABLE``.
 
 from __future__ import annotations
 
+import math
 import shutil
+import subprocess
 from collections.abc import Mapping, Sequence
 from typing import Any, ClassVar
 
 from animas import Context, Service
 
-from magitech_harness.sandbox.roots import canonical_path, workspace_writable_roots
+from magitech_harness.sandbox.roots import workspace_writable_roots
 from magitech_harness.sandbox.types import (
     ConfinedArgv,
     RunnerFailureRule,
@@ -21,16 +23,12 @@ from magitech_harness.sandbox.types import (
 )
 
 DENIAL_SIGNATURES: dict[str, tuple[str, ...]] = {
-    "bwrap": ("read-only file system", "permission denied"),
-    "landlock": ("permission denied", "operation not permitted"),
+    "bwrap": ("read-only file system",),
+    "landlock": ("permission denied",),
+    "runnerCommand": ("read-only file system", "permission denied"),
 }
 RUNNER_FAILURE_RULES: dict[str, tuple[RunnerFailureRule, ...]] = {
-    "bwrap": (
-        RunnerFailureRule(
-            ("bwrap:", "cannot create", "failed to exec", "not found"),
-            informational_lines=(),
-        ),
-    ),
+    "bwrap": (RunnerFailureRule(("bwrap: ",), informational_lines=()),),
 }
 STATIC_ENFORCEMENT: dict[str, str] = {
     "bwrap": "full",
@@ -64,6 +62,7 @@ class SandboxService(Service):
                 not isinstance(signature, str)
                 or not signature.strip()
                 or "\n" in signature
+                or "\r" in signature
             ):
                 raise SandboxError(
                     "sandbox-local: runnerFailureSignatures entries must be non-empty single-line strings",
@@ -76,18 +75,40 @@ class SandboxService(Service):
         if (
             isinstance(self.probe_timeout_ms, bool)
             or not isinstance(self.probe_timeout_ms, (int, float))
+            or not math.isfinite(self.probe_timeout_ms)
             or self.probe_timeout_ms <= 0
         ):
             raise SandboxError(
                 "sandbox-local: probeTimeoutMs must be a positive finite number",
                 "SANDBOX_INVALID_CONFIG",
             )
+        self._bwrap_verdict: bool | None = None
 
-    def _profile_argv(self, policy: Mapping[str, Any]) -> list[str]:
-        """Build the bwrap argv for one policy."""
-        assert self.bwrap_path is not None
+    def _probe_bwrap(self) -> bool:
+        """Run the read-only profile once (bounded by ``probeTimeoutMs``)."""
+        if self._bwrap_verdict is None:
+            if self.bwrap_path is None:
+                self._bwrap_verdict = False
+            else:
+                profile = self._profile_argv(
+                    {"mode": "read-only", "workspaceRoot": "/"}
+                )
+                try:
+                    result = subprocess.run(
+                        [*profile, "--", "true"],
+                        timeout=self.probe_timeout_ms / 1000,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
+                    self._bwrap_verdict = result.returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    self._bwrap_verdict = False
+        return self._bwrap_verdict
+
+    def _bwrap_profile_flags(self, policy: Mapping[str, Any]) -> list[str]:
+        """The bwrap profile arguments, without an executable."""
         args: list[str] = [
-            self.bwrap_path,
             "--ro-bind",
             "/",
             "/",
@@ -103,6 +124,11 @@ class SandboxService(Service):
             for root in workspace_writable_roots(policy):
                 args.extend(["--bind", root, root])
         return args
+
+    def _profile_argv(self, policy: Mapping[str, Any]) -> list[str]:
+        """Build the bwrap argv for one policy."""
+        assert self.bwrap_path is not None
+        return [self.bwrap_path, *self._bwrap_profile_flags(policy)]
 
     def confine(
         self,
@@ -120,22 +146,19 @@ class SandboxService(Service):
                 "SANDBOX_INVALID_CONFIG",
             )
         if self.runner_command:
-            runner = list(self.runner_command)
-            signatures = self.runner_signatures
-            rules: tuple[RunnerFailureRule, ...] = (RunnerFailureRule(signatures),)
+            runner = [*self.runner_command, *self._bwrap_profile_flags(policy)]
+            signatures = DENIAL_SIGNATURES["runnerCommand"]
+            rules: tuple[RunnerFailureRule, ...] = (
+                RunnerFailureRule(self.runner_signatures),
+            )
             enforcement = "full"
         else:
-            if self.bwrap_path is None:
+            if not self._probe_bwrap():
                 raise SandboxUnavailableError(mode)
             runner = self._profile_argv(policy)
             signatures = DENIAL_SIGNATURES["bwrap"]
             rules = RUNNER_FAILURE_RULES["bwrap"]
             enforcement = STATIC_ENFORCEMENT["bwrap"]
-        canonical = {
-            **policy,
-            "workspaceRoot": canonical_path(str(policy["workspaceRoot"])),
-        }
-        del canonical  # policy identity is preserved; roots are derived at the provider
         return ConfinedArgv(
             argv=[*runner, "--", *argv],
             enforcement=enforcement,  # type: ignore[arg-type]

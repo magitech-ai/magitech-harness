@@ -413,6 +413,10 @@ async def test_pwsh_abort_kill_oserror_and_denial_marker(monkeypatch: Any) -> No
         exec_view={"agent": SimpleNamespace(session=SimpleNamespace())},
     )
     assert "[sandbox: file access denied under read-only mode]" in out
+    assert "[sandbox: escalation available" in out, (
+        "denial must be followed by the same-turn escalation hint"
+    )
+    assert out.rstrip().endswith("[exit code: 1]")
 
 
 @pytest.mark.asyncio
@@ -439,3 +443,61 @@ async def test_pwsh_denial_signatures_no_match() -> None:
     )
     assert "[exit code: 4]" in out
     assert "[sandbox: file access denied" not in out
+
+
+@pytest.mark.asyncio
+async def test_pwsh_marker_order_single_timeout_and_cap(tmp_path: Any) -> None:
+    ctx = Context()
+    ctx.provide("pwshConfig", PWSH_BIN)
+    result = await handle_pwsh(
+        {"command": "Write-Output hi; exit 3"}, ctx=ctx, spill_dir=tmp_path
+    )
+    assert result.rstrip().endswith("[exit code: 3]")
+    from magitech_harness.agent.cancellation import AbortSignal
+
+    with_signal = await handle_pwsh(
+        {"command": "exit 3", "signal": AbortSignal()}, ctx=ctx, spill_dir=tmp_path
+    )
+    assert with_signal.rstrip().endswith("[exit code: 3]")
+
+    timed = await handle_pwsh(
+        {"command": "Start-Sleep -Seconds 2", "timeoutMs": 50},
+        ctx=ctx,
+        spill_dir=tmp_path,
+    )
+    assert timed == "[timed out after 50ms]"
+
+    registered: list[Any] = []
+    capped = Context()
+    capped.provide("tools", SimpleNamespace(register=registered.append))
+    capped.provide("pwshConfig", PWSH_BIN)
+    capped.provide("shell", SimpleNamespace(config={"maxTimeoutMs": 30}))
+    apply(capped)
+    out = await registered[0]["execute"](
+        {
+            "description": "sleep",
+            "command": "Start-Sleep -Seconds 2",
+            "timeoutMs": 1000,
+        }
+    )
+    assert out == "[timed out after 30ms]"
+
+
+@pytest.mark.asyncio
+async def test_pwsh_signal_marker(monkeypatch: Any) -> None:
+    class Signalled:
+        def __init__(self, code: int) -> None:
+            self.returncode = code
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b"", b""
+
+    async def spawn(code: int) -> Any:
+        async def create(*_args: Any, **_kwargs: Any) -> Any:
+            return Signalled(code)
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", create)
+        return await handle_pwsh({"command": "1"})
+
+    assert "[killed by signal: SIGTERM]" in await spawn(-15)
+    assert "[killed by signal: 999999]" in await spawn(-999999)
