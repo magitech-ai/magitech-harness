@@ -47,8 +47,8 @@ in `tests/test_profile_translator.py`. Never add a runtime expression evaluator 
 | 7 | `!!js process.env.DSH_PERMISSION_MODE ?? 'workspace-write'` | `mode: ${MAGITECH_PERMISSION_MODE:workspace-write}` | base.yaml `sandbox-policy` |
 | 8 | `!!js process.cwd()` | `workspaceRoot: ${PWD}` | base.yaml `sandbox-policy` |
 | 9 | `!!js process.platform === 'win32'` | `disabled_on: [ win32 ]` | base.yaml `tool-bash`, `bash-sandbox` |
-| 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` | base.yaml `tool-pwsh`, `pwsh-sandbox` |
-| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ${DSH_PERMISSION_MODE:ask:danger=never}` | base.yaml `approval` |
+| 10| `!!js process.platform !== 'win32'` | `enabled_on: [ win32 ]` for `pwsh-local`; `tool-pwsh` is mounted unconditionally so Linux pwsh 7 can run (dsh gates it win32) | base.yaml `pwsh-local`, `tool-pwsh` |
+| 11| `!!js "(process.env.DSH_PERMISSION_MODE ?? 'workspace-write') === 'danger-full-access' ? 'never' : 'ask'"` | `policy: ${MAGITECH_PERMISSION_MODE:ask:danger=never}` | base.yaml `approval` |
 | 12| `!!js process.env.DSH_TELEMETRY_DISABLED` (outer config, not base) | `disabled: ${DSH_TELEMETRY_DISABLED:true}` | base.yaml `session-telemetry-otel` |
 
 The translator golden tests pin each expression → declarative row. See `scripts/profile_translator.py`.
@@ -102,7 +102,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 41 | sandbox | `@deepseek-ai/dsh-sandbox-local` | packages/sandbox/sandbox-local/src/index.ts | magitech-harness | `src/magitech_harness/sandbox/service.py` | DONE | `test_sandbox.py` (fail-closed `confine`, bwrap backend, denial/runner signatures, full enforcement) |
 | 42 | sandbox-policy | `@deepseek-ai/dsh-sandbox-policy` | packages/sandbox/sandbox-policy/src/index.ts | magitech-harness | `src/magitech_harness/sandbox/policy.py` | DONE | `test_sandbox.py` (three modes, session `sandbox/mode` projection, precedence, writable roots, escalation) |
 | 43 | bash-sandbox | `@deepseek-ai/dsh-bash-sandbox` | packages/shell/bash-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/shell/bash_sandbox.py` | DONE | `test_sandbox.py` (real bwrap confinement, denial facts, runner-failure taxonomy, model-facing escalation; closes finding #13) |
-| 44 | pwsh-sandbox | `@deepseek-ai/dsh-pwsh-sandbox` | packages/shell/pwsh-sandbox/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported (Linux CI) |
+| 44 | pwsh-sandbox | `@deepseek-ai/dsh-pwsh-sandbox` | packages/shell/pwsh-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/tools/pwsh_tool.py` | DONE | `test_pwsh_tool.py` (argv confined through `ctx.sandbox`, bwrap backend, denial marker) |
 | 45 | approval | `@deepseek-ai/dsh-user-approval` | packages/interaction/user-approval/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` | DONE | `test_approval_service.py` |
 | 46 | permission | `@deepseek-ai/dsh-permission-presets` | packages/interaction/permission-presets/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` (policy) | DONE | `test_approval_presets.py` |
 | 47 | shell-env | `@deepseek-ai/dsh-shell-env` | packages/shell/shell-env/src/index.ts | magitech-harness | `src/magitech_harness/shell_env/service.py` | DONE | `test_shell_env.py` |

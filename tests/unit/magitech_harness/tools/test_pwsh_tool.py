@@ -344,3 +344,72 @@ async def test_pwsh_bare_ctx_and_quiet_signal() -> None:
         {"description": "add", "command": "20+22", "signal": QuietSignal()}
     )
     assert "42" in out
+
+
+@pytest.mark.asyncio
+async def test_pwsh_abort_kill_oserror_and_denial_marker(monkeypatch: Any) -> None:
+    import asyncio
+
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    class FailingKill:
+        def kill(self) -> None:
+            raise OSError("gone")
+
+        async def wait(self) -> int:
+            return -1
+
+    real_create = asyncio.create_subprocess_exec
+
+    async def fake_create(*args: Any, **kwargs: Any) -> Any:
+        process = await real_create(*args, **kwargs)
+        process.kill = FailingKill().kill
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_create)
+
+    class Signal:
+        def __init__(self) -> None:
+            self.callback: Any = None
+
+        def add_listener(self, callback: Any) -> Any:
+            self.callback = callback
+            return lambda: None
+
+    signal = Signal()
+
+    async def run() -> str:
+        task = asyncio.create_task(
+            handle_pwsh({"command": "Start-Sleep -Seconds 2", "signal": signal})
+        )
+        await asyncio.sleep(0.02)
+        if signal.callback is not None:
+            signal.callback()
+        return await task
+
+    assert "aborted" in (await run()).lower()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", real_create)
+
+    class Policy:
+        def resolve(self, session: Any) -> dict[str, Any]:
+            return {"mode": "read-only", "workspaceRoot": "/tmp"}
+
+    class Sandbox:
+        def confine(self, argv: list[str], policy: Any, signal: Any = None) -> Any:
+            from types import SimpleNamespace as NS
+
+            return NS(
+                argv=argv,
+                denial_signatures=("read-only file system", "permission denied"),
+            )
+
+    ctx = Context()
+    ctx.provide("sandbox", Sandbox())
+    ctx.provide("sandboxPolicy", Policy())
+    out = await handle_pwsh(
+        {"command": "touch /etc/x; exit 1"},
+        ctx=ctx,
+        exec_view={"agent": SimpleNamespace(session=SimpleNamespace())},
+    )
+    assert "[sandbox: file access denied under read-only mode]" in out

@@ -94,7 +94,12 @@ async def handle_pwsh(
         "-Command",
         ENCODING_PREAMBLE + str(command),
     ]
-    signal = args.get("signal")
+    signal = (
+        exec_view.get("signal")
+        if isinstance(exec_view, dict) and exec_view.get("signal") is not None
+        else args.get("signal")
+    )
+    denial_signatures: tuple[str, ...] = ()
     if ctx is not None and ctx.has("sandbox") and ctx.has("sandboxPolicy"):
         agent = exec_view.get("agent") if isinstance(exec_view, dict) else None
         session = getattr(agent, "session", None)
@@ -102,6 +107,7 @@ async def handle_pwsh(
         if policy.get("mode") != "danger-full-access":
             confined = ctx.sandbox.confine(argv, policy, signal)
             argv = confined.argv
+            denial_signatures = tuple(getattr(confined, "denial_signatures", ()))
     try:
         process = await asyncio.create_subprocess_exec(
             *argv,
@@ -110,6 +116,7 @@ async def handle_pwsh(
             cwd=cwd,
         )
         communicate = asyncio.ensure_future(process.communicate())
+        wait_for: set[Any] = {communicate}
         if signal is not None and hasattr(signal, "add_listener"):
             aborted = asyncio.get_running_loop().create_future()
 
@@ -118,28 +125,34 @@ async def handle_pwsh(
                     aborted.set_result(None)
 
             dispose = signal.add_listener(on_abort)
-            try:
-                done, _pending = await asyncio.wait(
-                    {communicate, aborted}, return_when=asyncio.FIRST_COMPLETED
-                )
-                if aborted in done:
-                    communicate.cancel()
+            wait_for.add(aborted)
+        else:
+            dispose = None
+        try:
+            done, _pending = await asyncio.wait(
+                wait_for,
+                timeout=timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if "aborted" in locals() and aborted in done:
+                communicate.cancel()
+                try:
                     process.kill()
                     await process.wait()
-                    return "Command aborted."
-            finally:
+                except OSError:
+                    pass
+                return "Command aborted."
+            if communicate not in done:
+                try:
+                    process.kill()
+                    await process.wait()
+                except OSError:
+                    pass
+                return f"Command timed out after {timeout_seconds} seconds. [timed out after {int(timeout_seconds * 1000)}ms]"
+            stdout_bytes, stderr_bytes = communicate.result()
+        finally:
+            if dispose is not None:
                 dispose()
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            asyncio.shield(communicate) if not communicate.done() else communicate,
-            timeout=timeout_seconds,
-        )
-    except TimeoutError:
-        try:
-            process.kill()
-            await process.wait()
-        except OSError:
-            pass
-        return f"Command timed out after {timeout_seconds} seconds. [timed out after {int(timeout_seconds * 1000)}ms]"
     except OSError as error:
         return f"Error: could not start PowerShell: {error}"
 
@@ -162,8 +175,8 @@ async def handle_pwsh(
                 spills.append(str(path))
             except OSError:
                 pass
-    stdout = stdout_bytes[:max_output_bytes].decode("utf-8", errors="replace").strip()
-    stderr = stderr_bytes[:max_output_bytes].decode("utf-8", errors="replace").strip()
+    stdout = stdout_bytes[-max_output_bytes:].decode("utf-8", errors="replace").strip()
+    stderr = stderr_bytes[-max_output_bytes:].decode("utf-8", errors="replace").strip()
 
     body = stdout
     if stderr:
@@ -172,6 +185,16 @@ async def handle_pwsh(
         body = (
             f"{body}\n[exit code: {exit_code}]" if body else f"[exit code: {exit_code}]"
         )
+    if denial_signatures and exit_code not in (0, None):
+        lowered = stderr.lower()
+        if any(
+            signature.lower() in lowered
+            for signature in denial_signatures
+            if signature.strip()
+        ):
+            from magitech_harness.sandbox.escalation import sandbox_denial_marker
+
+            body += f"\n{sandbox_denial_marker(str(policy.get('mode', 'read-only')))}"
     if spills or stdout_truncated or stderr_truncated:
         body += (
             f"\n[output truncated; full output: "
