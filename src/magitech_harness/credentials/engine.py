@@ -10,7 +10,7 @@ Reference: ``packages/credentials/credentials``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ClassVar, Literal, Self, TypedDict, cast
+from typing import Any, ClassVar, Literal, Protocol, Self, TypedDict, cast
 
 from animas import Context, Service
 
@@ -18,6 +18,7 @@ __all__ = [
     "CredentialConfig",
     "CredentialInfo",
     "CredentialKey",
+    "CredentialProvider",
     "CredentialRecord",
     "CredentialRecordInfo",
     "CredentialRecordKey",
@@ -102,6 +103,14 @@ class CredentialRecordKey(TypedDict):
 # ---------------------------------------------------------------------------
 
 
+class CredentialProvider(Protocol):
+    """Optional durable provider that owns credential resolution precedence."""
+
+    def resolve(self, ref: CredentialRef) -> ResolvedCredential | None:
+        """Resolve *ref* from its managed store and environment layers."""
+        ...
+
+
 class CredentialConfig(TypedDict, total=False):
     """Optional configuration for the credential service."""
 
@@ -128,6 +137,7 @@ class CredentialService(Service):
         self.cfg: CredentialConfig = config or {}
         self._stored: dict[str, str] = {}  # ref -> value
         self._records: dict[str, CredentialRecord] = {}  # key -> record
+        self._provider: CredentialProvider | None = None
         ctx.reflect.provide("credentials", self, None)
 
     def credential_ref(self, name: str) -> CredentialRef:
@@ -138,12 +148,24 @@ class CredentialService(Service):
         """Create a branded CredentialKey: ``<owner>/<id>``."""
         return CredentialKey(owner, id)
 
+    def set_provider(self, provider: CredentialProvider) -> Callable[[], None]:
+        """Install a durable provider that owns resolution; returns a disposer."""
+        self._provider = provider
+
+        def dispose() -> None:
+            if self._provider is provider:
+                self._provider = None
+
+        return dispose
+
     def resolve(self, ref: CredentialRef) -> ResolvedCredential | None:
         """Resolve a credential reference to its current value and source.
 
-        A stored value outranks environment fallbacks. Returns ``None`` when
-        the key is not configured anywhere.
+        A registered provider decides precedence across its managed store and
+        environment layers. Without one, stored values outrank ``os.environ``.
         """
+        if self._provider is not None:
+            return self._provider.resolve(ref)
         if ref in self._stored:
             return ResolvedCredential(value=self._stored[ref], source="stored")
         import os
