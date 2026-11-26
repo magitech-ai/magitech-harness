@@ -413,3 +413,29 @@ async def test_pwsh_abort_kill_oserror_and_denial_marker(monkeypatch: Any) -> No
         exec_view={"agent": SimpleNamespace(session=SimpleNamespace())},
     )
     assert "[sandbox: file access denied under read-only mode]" in out
+
+
+@pytest.mark.asyncio
+async def test_pwsh_denial_signatures_no_match() -> None:
+    from magitech_harness.tools.pwsh_tool import handle_pwsh
+
+    class Policy:
+        def resolve(self, session: Any) -> dict[str, Any]:
+            return {"mode": "read-only", "workspaceRoot": "/tmp"}
+
+    class Sandbox:
+        def confine(self, argv: list[str], policy: Any, signal: Any = None) -> Any:
+            from types import SimpleNamespace as NS
+
+            return NS(argv=argv, denial_signatures=("read-only file system",))
+
+    ctx = Context()
+    ctx.provide("sandbox", Sandbox())
+    ctx.provide("sandboxPolicy", Policy())
+    out = await handle_pwsh(
+        {"command": "'unrelated failure' | Write-Error; exit 4"},
+        ctx=ctx,
+        exec_view={"agent": SimpleNamespace(session=SimpleNamespace())},
+    )
+    assert "[exit code: 4]" in out
+    assert "[sandbox: file access denied" not in out
