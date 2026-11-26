@@ -37,6 +37,7 @@ from magitech_harness.fs.types import (
     FsWriteIntent,
     FsWriteOutcome,
 )
+from magitech_harness.sandbox.roots import writable_roots
 
 _DEFAULT_DIFF_BASIS_MAX_BYTES = 10 * 1024 * 1024
 _MAX_DIFF_BASIS_BYTES = 512 * 1024 * 1024
@@ -91,9 +92,7 @@ def _watch_snapshot(path_str: str, is_dir: bool) -> Any:
         raise
 
 
-def _assert_sandbox_write_allowed(
-    sandbox_policy: Any, target: FsTarget, verb: str
-) -> None:
+def _assert_sandbox_write_allowed(sandbox_policy: Any, target: FsTarget) -> None:
     """Enforce the resolved file policy at the filesystem provider boundary."""
     from collections.abc import Mapping
 
@@ -111,18 +110,7 @@ def _assert_sandbox_write_allowed(
         path = Path(raw).resolve(strict=False)
     except OSError:
         path = Path(raw)
-    roots: list[str] = []
-    if mode == "workspace-write":
-        roots.append(
-            str(
-                Path(str(sandbox_policy.get("workspaceRoot", ""))).resolve(strict=False)
-            )
-        )
-        for extra in sandbox_policy.get("additionalWritableRoots") or ():
-            roots.append(str(Path(str(extra)).resolve(strict=False)))
-    roots.append("/dev/null")
-    if mode == "workspace-write":
-        roots.append("/tmp")
+    roots = writable_roots(sandbox_policy) if mode == "workspace-write" else []
     for root in roots:
         try:
             path.relative_to(root)
@@ -132,7 +120,8 @@ def _assert_sandbox_write_allowed(
     from magitech_harness.fs.types import FsError
 
     raise FsError(
-        f"sandbox denied {verb} to {target.get('displayPath', raw)} under {mode} mode",
+        f'cannot write "{target.get("displayPath", raw)}": file access denied '
+        f"under {mode} mode",
         "FS_SANDBOX_DENIED",
     )
 
@@ -707,7 +696,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsWriteOutcome:
         """Atomically create or overwrite UTF-8 text."""
-        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
+        _assert_sandbox_write_allowed(sandbox_policy, target)
         _throw_if_aborted(signal, "write")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "write")
@@ -816,7 +805,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsEditOutcome:
         """Atomically perform a literal text replacement."""
-        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
+        _assert_sandbox_write_allowed(sandbox_policy, target)
         _throw_if_aborted(signal, "edit")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "edit")
@@ -861,7 +850,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsEditOutcome:
         """Atomically apply parsed patch hunks."""
-        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
+        _assert_sandbox_write_allowed(sandbox_policy, target)
         _throw_if_aborted(signal, "patch")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "patch")
@@ -893,7 +882,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsDeleteOutcome:
         """Remove a regular file with optional version check."""
-        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
+        _assert_sandbox_write_allowed(sandbox_policy, target)
         _throw_if_aborted(signal, "delete")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "delete")
@@ -929,8 +918,8 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsMoveOutcome:
         """Publish source (optionally patched) at destination, then remove source."""
-        _assert_sandbox_write_allowed(sandbox_policy, source, "move")
-        _assert_sandbox_write_allowed(sandbox_policy, destination, "move")
+        _assert_sandbox_write_allowed(sandbox_policy, source)
+        _assert_sandbox_write_allowed(sandbox_policy, destination)
         _throw_if_aborted(signal, "move")
         if source["targetKey"] == destination["targetKey"]:
             raise FsError(

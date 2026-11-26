@@ -13,6 +13,10 @@ from typing import Any
 
 from animas import Context
 
+from magitech_harness.shell._subprocess_base import (
+    DEFAULT_MAX_TIMEOUT_MS,
+    assert_positive_finite,
+)
 from magitech_harness.tools.schema import define_tool
 
 DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
@@ -47,12 +51,13 @@ async def handle_pwsh(
     ctx: Context | None = None,
     spill_dir: Path | None = None,
     max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
-    timeout_cap_ms: int = 3_600_000,
+    timeout_cap_ms: float = DEFAULT_MAX_TIMEOUT_MS,
     exec_view: Any = None,
 ) -> str:
     """Execute one PowerShell command and render its result."""
     import asyncio
     import math
+    import signal as signal_mod
     import uuid
 
     from magitech_harness.shell.pwsh_local import (
@@ -143,12 +148,13 @@ async def handle_pwsh(
                     pass
                 return "Command aborted."
             if communicate not in done:
+                communicate.cancel()
                 try:
                     process.kill()
                     await process.wait()
                 except OSError:
                     pass
-                return f"Command timed out after {timeout_seconds} seconds. [timed out after {int(timeout_seconds * 1000)}ms]"
+                return f"[timed out after {int(timeout_seconds * 1000)}ms]"
             stdout_bytes, stderr_bytes = communicate.result()
         finally:
             if dispose is not None:
@@ -157,7 +163,15 @@ async def handle_pwsh(
         return f"Error: could not start PowerShell: {error}"
 
     exit_code = process.returncode if process.returncode is not None else -1
-    spills: list[str] = []
+    # A negative POSIX return code means the subprocess itself was signalled;
+    # this is independent of the caller's cooperative AbortSignal.
+    process_signal: str | None = None
+    if exit_code < 0:
+        try:
+            process_signal = signal_mod.Signals(-exit_code).name
+        except ValueError:
+            process_signal = str(-exit_code)
+    spills: dict[str, str] = {}
     stdout_truncated = len(stdout_bytes) > max_output_bytes
     stderr_truncated = len(stderr_bytes) > max_output_bytes
     if stdout_truncated or stderr_truncated:
@@ -172,34 +186,46 @@ async def handle_pwsh(
                 target_dir.mkdir(parents=True, exist_ok=True)
                 path = target_dir / f"{uuid.uuid4()}.{name}"
                 path.write_bytes(data)
-                spills.append(str(path))
+                spills[name] = str(path)
             except OSError:
                 pass
-    stdout = stdout_bytes[-max_output_bytes:].decode("utf-8", errors="replace").strip()
-    stderr = stderr_bytes[-max_output_bytes:].decode("utf-8", errors="replace").strip()
 
-    body = stdout
-    if stderr:
-        body = f"{body}\n\n[stderr]\n{stderr}" if body else f"[stderr]\n{stderr}"
-    if exit_code != 0:
-        body = (
-            f"{body}\n[exit code: {exit_code}]" if body else f"[exit code: {exit_code}]"
-        )
+    def stream_text(name: str, data: bytes, truncated: bool) -> str:
+        text = data[-max_output_bytes:].decode("utf-8", errors="replace").strip()
+        if truncated:
+            full = spills.get(name, "(unavailable)")
+            text = f"{text}\n[output truncated; full output: {full}]"
+        return text
+
+    body = stream_text("stdout", stdout_bytes, stdout_truncated)
+    error_text = stream_text("stderr", stderr_bytes, stderr_truncated)
+    if error_text:
+        body = f"{body}\n[stderr]\n{error_text}" if body else f"[stderr]\n{error_text}"
+    if not body:
+        body = "(no output)"
+
+    markers: list[str] = []
     if denial_signatures and exit_code not in (0, None):
-        lowered = stderr.lower()
+        lowered = error_text.lower()
         if any(
             signature.lower() in lowered
             for signature in denial_signatures
             if signature.strip()
         ):
-            from magitech_harness.sandbox.escalation import sandbox_denial_marker
+            from magitech_harness.sandbox.escalation import (
+                escalation_hint_marker,
+                sandbox_denial_marker,
+            )
 
-            body += f"\n{sandbox_denial_marker(str(policy.get('mode', 'read-only')))}"
-    if spills or stdout_truncated or stderr_truncated:
-        body += (
-            f"\n[output truncated; full output: "
-            f"{', '.join(spills) if spills else '(unavailable)'}]"
-        )
+            markers.append(sandbox_denial_marker(str(policy.get("mode", "read-only"))))
+            markers.append(escalation_hint_marker("command"))
+    # The exit markers stay last: status parsers anchor there.
+    if process_signal is not None:
+        markers.append(f"[killed by signal: {process_signal}]")
+    elif exit_code != 0:
+        markers.append(f"[exit code: {exit_code}]")
+    if markers:
+        body += "\n" + "\n".join(markers)
     return body
 
 
@@ -208,7 +234,14 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
     del config, kwargs
 
     async def _execute(args: dict[str, Any], exec_view: Any = None) -> str:
-        return await handle_pwsh(args, ctx=ctx, exec_view=exec_view)
+        shell = ctx.get("shell", None, strict=False)
+        shell_config = getattr(shell, "config", None) or {}
+        cap = assert_positive_finite(
+            "pwsh",
+            "maxTimeoutMs",
+            shell_config.get("maxTimeoutMs", DEFAULT_MAX_TIMEOUT_MS),
+        )
+        return await handle_pwsh(args, ctx=ctx, exec_view=exec_view, timeout_cap_ms=cap)
 
     ctx.tools.register(
         define_tool(
@@ -227,7 +260,10 @@ def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> 
                 },
                 "timeoutMs": {
                     "type": "number",
-                    "description": "Timeout in milliseconds (bounded to one hour); the command is killed on expiry.",
+                    "description": (
+                        "Timeout in milliseconds (bounded by maxTimeoutMs); the "
+                        "command is killed on expiry."
+                    ),
                 },
                 "workdir": {
                     "type": "string",

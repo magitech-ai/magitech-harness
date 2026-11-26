@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -118,6 +119,22 @@ async def test_escalation_approval() -> None:
     assert isinstance(rejected, SandboxEscalationError)
     unavailable = await allow_scenario("unavailable")
     assert isinstance(unavailable, SandboxEscalationError)
+    assert (
+        'sandbox escalation to "workspace-write" requires approval, but no '
+        "approval channel is available" in str(unavailable)
+    )
+    with pytest.raises(
+        SandboxEscalationError,
+        match='sandbox escalation to "workspace-write" requires approval, but no approval service is composed',
+    ):
+        await esc.approve_escalation(request, {"agent": agent})
+    with pytest.raises(
+        SandboxEscalationError,
+        match='sandbox escalation to "workspace-write" requires approval, but the call has no agent',
+    ):
+        await esc.approve_escalation(
+            request, {"approver": lambda _p: {"status": "allowed-once"}}
+        )
     same = await esc.approve_escalation(
         {**request, "requestedMode": "read-only"},
         {"approver": lambda _p: {"status": "rejected"}, "agent": agent},
@@ -158,6 +175,7 @@ def test_sandbox_service() -> None:
         {"runnerFailureSignatures": ["x"]},
         {"runnerCommand": ["runner"]},
         {"runnerCommand": ["runner"], "runnerFailureSignatures": ["a\n b"]},
+        {"runnerCommand": ["runner"], "runnerFailureSignatures": ["a\r b"]},
         {"probeTimeoutMs": 0},
     ):
         with pytest.raises(SandboxError):
@@ -179,7 +197,14 @@ def test_sandbox_service() -> None:
         {"runnerCommand": ["runner"], "runnerFailureSignatures": ["broken"]},
     )
     wrapped = runner.confine(["bash", "-c", "x"], policy)
-    assert wrapped.argv[:2] == ["runner", "--"]
+    assert wrapped.argv[0] == "runner"
+    assert wrapped.argv[1] == "--ro-bind"
+    assert service.bwrap_path not in wrapped.argv
+    assert wrapped.argv[-3:] == ["bash", "-c", "x"]
+    assert wrapped.denial_signatures == ("read-only file system", "permission denied")
+    assert wrapped.runner_failure_rules[0].fatal_signatures == ("broken",)
+    runner.bwrap_path = None
+    assert runner.confine(["bash", "-c", "x"], policy).argv[0] == "runner"
 
     class Aborted:
         aborted = True
@@ -425,9 +450,27 @@ async def test_policy_context_and_root_fallback(tmp_path: Path) -> None:
     )
     dispose = await service.init()
     assert sections[0]["name"] == "sandbox:policy"
-    assert sections[0]["text"]({"session": None}).startswith("Current DSH file policy")
+    assert sections[0]["text"]({"session": None}) == ""
     session = SimpleNamespace(session_id="s", header={})
     assert service.resolve(session)["workspaceRoot"] == str(tmp_path)
+    assert sections[0]["text"]({"agent": SimpleNamespace(session=session)}) == sections[
+        0
+    ]["text"]({"session": session})
+    text = sections[0]["text"]({"session": session})
+    assert text.startswith("Current DSH file policy: workspace-write.")
+    assert "Some platform temporary areas may also be writable." in text
+    assert "Do not refuse a required modification" not in text
+    extra = tmp_path / "extra"
+    extra.mkdir()
+    release = service.register_writable_root(session, str(extra))
+    enriched = sections[0]["text"]({"session": session})
+    assert "Additional writable directories:" in enriched
+    assert "not sandboxed processes." in enriched
+    release()
+    readonly = SandboxPolicyService(ctx, {"mode": "read-only", "workspaceRoot": "/"})
+    assert "Do not refuse a required modification" in readonly._render_context(
+        {"session": session}
+    )
     dispose()
 
 
@@ -507,7 +550,6 @@ def test_fs_policy_helper_branches(monkeypatch: Any) -> None:
         _assert_sandbox_write_allowed(
             {"mode": "read-only", "workspaceRoot": "/tmp"},
             {"targetKey": "x", "displayPath": "x"},
-            "write",
         )
     monkeypatch.setattr(P, "resolve", original)
 
@@ -515,7 +557,6 @@ def test_fs_policy_helper_branches(monkeypatch: Any) -> None:
         _assert_sandbox_write_allowed(
             {"mode": "workspace-write", "workspaceRoot": "/var/empty"},
             {"targetKey": "/etc/hosts", "displayPath": "/etc/hosts"},
-            "write",
         )
     _assert_sandbox_write_allowed(
         {
@@ -524,7 +565,6 @@ def test_fs_policy_helper_branches(monkeypatch: Any) -> None:
             "additionalWritableRoots": ["/etc"],
         },
         {"targetKey": "/etc/hosts", "displayPath": "/etc/hosts"},
-        "write",
     )
 
 
@@ -616,9 +656,7 @@ async def test_tool_policy_helper_edges(tmp_path: Path, monkeypatch: Any) -> Non
     monkeypatch.setattr(P, "resolve", original)
 
     with pytest.raises(FsError):
-        _assert_sandbox_write_allowed(
-            "bad", {"targetKey": "x", "displayPath": "x"}, "write"
-        )
+        _assert_sandbox_write_allowed("bad", {"targetKey": "x", "displayPath": "x"})
 
 
 @pytest.mark.asyncio
@@ -626,3 +664,72 @@ async def test_bash_without_shell_is_error() -> None:
     from magitech_harness.tools.bash_tool import handle_bash
 
     assert "no shell executor" in await handle_bash({"command": "echo hi"})
+
+
+def test_sandbox_probe_is_bounded_and_cached(monkeypatch: Any) -> None:
+    from magitech_harness.sandbox import service as sandbox_service
+
+    ctx = Context()
+    policy = {"mode": "read-only", "workspaceRoot": "/tmp"}
+    service = SandboxService(ctx, {"probeTimeoutMs": 10})
+
+    def timed_out(*_args: Any, **_kwargs: Any) -> Any:
+        raise subprocess.TimeoutExpired("bwrap", 0.01)
+
+    def bounded(*_args: Any, **kwargs: Any) -> Any:
+        assert kwargs["timeout"] == 0.025
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(sandbox_service.subprocess, "run", bounded)
+    cached = SandboxService(ctx, {"probeTimeoutMs": 25})
+    cached.confine(["true"], policy)
+    cached.confine(["true"], policy)
+    monkeypatch.setattr(sandbox_service.subprocess, "run", timed_out)
+    # A cached successful verdict is reused; the failed probe below is a new service.
+    cached.confine(["true"], policy)
+    with pytest.raises(SandboxUnavailableError):
+        service.confine(["true"], policy)
+    # Cached verdict: a failed probe is not repeated.
+    with pytest.raises(SandboxUnavailableError):
+        service.confine(["true"], policy)
+
+    def missing(*_args: Any, **_kwargs: Any) -> Any:
+        raise OSError("no bwrap")
+
+    other = SandboxService(ctx, {"probeTimeoutMs": 10})
+    other.bwrap_path = None
+    monkeypatch.setattr(sandbox_service.subprocess, "run", missing)
+    with pytest.raises(SandboxUnavailableError):
+        other.confine(["true"], policy)
+
+    third = SandboxService(ctx, {"probeTimeoutMs": 10})
+    monkeypatch.setattr(sandbox_service.subprocess, "run", missing)
+    with pytest.raises(SandboxUnavailableError):
+        third.confine(["true"], policy)
+
+
+def test_writable_roots_use_weak_session_keys_and_unique_tokens(
+    tmp_path: Path,
+) -> None:
+    from weakref import WeakKeyDictionary
+
+    from magitech_harness.session.store import Session
+
+    service = SandboxPolicyService(
+        Context(), {"mode": "workspace-write", "workspaceRoot": str(tmp_path)}
+    )
+    session = Session.create("weak-roots")
+    assert isinstance(service._registrations, WeakKeyDictionary)
+    for name in ("a", "b", "c"):
+        (tmp_path / name).mkdir()
+    first = service.register_writable_root(session, str(tmp_path / "a"))
+    second = service.register_writable_root(session, str(tmp_path / "b"))
+    assert session in service._registrations
+    assert not service._plain_registrations
+    first()
+    third = service.register_writable_root(session, str(tmp_path / "c"))
+    roots = service.resolve(session)["additionalWritableRoots"]
+    assert str(tmp_path / "b") in roots and str(tmp_path / "c") in roots
+    second()
+    assert str(tmp_path / "c") in service.resolve(session)["additionalWritableRoots"]
+    third()

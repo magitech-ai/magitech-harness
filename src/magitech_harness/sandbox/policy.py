@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import os
+import uuid
 from collections.abc import Callable, Mapping
 from typing import Any, ClassVar
+from weakref import WeakKeyDictionary
 
 from animas import Context, Service
 
@@ -14,11 +17,7 @@ from magitech_harness.sandbox.types import (
     SandboxInvalidRootError,
 )
 
-POLICY_CONTEXT = (
-    "Current DSH file policy: {mode}. {detail} Do not refuse a required modification "
-    "from this policy alone: try an available tool normally and follow any denial "
-    "and escalation guidance it returns."
-)
+POLICY_CONTEXT = "Current DSH file policy: {mode}. {detail}"
 
 
 def _execution_world_path(path: Any) -> bool:
@@ -62,8 +61,26 @@ class SandboxPolicyService(Service):
         self.configured_roots = _resolve_roots(
             cfg.get("additionalWritableRoots"), "additional writable directory"
         )
-        self._registrations: dict[int, dict[str, str]] = {}
+        self._registrations: WeakKeyDictionary[Any, dict[str, str]] = (
+            WeakKeyDictionary()
+        )
+        # Test doubles and other non-weak-referenceable session-like objects
+        # cannot be weak keys; they keep the legacy identity fallback.
+        self._plain_registrations: dict[int, dict[str, str]] = {}
         self._handle: Any = None
+
+    def _registrations_of(
+        self, session: Any, *, create: bool = False
+    ) -> dict[str, str]:
+        try:
+            if create:
+                return self._registrations.setdefault(session, {})
+            return self._registrations.get(session, {})
+        except TypeError:
+            key = id(session)
+            if create:
+                return self._plain_registrations.setdefault(key, {})
+            return self._plain_registrations.get(key, {})
 
     async def init(self) -> Callable[[], None]:
         """Register the ``sandboxMode`` session projection and policy context."""
@@ -145,9 +162,7 @@ class SandboxPolicyService(Service):
         """Resolve the complete per-call policy (explicit > session > default)."""
         effective = mode or self._override(session) or self.default_mode
         roots = list(self.configured_roots or ())
-        registrations = (
-            self._registrations.get(id(session), {}) if session is not None else {}
-        )
+        registrations = self._registrations_of(session) if session is not None else {}
         roots.extend(registrations.values())
         resolved_roots = _resolve_roots(roots, "additional writable directory")
         policy: dict[str, Any] = {
@@ -169,8 +184,8 @@ class SandboxPolicyService(Service):
                 "sandbox-policy: writable directories must be absolute execution-world paths without NUL bytes",
                 "SANDBOX_INVALID_CONFIG",
             )
-        registrations = self._registrations.setdefault(id(session), {})
-        token = str(len(registrations))
+        registrations = self._registrations_of(session, create=True)
+        token = uuid.uuid4().hex
         registrations[token] = directory
 
         def dispose() -> None:
@@ -186,16 +201,33 @@ class SandboxPolicyService(Service):
 
     def _render_context(self, ctx_arg: Mapping[str, Any]) -> str:
         session = ctx_arg.get("session")
+        if session is None:
+            agent = ctx_arg.get("agent")
+            session = getattr(agent, "session", None)
+        if session is None:
+            return ""
         policy = self.resolve(session)
         mode = policy["mode"]
         detail = {
             "read-only": (
                 "Any available operation enforced by the DSH file sandbox cannot "
-                "modify files in the standing mode."
+                "modify files in the standing mode. Do not refuse a required "
+                "modification from this policy alone: try an available tool "
+                "normally and follow any denial and escalation guidance it returns."
             ),
             "workspace-write": (
                 "Any available operation enforced by the DSH file sandbox may "
-                f"modify files under the session workspace: {policy['workspaceRoot']!r}."
+                "modify files under the session workspace: "
+                f"{json.dumps(policy['workspaceRoot'])}."
+                + (
+                    " Additional writable directories: "
+                    f"{json.dumps(list(policy['additionalWritableRoots']))}. On "
+                    "Windows, these additional grants apply to file tools only, "
+                    "not sandboxed processes."
+                    if policy.get("additionalWritableRoots")
+                    else ""
+                )
+                + " Some platform temporary areas may also be writable."
             ),
             "danger-full-access": (
                 "The DSH file sandbox does not restrict file modifications by "

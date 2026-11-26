@@ -236,6 +236,12 @@ registrations remain.
 - `tool-workflow` (row 78) and its `workflow` tool: require the out-of-scope `workflow-ptc` JavaScript orchestration runtime.
 - DeepSeek account-backed web providers `web-search-deepseek` / `web-deepseek-api` (rows 89–90): require the out-of-scope `deepseek-auth` / account-credential stack; the provider-neutral web seam is ported instead.
 
+## Fidelity refinements
+
+- `runnerCommand` wraps the same bwrap profile args as the built-in backend, advertises dsh's runner denial signatures, and a bounded `probeTimeoutMs` bwrap probe gates every unconfigured backend call (the verdict is cached).
+- Policy-context prose, escalation messages, session writable-root keying and the filesystem provider's write boundary follow the pinned dsh wording and ownership.
+- The PowerShell tool renders dsh-ordered markers (denial → escalation hint → exit status) with a single `[timed out after Nms]` marker and an `maxTimeoutMs` cap read from the mounted shell configuration.
+
 ## Acceptance summary
 
 - In-scope base-bundle rows: 101 counted; those mapped to Python are DONE/PARTIAL; DSH-specific and marketplace-owned rows are OUT OF SCOPE by rule.

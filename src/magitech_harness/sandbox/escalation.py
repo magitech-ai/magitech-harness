@@ -100,13 +100,15 @@ async def approve_escalation(
     approver = approval.get("approver")
     if approver is None:
         raise SandboxEscalationError(
-            "sandbox escalation requires approval, but no approval service is composed",
+            f'sandbox escalation to "{requested}" requires approval, but no '
+            "approval service is composed",
             SANDBOX_ESCALATION_UNAVAILABLE,
         )
     agent = approval.get("agent")
     if agent is None:
         raise SandboxEscalationError(
-            "sandbox escalation requires approval, but the call has no agent to route it through",
+            f'sandbox escalation to "{requested}" requires approval, but the '
+            "call has no agent to route it through",
             SANDBOX_ESCALATION_UNAVAILABLE,
         )
     justification = str(request.get("justification", ""))
@@ -150,7 +152,8 @@ async def approve_escalation(
         )
     if status == "unavailable":
         raise SandboxEscalationError(
-            "sandbox escalation requires approval, but no approval channel is available",
+            f'sandbox escalation to "{requested}" requires approval, but no '
+            "approval channel is available",
             SANDBOX_ESCALATION_UNAVAILABLE,
         )
     raise SandboxEscalationError(
