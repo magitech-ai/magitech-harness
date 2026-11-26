@@ -146,6 +146,11 @@ EXPECTED_ROWS = [
         "config": {},
     },
     {
+        "id": "tool-pwsh",
+        "name": "magitech_harness.tools.pwsh_tool:apply",
+        "config": {},
+    },
+    {
         "id": "tool-fs",
         "name": "magitech_harness.tools.fs:apply",
         "config": {"apply_patch": False},

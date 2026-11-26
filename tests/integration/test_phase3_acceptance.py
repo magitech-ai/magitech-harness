@@ -202,6 +202,7 @@ async def test_phase3_scripted_transcript_replay_and_resume(tmp_path: Path) -> N
         "list_agents",
         "list_subagent_models",
         "plan",
+        "pwsh",
         "read_file",
         "send_message",
         "subagent",
