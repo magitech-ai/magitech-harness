@@ -339,20 +339,23 @@ def _section(ctx: Context, name: str, order: str, text: str) -> None:
 
 
 def apply(ctx: Context, config: dict[str, Any] | None = None, **kwargs: Any) -> None:
-    """Mount read_file, write_file, and edit_file onto ``ctx.tools``.
+    """Mount read_file, write_file, edit_file, and optional apply_patch.
 
-    Mirrors dsh's single ``tool-fs`` row. ``apply_patch`` is accepted for
-    config-shape parity but must stay false: the patch tool is not ported.
+    Mirrors dsh's single ``tool-fs`` row. ``apply_patch`` is config-gated exactly
+    as in pinned dsh, whose base bundle leaves it disabled.
     """
     cfg = {**(config or {}), **kwargs}
-    if cfg.get("apply_patch", False):
-        raise ValueError("tool-fs: apply_patch is not ported; set apply_patch: false")
+    root = cfg.get("workspace_root") or getattr(ctx, "workspace_dir", None)
     _register_read(ctx, cfg)
     _register_write(ctx, cfg)
     _register_edit(ctx)
     _section(ctx, "tool:read_file", "TOOL_READ", READ_SECTION_TEXT)
     _section(ctx, "tool:write_file", "TOOL_WRITE", WRITE_SECTION_TEXT)
     _section(ctx, "tool:edit_file", "TOOL_EDIT", EDIT_SECTION_TEXT)
+    if cfg.get("apply_patch", False):
+        from magitech_harness.tools.fs_apply_patch import register_apply_patch
+
+        register_apply_patch(ctx, root)
 
 
 apply.inject = ["tools"]  # type: ignore[attr-defined]
