@@ -91,9 +91,9 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 30 | session-query-sqlite | `@deepseek-ai/dsh-session-query-sqlite` | packages/session-query/session-query-sqlite/src/index.ts | mth-components | `src/mth_components/sessions/search/component.py` | DONE | mth-components: `tests/unit/mth_components/sessions/search/test_service.py` |
 | 31 | working-directory | `@deepseek-ai/dsh-working-directory` | packages/session/working-directory/src/index.ts | magitech-harness | `src/magitech_harness/session/working_directory.py` | DONE | `tests/unit/magitech_harness/session/test_working_directory.py` |
 | 32 | session-projection | `@deepseek-ai/dsh-session-projection` | packages/session/session-projection/src/index.ts | magitech-harness | `src/magitech_harness/session/projection_registry.py` | DONE | `tests/unit/magitech_harness/session/test_projection_registry.py` |
-| 33 | storage | `@deepseek-ai/dsh-storage` | packages/storage/storage/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional storage |
-| 34 | storage-json | `@deepseek-ai/dsh-storage-json` | packages/storage/storage-json/src/index.ts | mth-components | NONE | OUT OF SCOPE | |
-| 35 | storage-domain | `@deepseek-ai/dsh-storage-domain` | packages/storage/storage-domain/src/index.ts | mth-components | NONE | OUT OF SCOPE | |
+| 33 | storage | `@deepseek-ai/dsh-storage` | packages/storage/storage/src/index.ts | mth-components | `src/mth_components/storage/service.py` | DONE | mth-components: `tests/unit/mth_components/storage/test_service.py`, `tests/unit/mth_components/storage/test_component.py` (named backend registry, mountable forms, dsh error codes, stale-disposer guards), `tests/unit/mth_components/test_index.py` (catalog registration) |
+| 34 | storage-json | `@deepseek-ai/dsh-storage-json` | packages/storage/storage-json/src/index.ts | mth-components | NONE | OUT OF SCOPE | Optional JSON backend. The hub it registers on (row 33) is now ported; the backend itself remains unported. |
+| 35 | storage-domain | `@deepseek-ai/dsh-storage-domain` | packages/storage/storage-domain/src/index.ts | mth-components | NONE | OUT OF SCOPE | Optional domain data form. Its prerequisites (row 33 hub and row 34 backend) are not both ported yet. |
 | 36 | session-projection-cache | `@deepseek-ai/dsh-session-projection-cache` | packages/session/session-projection-cache/src/index.ts | magitech-harness | `src/magitech_harness/session/projection_cache.py` | DONE | `tests/unit/magitech_harness/session/test_projection_cache.py` |
 | 37 | otel | `@deepseek-ai/dsh-otel` | packages/telemetry/otel/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional telemetry |
 | 38 | session-telemetry-otel | `@deepseek-ai/dsh-session-telemetry-otel` | packages/session/session-telemetry-otel/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional telemetry |
@@ -231,7 +231,7 @@ registrations remain.
 - Windows ACL sandbox backend (`dsh-sandbox-windows-acl`).
 - External connectors (linear, notion, feishu, dingtalk, wecom, tencent-*).
 - Experimental bundles (forges, CUA, terminal, ralph, etc.).
-- Plugin manager / config editor / settings / credentials / authorization / storage / otel telemetry as shipped rows (marketplace-owned, opt-in).
+- Plugin manager / config editor / settings / credentials / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage hub (row 33) is now ported; only its JSON backend and domain form remain out of scope.
 - DSH-specific packages (deepseek-account, deepseek-auth, typert, api-gateway, remote-access, session-log-deepseek, deepseek-llm-api-extensions, cli-account, ptc-runtime, workflow-ptc, tool-executor-ptc).
 - `tool-workflow` (row 78) and its `workflow` tool: require the out-of-scope `workflow-ptc` JavaScript orchestration runtime.
 - DeepSeek account-backed web providers `web-search-deepseek` / `web-deepseek-api` (rows 89–90): require the out-of-scope `deepseek-auth` / account-credential stack; the provider-neutral web seam is ported instead.
