@@ -90,6 +90,22 @@
 - id: approval-guard
   name: magitech_harness.approval.guard:apply
   config: {}
+- id: permission
+  name: magitech_harness.permission.service:PermissionPresetService
+  # The harness has no confining pwsh executor yet (Windows ACL backend gap,
+  # PARITY row 44), so the preset bundle cannot compose on win32.
+  disabled_on: [win32]
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
 - id: layers
   name: magitech_harness.components.layers:LayerResolutionService
   config: {}

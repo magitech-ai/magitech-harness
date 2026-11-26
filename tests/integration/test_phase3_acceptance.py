@@ -1145,7 +1145,16 @@ async def test_phase3_crash_recovery_def04_and_per_step_tool_recovery(
         }
     )
     agent2 = handle2["agent"]
-    repaired_tail = agent2.session.events[4:]
+    repaired_tail = [
+        ev
+        for ev in agent2.session.events[4:]
+        if ev.type
+        not in {
+            EventType.PERMISSION_PRESET,
+            EventType.SANDBOX_MODE,
+            EventType.APPROVAL_POLICY,
+        }
+    ]
     assert [ev.type for ev in repaired_tail] == [
         EventType.TOOL_RESULT,
         EventType.TOOL_RESULT,
