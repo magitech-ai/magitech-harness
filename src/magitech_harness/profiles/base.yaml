@@ -51,9 +51,9 @@
   name: magitech_harness.sandbox.service:apply
   config: {}
 - id: sandbox-policy
-  name: magitech_harness.sandbox.policy:apply
+  name: magitech_harness.sandbox.policy:SandboxPolicyService
   config:
-    mode: workspace-write
+    mode: ${MAGITECH_PERMISSION_MODE:workspace-write}
 - id: bash-sandbox
   name: magitech_harness.shell.bash_sandbox:SandboxBashExecutor
   disabled_on: [win32]

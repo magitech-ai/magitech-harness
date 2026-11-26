@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
@@ -219,3 +221,154 @@ async def test_bash_component_without_system_prompt_service() -> None:
     await ctx.flush()
 
     assert ctx.has("tools")
+
+
+@pytest.mark.asyncio
+async def test_bash_escalation_paths(tmp_path: Path) -> None:
+    from magitech_harness.tools.bash_tool import handle_bash
+
+    class Approver:
+        def __init__(self, status: str = "allowed-once") -> None:
+            self.status = status
+
+        async def request(self, _payload: dict[str, Any]) -> dict[str, str]:
+            return {"status": self.status}
+
+    class Shell:
+        async def run(self, command: str, **kwargs: Any) -> Any:
+            return SimpleNamespace(
+                exit_code=0,
+                stdout="ok",
+                stderr="",
+                timed_out=False,
+                truncated=False,
+                stdout_spill_path=None,
+                stderr_spill_path=None,
+                sandbox={"mode": "read-only", "denied": False},
+            )
+
+    def make_ctx(approver: Approver) -> Context:
+        ctx = Context()
+        ctx.provide(
+            "sandboxPolicy",
+            SimpleNamespace(
+                default_mode="read-only",
+                resolve=lambda session: {
+                    "mode": "read-only",
+                    "workspaceRoot": str(tmp_path),
+                },
+            ),
+        )
+        ctx.provide("approval", approver)
+        ctx.provide("shell", Shell())
+        return ctx
+
+    ctx = make_ctx(Approver())
+    view = {
+        "agent": SimpleNamespace(session=SimpleNamespace()),
+        "callId": "c1",
+        "signal": None,
+    }
+    out = await handle_bash(
+        {
+            "command": "echo ok",
+            "description": "echo",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "need full access",
+        },
+        ctx=ctx,
+        exec_view=view,
+    )
+    assert "ok" in out
+
+    assert "sandbox_permissions" in await handle_bash(
+        {"command": "echo ok", "sandbox_permissions": "workspace-write"},
+        ctx=ctx,
+        exec_view=view,
+    )
+    assert "invalid sandbox_permissions" in await handle_bash(
+        {"command": "echo ok", "sandbox_permissions": "bogus", "justification": "why"},
+        ctx=ctx,
+        exec_view=view,
+    )
+    rejected = make_ctx(Approver("rejected"))
+    assert "Error" in await handle_bash(
+        {
+            "command": "echo ok",
+            "sandbox_permissions": "danger-full-access",
+            "justification": "why",
+        },
+        ctx=rejected,
+        exec_view=view,
+    )
+
+
+@pytest.mark.asyncio
+async def test_bash_denial_marker(tmp_path: Path) -> None:
+    from magitech_harness.tools.bash_tool import handle_bash
+
+    class DenyingShell:
+        async def run(self, command: str, **kwargs: Any) -> Any:
+            return SimpleNamespace(
+                exit_code=1,
+                stdout="",
+                stderr="read-only file system",
+                timed_out=False,
+                truncated=False,
+                stdout_spill_path=None,
+                stderr_spill_path=None,
+                sandbox={"mode": "read-only", "denied": True, "enforcement": "full"},
+            )
+
+    ctx = Context()
+    ctx.provide("shell", DenyingShell())
+    out = await handle_bash({"command": "touch /etc/x"}, ctx=ctx)
+    assert "[sandbox: file access denied under read-only mode]" in out
+    assert "escalation available" in out
+
+
+@pytest.mark.asyncio
+async def test_bash_under_policy_without_escalation(tmp_path: Path) -> None:
+    from magitech_harness.tools.bash_tool import handle_bash
+
+    class Shell:
+        async def run(self, command: str, **kwargs: Any) -> Any:
+            assert "sandboxPolicy" in kwargs
+            return SimpleNamespace(
+                exit_code=0,
+                stdout="fine",
+                stderr="",
+                timed_out=False,
+                truncated=False,
+                stdout_spill_path=None,
+                stderr_spill_path=None,
+                sandbox=None,
+            )
+
+    ctx = Context()
+    ctx.provide(
+        "sandboxPolicy",
+        SimpleNamespace(
+            default_mode="workspace-write",
+            resolve=lambda session: {
+                "mode": "workspace-write",
+                "workspaceRoot": str(tmp_path),
+            },
+        ),
+    )
+    ctx.provide("shell", Shell())
+    assert "fine" in await handle_bash({"command": "echo fine"}, ctx=ctx)
+
+
+@pytest.mark.asyncio
+async def test_executor_sandbox_policy_kwarg(tmp_path: Path) -> None:
+    from magitech_harness import create_harness
+
+    ctx = create_harness(storage_dir=tmp_path / "executor-policy")
+    await ctx.flush()
+    executor = ctx.get("shell", None, strict=False)
+    result = await executor.run(
+        "echo policy",
+        sandboxPolicy={"mode": "danger-full-access", "workspaceRoot": str(tmp_path)},
+    )
+    assert result.stdout.strip() == "policy"

@@ -124,8 +124,8 @@ EXPECTED_ROWS = [
     },
     {
         "id": "sandbox-policy",
-        "name": "magitech_harness.sandbox.policy:apply",
-        "config": {"mode": "workspace-write"},
+        "name": "magitech_harness.sandbox.policy:SandboxPolicyService",
+        "config": {"mode": "${MAGITECH_PERMISSION_MODE:workspace-write}"},
     },
     {
         "id": "bash-sandbox",

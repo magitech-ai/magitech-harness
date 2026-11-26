@@ -91,6 +91,48 @@ def _watch_snapshot(path_str: str, is_dir: bool) -> Any:
         raise
 
 
+def _assert_sandbox_write_allowed(
+    sandbox_policy: Any, target: FsTarget, verb: str
+) -> None:
+    """Enforce the resolved file policy at the filesystem provider boundary."""
+    from collections.abc import Mapping
+
+    if sandbox_policy is None or not isinstance(sandbox_policy, Mapping):
+        return
+    mode = sandbox_policy.get("mode", "danger-full-access")
+    if mode == "danger-full-access":
+        return
+    raw = str(target.get("targetKey", ""))
+    try:
+        path = Path(raw).resolve(strict=False)
+    except OSError:
+        path = Path(raw)
+    roots: list[str] = []
+    if mode == "workspace-write":
+        roots.append(
+            str(
+                Path(str(sandbox_policy.get("workspaceRoot", ""))).resolve(strict=False)
+            )
+        )
+        for extra in sandbox_policy.get("additionalWritableRoots") or ():
+            roots.append(str(Path(str(extra)).resolve(strict=False)))
+    roots.append("/dev/null")
+    if mode == "workspace-write":
+        roots.append("/tmp")
+    for root in roots:
+        try:
+            path.relative_to(root)
+            return
+        except ValueError:
+            continue
+    from magitech_harness.fs.types import FsError
+
+    raise FsError(
+        f"sandbox denied {verb} to {target.get('displayPath', raw)} under {mode} mode",
+        "FS_SANDBOX_DENIED",
+    )
+
+
 def _throw_if_aborted(signal: AbortSignal | None, verb: str) -> None:
     if signal is not None and signal.aborted:
         raise FsError(f"{verb} aborted", "FS_ABORTED")
@@ -661,7 +703,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsWriteOutcome:
         """Atomically create or overwrite UTF-8 text."""
-        del sandbox_policy
+        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
         _throw_if_aborted(signal, "write")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "write")
@@ -770,7 +812,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsEditOutcome:
         """Atomically perform a literal text replacement."""
-        del sandbox_policy
+        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
         _throw_if_aborted(signal, "edit")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "edit")
@@ -815,7 +857,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsEditOutcome:
         """Atomically apply parsed patch hunks."""
-        del sandbox_policy
+        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
         _throw_if_aborted(signal, "patch")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "patch")
@@ -847,7 +889,7 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsDeleteOutcome:
         """Remove a regular file with optional version check."""
-        del sandbox_policy
+        _assert_sandbox_write_allowed(sandbox_policy, target, "write")
         _throw_if_aborted(signal, "delete")
         async with self._lock_targets(target["targetKey"]):
             _throw_if_aborted(signal, "delete")
@@ -883,7 +925,8 @@ class LocalFileSystem(FileSystem):
         sandbox_policy: Any = None,
     ) -> FsMoveOutcome:
         """Publish source (optionally patched) at destination, then remove source."""
-        del sandbox_policy
+        _assert_sandbox_write_allowed(sandbox_policy, source, "move")
+        _assert_sandbox_write_allowed(sandbox_policy, destination, "move")
         _throw_if_aborted(signal, "move")
         if source["targetKey"] == destination["targetKey"]:
             raise FsError(

@@ -101,7 +101,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 40 | cli-account | `@deepseek-ai/dsh-cli-account` | packages/connector/cli-account/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | |
 | 41 | sandbox | `@deepseek-ai/dsh-sandbox-local` | packages/sandbox/sandbox-local/src/index.ts | magitech-harness | `src/magitech_harness/sandbox/service.py` | DONE | `test_sandbox.py` (fail-closed `confine`, bwrap backend, denial/runner signatures, full enforcement) |
 | 42 | sandbox-policy | `@deepseek-ai/dsh-sandbox-policy` | packages/sandbox/sandbox-policy/src/index.ts | magitech-harness | `src/magitech_harness/sandbox/policy.py` | DONE | `test_sandbox.py` (three modes, session `sandbox/mode` projection, precedence, writable roots, escalation) |
-| 43 | bash-sandbox | `@deepseek-ai/dsh-bash-sandbox` | packages/shell/bash-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/shell/bash_sandbox.py` | DONE | `test_sandbox.py` (real bwrap confinement, denial facts, runner-failure taxonomy; closes finding #13) |
+| 43 | bash-sandbox | `@deepseek-ai/dsh-bash-sandbox` | packages/shell/bash-sandbox/src/index.ts | magitech-harness | `src/magitech_harness/shell/bash_sandbox.py` | DONE | `test_sandbox.py` (real bwrap confinement, denial facts, runner-failure taxonomy, model-facing escalation; closes finding #13) |
 | 44 | pwsh-sandbox | `@deepseek-ai/dsh-pwsh-sandbox` | packages/shell/pwsh-sandbox/src/index.ts | mth-components | NONE | PARTIAL | pwsh not ported (Linux CI) |
 | 45 | approval | `@deepseek-ai/dsh-user-approval` | packages/interaction/user-approval/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` | DONE | `test_approval_service.py` |
 | 46 | permission | `@deepseek-ai/dsh-permission-presets` | packages/interaction/permission-presets/src/index.ts | magitech-harness | `src/magitech_harness/approval/service.py` (policy) | DONE | `test_approval_presets.py` |
@@ -217,7 +217,7 @@ registrations remain.
 | Row | Reason | Accepted by |
 |---|---|---|
 | `tool-pwsh` / `pwsh-sandbox` | pwsh is Windows-only; CI runs Linux. No runtime behavior difference to port. | Malcom (platform parity decision) |
-| `sandbox` / `sandbox-policy` | Linux bwrap-backed confinement implemented (rows 41–43 DONE); finding #13 closed. Windows ACL backend remains a platform gap (row 44). | Resolved by implementation |
+| `sandbox` / `sandbox-policy` | Linux bwrap-backed confinement implemented (rows 41–43 DONE) with per-call policy, session mode, approval escalation and fs-provider enforcement; finding #13 closed for the shell and fs paths. Windows ACL backend remains a platform gap (row 44). | Resolved by implementation |
 | `agent-instructions` | Implemented as a durable instruction loader (row 54 DONE). | Resolved by implementation |
 | `upstream-skills` | Implemented as a verified pinned download component (row 58 DONE). | Resolved by implementation |
 | `image-offload` | Implemented as a durable message projection + `agent/request-error` retry (row 84 DONE). | Resolved by implementation |

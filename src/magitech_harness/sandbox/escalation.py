@@ -111,15 +111,18 @@ async def approve_escalation(
         )
     justification = str(request.get("justification", ""))
     reason = f"escalate sandbox to {requested}: {justification}"
-    outcome = approver(
-        {
-            "agent": agent,
-            "toolName": approval.get("toolName"),
-            "callId": approval.get("callId"),
-            "reason": reason,
-            "displayReason": escalation_display_reason(str(requested), justification),
-            "signal": approval.get("signal"),
-        }
+    payload: dict[str, Any] = {
+        "agent": agent,
+        "toolName": approval.get("toolName"),
+        "callId": approval.get("callId"),
+        "reason": reason,
+        "displayReason": {
+            "en": escalation_display_reason(str(requested), justification)
+        },
+        "signal": approval.get("signal"),
+    }
+    outcome = (
+        approver.request(payload) if hasattr(approver, "request") else approver(payload)
     )
     if hasattr(outcome, "__await__"):
         outcome = await outcome

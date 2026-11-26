@@ -463,3 +463,66 @@ async def test_bash_sandbox_runner_failure(tmp_path: Path, monkeypatch: Any) -> 
     policy_service = ctx.sandboxPolicy
     probe_session = ctx.sessions.create("policy-fallback")
     assert policy_service.resolve(probe_session)["workspaceRoot"]
+
+
+@pytest.mark.asyncio
+async def test_fs_policy_enforcement(tmp_path: Path) -> None:
+    from magitech_harness.fs.local import LocalFileSystem
+    from magitech_harness.fs.types import FsError
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    fs = LocalFileSystem(Context(), {"cwd": str(root)})
+    target = await fs.resolve("note.txt")
+
+    await fs.write_text(
+        target,
+        "allowed",
+        sandbox_policy={"mode": "workspace-write", "workspaceRoot": str(root)},
+    )
+    with pytest.raises(FsError) as denied:
+        await fs.write_text(
+            target,
+            "denied",
+            sandbox_policy={"mode": "read-only", "workspaceRoot": str(root)},
+        )
+    assert denied.value.code == "FS_SANDBOX_DENIED"
+    await fs.write_text(target, "unrestricted", sandbox_policy=None)
+    await fs.write_text(target, "full", sandbox_policy={"mode": "danger-full-access"})
+
+
+def test_fs_policy_helper_branches(monkeypatch: Any) -> None:
+    from pathlib import Path as P
+
+    from magitech_harness.fs.local import _assert_sandbox_write_allowed
+    from magitech_harness.fs.types import FsError
+
+    original = P.resolve
+
+    def failing(self: P, *args: Any, **kwargs: Any) -> P:
+        raise OSError("nope")
+
+    monkeypatch.setattr(P, "resolve", failing)
+    with pytest.raises(FsError):
+        _assert_sandbox_write_allowed(
+            {"mode": "read-only", "workspaceRoot": "/tmp"},
+            {"targetKey": "x", "displayPath": "x"},
+            "write",
+        )
+    monkeypatch.setattr(P, "resolve", original)
+
+    with pytest.raises(FsError):
+        _assert_sandbox_write_allowed(
+            {"mode": "workspace-write", "workspaceRoot": "/var/empty"},
+            {"targetKey": "/etc/hosts", "displayPath": "/etc/hosts"},
+            "write",
+        )
+    _assert_sandbox_write_allowed(
+        {
+            "mode": "workspace-write",
+            "workspaceRoot": "/var/empty",
+            "additionalWritableRoots": ["/etc"],
+        },
+        {"targetKey": "/etc/hosts", "displayPath": "/etc/hosts"},
+        "write",
+    )
