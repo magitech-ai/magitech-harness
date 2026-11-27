@@ -62,7 +62,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 1 | tool-plugin-manager | `@deepseek-ai/dsh-plugin-manager/tools` | packages/boot/plugin-manager/src/tools.ts:92 | mth-components (plugin manager is opt-in infra) | NONE | OUT OF SCOPE | plugin manager is optional, not base Tier 1 |
 | 2 | plugin-manager | `@deepseek-ai/dsh-plugin-manager` | packages/boot/plugin-manager/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional bundle |
 | 3 | timer | `@deepseek-ai/cordis-plugin-timer` | `vendor/timer/src/index.ts` | animas | `src/animas/timer.py` | DONE | animas: `tests/unit/animas/test_timer.py` (kernel `timeout`, `interval`, `throttle`, `debounce` with fiber-scoped disposal; owned by animas, not the harness) |
-| 4 | hmr | `@deepseek-ai/dsh-hmr` | packages/boot/hmr/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
+| 4 | hmr | `@deepseek-ai/dsh-hmr` | packages/boot/hmr/src/index.ts | mth-components | `src/mth_components/hmr/component.py`, `src/mth_components/hmr/config.py` | DONE | mth-components: `tests/unit/mth_components/hmr/test_component.py` (dsh config mapping, multi-root watching, active ignore patterns, mount/inject), `tests/unit/mth_components/test_index.py` (catalog registration); core `animas.HmrService` multi-root support probed in animas `tests/unit/animas/test_hmr_roots.py` |
 | 5 | llm | `@deepseek-ai/dsh-llm` | packages/llm/llm/src/index.ts | magitech-harness | `src/magitech_harness/llm/service.py` | DONE | `tests/unit/magitech_harness/llm/test_service.py` |
 | 6 | deepseek-llm-api-extensions | `@deepseek-ai/dsh-deepseek-llm-api-extensions` | packages/llm/deepseek-llm-api-extensions/src/ | DSH-specific | NONE | OUT OF SCOPE | DeepSeek-specific extension |
 | 7 | session | `@deepseek-ai/dsh-session` | packages/core/session/src/index.ts | magitech-harness | `src/magitech_harness/session/service.py` | DONE | `tests/unit/magitech_harness/session/test_service.py` |
@@ -231,7 +231,7 @@ registrations remain.
 - Windows ACL sandbox backend (`dsh-sandbox-windows-acl`).
 - External connectors (linear, notion, feishu, dingtalk, wecom, tencent-*).
 - Experimental bundles (forges, CUA, terminal, ralph, etc.).
-- Plugin manager / config editor / settings / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage stack (rows 33–35) and the core local credentials provider (row 26) are now ported as opt-in mth-components.
+- Plugin manager / config editor / settings / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage stack (rows 33–35), core local credentials provider (row 26) and HMR wrapper (row 4) are now ported as opt-in mth-components.
 - DSH-specific packages (deepseek-account, deepseek-auth, typert, api-gateway, remote-access, session-log-deepseek, deepseek-llm-api-extensions, cli-account, ptc-runtime, workflow-ptc, tool-executor-ptc).
 - `tool-workflow` (row 78) and its `workflow` tool: require the out-of-scope `workflow-ptc` JavaScript orchestration runtime.
 - DeepSeek account-backed web providers `web-search-deepseek` / `web-deepseek-api` (rows 89–90): require the out-of-scope `deepseek-auth` / account-credential stack; the provider-neutral web seam is ported instead.
