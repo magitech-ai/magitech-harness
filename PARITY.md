@@ -79,7 +79,7 @@ Each DSH row: package, DSH source, owning repo, Python implementation, verdict, 
 | 18 | agent-default-model | `@deepseek-ai/dsh-agent-default-model` | packages/core/agent-default-model/src/index.ts | magitech-harness | `src/magitech_harness/agent/default_model.py` | DONE | `tests/unit/magitech_harness/compaction/test_pruner_and_default_model.py`; base row defaults to `kilo`/`kilo-auto/free`, verified live with `cost: 0` and no API key |
 | 19 | jobs | `@deepseek-ai/dsh-jobs-local` | packages/jobs/jobs-local/src/index.ts | magitech-harness | `src/magitech_harness/jobs/local.py` | DONE | `tests/unit/magitech_harness/jobs/test_local.py` |
 | 20 | llm-retry | `@deepseek-ai/dsh-llm-retry` | packages/llm/llm-retry/src/index.ts | magitech-harness | `src/magitech_harness/llm/retry.py` | DONE | `tests/unit/magitech_harness/llm/test_retry.py`, `tests/unit/magitech_harness/llm/test_retry_policy.py` |
-| 21 | config-editor | `@deepseek-ai/dsh-config-editor` | packages/boot/config-editor/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
+| 21 | config-editor | `@deepseek-ai/dsh-config-editor` | packages/boot/config-editor/src/index.ts | mth-components | `src/mth_components/config_editor/service.py` | DONE | mth-components: `tests/unit/mth_components/config_editor/test_component.py` (whole-config edit, inherited layers, atomic 0600 patch write, rollback, HMR serialization, fiber/overlay guards), `tests/unit/mth_components/test_index.py` (catalog registration) |
 | 22 | settings | `@deepseek-ai/dsh-settings` | packages/settings/settings/src/index.ts | mth-components | NONE | OUT OF SCOPE | optional |
 | 23 | authorization | `@deepseek-ai/dsh-authorization` | packages/credentials/authorization/src/index.ts | mth-components | NONE | OUT OF SCOPE | credentials marketplace |
 | 24 | deepseek-account | `@deepseek-ai/dsh-deepseek-account` | packages/account/deepseek-account/src/index.ts | DSH-specific | NONE | OUT OF SCOPE | DeepSeek account |
@@ -231,7 +231,7 @@ registrations remain.
 - Windows ACL sandbox backend (`dsh-sandbox-windows-acl`).
 - External connectors (linear, notion, feishu, dingtalk, wecom, tencent-*).
 - Experimental bundles (forges, CUA, terminal, ralph, etc.).
-- Plugin manager / config editor / settings / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage stack (rows 33–35), core local credentials provider (row 26) and HMR wrapper (row 4) are now ported as opt-in mth-components.
+- Plugin manager / settings / authorization / otel telemetry as shipped rows (marketplace-owned, opt-in). The storage stack (rows 33–35), core local credentials provider (row 26), HMR wrapper (row 4) and config editor (row 21) are now ported as opt-in mth-components.
 - DSH-specific packages (deepseek-account, deepseek-auth, typert, api-gateway, remote-access, session-log-deepseek, deepseek-llm-api-extensions, cli-account, ptc-runtime, workflow-ptc, tool-executor-ptc).
 - `tool-workflow` (row 78) and its `workflow` tool: require the out-of-scope `workflow-ptc` JavaScript orchestration runtime.
 - DeepSeek account-backed web providers `web-search-deepseek` / `web-deepseek-api` (rows 89–90): require the out-of-scope `deepseek-auth` / account-credential stack; the provider-neutral web seam is ported instead.
