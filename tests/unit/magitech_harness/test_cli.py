@@ -1036,10 +1036,16 @@ async def test_cli_headless_subcommand_exit_codes_and_output(
     )
     assert code_json == 0
     assert _OkAdapter.seen_models == ["m1", "m2"]
-    json_out = capsys.readouterr().out.strip().splitlines()[-1]
-    payload = py_json.loads(json_out)
-    assert payload["exitCode"] == 0
-    assert payload["text"] == "Headless answer"
+    projected = [
+        py_json.loads(line)
+        for line in capsys.readouterr().out.splitlines()
+        if line.strip()
+    ]
+    assert projected[0]["type"] == "session"
+    assert projected[0]["sessionId"] == resumed_sess
+    assert projected[-1]["type"] == "final"
+    assert projected[-1]["reason"]["kind"] == "completed"
+    assert projected[-1]["text"] == "Headless answer"
 
     # Resume with --model omitted keeps existing selection without clobbering.
     code_keep = await main_async(
@@ -1124,6 +1130,9 @@ async def test_cli_headless_subcommand_exit_codes_and_output(
     orphan_out = capsys.readouterr()
     assert "orphan crash" in orphan_out.out
     assert "orphan crash" in orphan_out.err
+    # The same uncleared failure without --json skips the NDJSON terminal event.
+    assert await _run_headless(fake_ctx, "hi") == 1
+    capsys.readouterr()
 
     # Exception raised after handle creation inside followup/when_idle hits inner except + async/sync dispose.
     def _boom_trigger() -> None:
@@ -1136,7 +1145,16 @@ async def test_cli_headless_subcommand_exit_codes_and_output(
 
     fake_ctx.agents.create = _fake_create2  # type: ignore[method-assign]
     assert await _run_headless(fake_ctx, "hi") == 1
-    assert dispose_calls == ["sync", "sync2"]
+    assert dispose_calls == ["sync", "sync", "sync2"]
+    assert "followup boom" in capsys.readouterr().err
+
+    fake_agent3 = _FakeAgent(fake_sess, _boom_trigger)
+
+    async def _fake_create3(_opts: Any) -> Any:
+        return {"agent": fake_agent3, "dispose": lambda: dispose_calls.append("sync3")}
+
+    fake_ctx.agents.create = _fake_create3  # type: ignore[method-assign]
+    assert await _run_headless(fake_ctx, "hi", json_mode=True) == 1
     assert "followup boom" in capsys.readouterr().err
 
     # Also test turn/end error whose error payload is non-dict (defensive branch).
@@ -1433,3 +1451,300 @@ async def test_repl_dispatcher_duplicate_registration_and_dispose(
     assert await second.dispatch("/help") is False
     disposer = first._dispose_commands()
     disposer()
+
+
+def test_cli_help_snapshot_and_version() -> None:
+    """The parser's help is a checked-in snapshot; --version reports the package version."""
+    from magitech_harness.cli import build_parser
+
+    snapshot = Path(__file__).parent / "expected" / "cli-help.txt"
+    assert build_parser().format_help() == snapshot.read_text(encoding="utf-8")
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(["--version"])
+    assert exc.value.code == 0
+
+
+@pytest.mark.asyncio
+async def test_cli_headless_reads_task_from_stdin(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Omitted task and '-' both read the prompt from stdin verbatim."""
+    import io
+    import json as _json
+
+    from magitech_harness.session.store import Session
+
+    script = tmp_path / "stdin-script.json"
+    script.write_text(
+        _json.dumps(
+            {
+                "turns": [
+                    [
+                        {"type": "text-delta", "index": 0, "text": "FROM STDIN"},
+                        {"type": "finish", "reason": {"kind": "stop"}},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO("prompt from stdin\n"))
+    code = await main_async(
+        [
+            "--storage",
+            str(tmp_path / "store"),
+            "headless",
+            "--script",
+            str(script),
+            "-",
+        ]
+    )
+    assert code == 0
+    assert "FROM STDIN" in capsys.readouterr().out
+    log = next((tmp_path / "store").rglob("session.v4.jsonl"))
+    session = Session.load(log)
+    assert any(
+        "prompt from stdin" in _json.dumps(event.payload) for event in session.events
+    )
+
+
+@pytest.mark.asyncio
+async def test_cli_headless_json_streams_reasoning_and_final(
+    tmp_path: Path, capsys
+) -> None:
+    """--json emits reference-shaped NDJSON and keeps reasoning diagnostics on stderr."""
+    import json as _json
+
+    script = tmp_path / "reasoning-script.json"
+    script.write_text(
+        _json.dumps(
+            {
+                "turns": [
+                    [
+                        {"type": "block-start", "index": 0, "blockType": "reasoning"},
+                        {"type": "reasoning-delta", "index": 0, "text": "because"},
+                        {
+                            "type": "block-end",
+                            "index": 0,
+                            "block": {"type": "reasoning", "text": "because"},
+                        },
+                        {"type": "block-start", "index": 1, "blockType": "text"},
+                        {"type": "text-delta", "index": 1, "text": "answer"},
+                        {
+                            "type": "block-end",
+                            "index": 1,
+                            "block": {"type": "text", "text": "answer"},
+                        },
+                        {"type": "finish", "reason": {"kind": "stop"}},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = await main_async(
+        [
+            "--storage",
+            str(tmp_path / "store"),
+            "headless",
+            "--script",
+            str(script),
+            "--json",
+            "task",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "mth: reasoning:" in captured.err
+    assert "because" in captured.err
+    events = [_json.loads(line) for line in captured.out.splitlines() if line.strip()]
+    assert events[0]["type"] == "session"
+    assert {"thinking", "text"} <= {event["type"] for event in events}
+    assert events[-1]["type"] == "final"
+    assert events[-1]["text"] == "answer"
+
+
+@pytest.mark.asyncio
+async def test_headless_reasoning_uses_one_stderr_section(
+    tmp_path: Path, capsys
+) -> None:
+    """Text-only messages are ignored; consecutive reasoning commits share one heading."""
+    from magitech_harness.cli import _run_headless
+
+    ctx = create_harness(storage_dir=tmp_path)
+    await ctx.flush()
+    session = ctx.sessions.create("reason-sections")
+    other = ctx.sessions.create("other-sections")
+
+    def _emit(content: list[dict[str, Any]]) -> None:
+        session.append(
+            EventType.ASSISTANT_MESSAGE,
+            {
+                "turn": 1,
+                "step": 1,
+                "stream": [],
+                "message": {
+                    "id": "msg-sections",
+                    "role": "assistant",
+                    "content": content,
+                    "source": {"kind": "model", "provider": "p", "model": "m"},
+                },
+            },
+            surface_op="append",
+        )
+
+    class _Agent:
+        def __init__(self) -> None:
+            self.session = session
+            self.model = SimpleNamespace(current=lambda: None, select=lambda _sel: None)
+
+        def followup(self, _msg: Any) -> None:
+            other.append(EventType.TURN_START, {"turn": 1})
+            _emit([{"type": "text", "text": "no reasoning"}])
+            _emit([{"type": "reasoning", "text": "r1"}])
+            _emit([{"type": "reasoning", "text": "r2"}])
+
+        async def when_idle(self) -> None:
+            return None
+
+    async def _create(_opts: Any) -> Any:
+        return {"agent": _Agent(), "dispose": lambda: None}
+
+    ctx.agents.create = _create  # type: ignore[method-assign]
+    await _run_headless(ctx, "hi")
+    err = capsys.readouterr().err
+    assert err.count("mth: reasoning:") == 1
+    assert "r1r2" in err
+
+
+@pytest.mark.asyncio
+async def test_cli_config_dumps_are_boot_free(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """--dump-config, --dump-default-config and --dump-config-schema never boot."""
+    import json as _json
+
+    from magitech_harness.profiles.launcher import HOME_ENV
+
+    monkeypatch.setenv(HOME_ENV, str(tmp_path / "home"))
+    overlay = tmp_path / "overlay.yaml"
+    overlay.write_text("[]\n", encoding="utf-8")
+
+    assert await main_async(["--dump-config", "--patch", str(overlay)]) == 0
+    report = _json.loads(capsys.readouterr().out)
+    assert report["schema"] == "mth-config-dump/v1"
+    assert report["layers"][0]["label"] == "base"
+
+    assert await main_async(["--dump-default-config"]) == 0
+    defaults = _json.loads(capsys.readouterr().out)
+    assert [layer["label"] for layer in defaults["layers"]] == ["base"]
+
+    assert await main_async(["--dump-config-schema"]) == 0
+    schema = _json.loads(capsys.readouterr().out)
+    assert schema["x-mth"]["complete"] is True
+
+    with pytest.raises(SystemExit):
+        await main_async(["--dump-default-config", "--patch", str(overlay)])
+    with pytest.raises(SystemExit):
+        await main_async(["--dump-config", "headless"])
+
+
+@pytest.mark.asyncio
+async def test_cli_named_profile_component_and_template_reset(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """Named profiles resolve under MTH_HOME and component edits persist across resets."""
+    import json as _json
+
+    from magitech_harness.profiles.launcher import (
+        COMPONENTS_FILE,
+        HOME_ENV,
+        PROFILE_FILE,
+    )
+
+    root = tmp_path / "home"
+    monkeypatch.setenv(HOME_ENV, str(root))
+
+    assert await main_async(["plugin", "--profile", "work", "add", "notion"]) == 0
+    assert capsys.readouterr().out.strip() == "notion"
+    assert await main_async(["plugin", "--profile", "work", "list"]) == 0
+    assert capsys.readouterr().out.strip() == "notion"
+    stored = root / "profiles" / "work" / COMPONENTS_FILE
+    assert _json.loads(stored.read_text(encoding="utf-8")) == ["notion"]
+
+    assert await main_async(["--profile", "work", "--dump-config"]) == 0
+    report = _json.loads(capsys.readouterr().out)
+    assert any("work" in layer["label"] for layer in report["layers"])
+
+    assert (
+        await main_async(
+            ["--profile", "work", "--from-default-profile", "base", "--dump-config"]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert (root / "profiles" / "work" / PROFILE_FILE).exists()
+    assert _json.loads(stored.read_text(encoding="utf-8")) == []
+
+    assert await main_async(["plugin", "--profile", "work", "bogus"]) == 1
+    assert "unknown component action" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        await main_async(["plugin", "--profile", "work"])
+    with pytest.raises(SystemExit):
+        await main_async(["plugin", "--profile", "work", "add", "a", "b"])
+    assert await main_async(["--profile", "missing-profile", "--dump-config"]) == 1
+    assert "profile not found" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        await main_async(["--from-default-profile", "base", "--dump-config"])
+    with pytest.raises(SystemExit):
+        await main_async(
+            [
+                "--profile",
+                "some/path.yaml",
+                "--from-default-profile",
+                "base",
+                "--dump-config",
+            ]
+        )
+
+
+@pytest.mark.asyncio
+async def test_cli_named_profile_boot_initializes_template(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """A bare profile name boots through the same driver as a path overlay."""
+    import json as _json
+
+    from magitech_harness.profiles.launcher import HOME_ENV, PROFILE_FILE
+
+    root = tmp_path / "home"
+    monkeypatch.setenv(HOME_ENV, str(root))
+    script = tmp_path / "turns.json"
+    script.write_text(
+        _json.dumps(
+            {
+                "turns": [
+                    [
+                        {"type": "text-delta", "index": 0, "text": "NAMED"},
+                        {"type": "finish", "reason": {"kind": "stop"}},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    code = await main_async(
+        [
+            "--storage",
+            str(tmp_path / "store"),
+            "--profile",
+            "headless",
+            "headless",
+            "--script",
+            str(script),
+            "task",
+        ]
+    )
+    assert code == 0
+    assert "NAMED" in capsys.readouterr().out
+    assert (root / "profiles" / "headless" / PROFILE_FILE).exists()

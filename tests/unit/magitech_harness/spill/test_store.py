@@ -136,8 +136,14 @@ async def test_save_text_file_name_collision_retry(
     """saveTextFile retries on FileExistsError (name collision)."""
     real_open = os.open
     call_count = [0]
+    target_dir = sessionDir(str(tmp_path), "sess-1")
 
     def fake_open(path, flags, mode=0o600, *args, **kwargs):
+        # Background tasks in the same process also use os.open; only count
+        # this probe's save path so their writes cannot shift the retry count.
+        text = str(path)
+        if not text.startswith(target_dir) or not text.endswith("-r.txt"):
+            return real_open(path, flags, mode, *args, **kwargs)
         call_count[0] += 1
         if call_count[0] == 1:
             raise FileExistsError(17, "File exists", path)

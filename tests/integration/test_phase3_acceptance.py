@@ -1307,10 +1307,15 @@ class ErrPlugin:
         check=False,
     )
     assert proc_ok.returncode == 0, proc_ok.stderr
-    payload_ok = json.loads(proc_ok.stdout.strip().splitlines()[-1])
-    assert payload_ok["exitCode"] == 0
-    assert payload_ok["text"] == "CLI headless ok."
-    assert payload_ok["reason"] == {"kind": "completed"}
+    projected_ok = [
+        json.loads(line) for line in proc_ok.stdout.splitlines() if line.strip()
+    ]
+    session_ok = projected_ok[0]
+    final_ok = projected_ok[-1]
+    assert session_ok["type"] == "session"
+    assert final_ok["type"] == "final"
+    assert final_ok["text"] == "CLI headless ok."
+    assert final_ok["reason"] == {"kind": "completed"}
 
     # Verify K5: slow async provider title landed in persisted JSONL before CLI exited
     session_file = next(storage.rglob("session.v4.jsonl"))
@@ -1341,7 +1346,7 @@ class ErrPlugin:
             "headless",
             "--json",
             "--session-id",
-            payload_ok["sessionId"],
+            session_ok["sessionId"],
             "Fail second turn",
         ],
         capture_output=True,
@@ -1351,9 +1356,11 @@ class ErrPlugin:
         check=False,
     )
     assert proc_err.returncode == 1
-    payload_err = json.loads(proc_err.stdout.strip().splitlines()[-1])
-    assert payload_err["exitCode"] == 1
-    assert payload_err["reason"]["kind"] == "error"
+    projected_err = [
+        json.loads(line) for line in proc_err.stdout.splitlines() if line.strip()
+    ]
+    final_err = next(item for item in projected_err if item.get("type") == "final")
+    assert final_err["reason"]["kind"] == "error"
 
 
 @pytest.mark.asyncio
