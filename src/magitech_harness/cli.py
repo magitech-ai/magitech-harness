@@ -16,11 +16,18 @@ from typing import Any
 
 from animas import Context
 
-from magitech_harness import check_bundle_entries, create_harness
+from magitech_harness import __version__, check_bundle_entries, create_harness
 from magitech_harness.agent.cancellation import AbortError
 from magitech_harness.agent.model_selection import install_model_selection
+from magitech_harness.headless_json import HeadlessJsonProjection
 from magitech_harness.llm.message import create_user_message
 from magitech_harness.llm.slug import parse_model_slug
+from magitech_harness.profiles.launcher import (
+    dump_config,
+    dump_config_schema,
+    edit_components,
+    resolve_profile_source,
+)
 from magitech_harness.session.events import EventType
 from magitech_harness.session.store import Session
 
@@ -120,7 +127,7 @@ def _report_headless_failure(error: BaseException, *, json_mode: bool) -> int:
 
 async def _run_headless(
     ctx: Context,
-    task: str,
+    task: str | None,
     *,
     model: str | None = None,
     session_id: str | None = None,
@@ -130,6 +137,9 @@ async def _run_headless(
     try:
         if session_id is not None and session_id.strip() == "":
             raise ValueError("headless: session_id must not be blank")
+        if task is None:
+            task = await asyncio.to_thread(sys.stdin.read)
+        assert task is not None  # stdin reader always returns a string
         if task.strip() == "":
             raise ValueError(
                 'a task is required, for example: mth headless "run the tests"'
@@ -178,6 +188,37 @@ async def _run_headless(
     agent = handle["agent"]
     agent_session = agent.session
     failure: tuple[BaseException, int] | None = None
+    projection: HeadlessJsonProjection | None = None
+    reasoning_open = False
+
+    def _close_reasoning() -> None:
+        nonlocal reasoning_open
+        if reasoning_open:
+            print(file=sys.stderr)
+            reasoning_open = False
+
+    def _emit_reasoning(payload: dict[str, Any]) -> None:
+        nonlocal reasoning_open
+        message = payload.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        texts = (
+            [
+                block["text"]
+                for block in content
+                if isinstance(block, dict)
+                and block.get("type") == "reasoning"
+                and isinstance(block.get("text"), str)
+                and block["text"] != ""
+            ]
+            if isinstance(content, list)
+            else []
+        )
+        if not texts:
+            return
+        if not reasoning_open:
+            print("mth: reasoning:", file=sys.stderr)
+            reasoning_open = True
+        print("".join(texts), file=sys.stderr, end="")
 
     def _on_agent_error(payload: dict[str, Any]) -> None:
         nonlocal failure
@@ -186,19 +227,36 @@ async def _run_headless(
 
     def _on_session_event(subject: Session, event: Any) -> None:
         nonlocal failure
+        if subject is not agent_session:
+            return
         if (
-            subject is agent_session
-            and event.type == EventType.TURN_END
+            event.type == EventType.TURN_END
             and failure is not None
             and event.seq >= failure[1]
         ):
             failure = None
+        if event.type == EventType.TURN_END:
+            _close_reasoning()
+        elif event.type == EventType.ASSISTANT_MESSAGE:
+            _emit_reasoning(event.payload)
+        if projection is not None:
+            projection.on_event(event.type, event.payload, event.surface_op)
 
     stop_errors = ctx.on("agent/error", _on_agent_error)
     stop_terminals = ctx.on("session/event", _on_session_event)
     try:
         try:
             first_seq = len(agent.session.events)
+            if json_mode:
+
+                def _write_ndjson(line: str) -> None:
+                    sys.stdout.write(line)
+
+                projection = HeadlessJsonProjection(
+                    _write_ndjson,
+                    agent_session.id,
+                    str(Path.cwd()),
+                )
             agent.followup(
                 create_user_message(
                     content=[{"type": "text", "text": task}],
@@ -207,21 +265,15 @@ async def _run_headless(
             )
             await agent.when_idle()
             await _drain_and_flush(ctx)
+            _close_reasoning()
             if failure is not None:
+                if projection is not None:
+                    projection.finish("", {"kind": "error", "message": str(failure[0])})
                 return _report_headless_failure(failure[0], json_mode=json_mode)
             outcome = summarize_headless_outcome(agent.session, first_seq)
             exit_code = headless_exit_code(outcome)
-            if json_mode:
-                print(
-                    json.dumps(
-                        {
-                            "sessionId": agent.session.id,
-                            "text": outcome.text,
-                            "reason": outcome.reason,
-                            "exitCode": exit_code,
-                        }
-                    )
-                )
+            if projection is not None:
+                projection.finish(outcome.text, outcome.reason)
             else:
                 print(outcome.text)
             if outcome.reason is not None and outcome.reason.get("kind") == "error":
@@ -232,6 +284,8 @@ async def _run_headless(
                     print(f"mth: {code}: {msg}", file=sys.stderr)
             return exit_code
         except Exception as exc:  # noqa: BLE001 - fail-closed CLI boundary
+            if projection is not None:
+                projection.finish("", {"kind": "error", "message": str(exc)})
             return _report_headless_failure(exc, json_mode=json_mode)
     finally:
         stop_errors()
@@ -508,6 +562,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="Magitech Harness: Composable Agent Runtime by Magitech",
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"mth {__version__}",
+        help="output the version number",
+    )
+    parser.add_argument(
         "--storage",
         default=".sessions",
         help="Directory to persist JSONL session logs (default: .sessions)",
@@ -527,6 +587,27 @@ def build_parser() -> argparse.ArgumentParser:
         dest="patch",
         help="Extra patch-list overlay applied after the profile (repeatable)",
     )
+    parser.add_argument(
+        "--from-default-profile",
+        dest="from_default_profile",
+        help="Replace a named profile with a fresh copy of a shipped template, then boot it",
+    )
+    dumps = parser.add_mutually_exclusive_group()
+    dumps.add_argument(
+        "--dump-config",
+        action="store_true",
+        help="Print the composed profile tree and exit without booting",
+    )
+    dumps.add_argument(
+        "--dump-default-config",
+        action="store_true",
+        help="Print the tree without the profile or --patch overlays and exit",
+    )
+    dumps.add_argument(
+        "--dump-config-schema",
+        action="store_true",
+        help="Print JSON Schema for profile rows without mounting",
+    )
 
     subparsers = parser.add_subparsers(dest="command")
 
@@ -537,7 +618,11 @@ def build_parser() -> argparse.ArgumentParser:
     headless_parser = subparsers.add_parser(
         "headless", help="Run one-shot prompt through the parity agent loop"
     )
-    headless_parser.add_argument("task", help="Task prompt to execute")
+    headless_parser.add_argument(
+        "task",
+        nargs="?",
+        help="Task prompt to execute; omit or pass '-' to read stdin",
+    )
     headless_parser.add_argument(
         "--session-id",
         dest="session_id",
@@ -566,6 +651,22 @@ def build_parser() -> argparse.ArgumentParser:
     show_p = session_sub.add_parser("show", help="Show session events")
     show_p.add_argument("session_id", help="Session ID to inspect")
 
+    # plugin subcommand
+    plugin_parser = subparsers.add_parser(
+        "plugin", help="Manage a named profile's marketplace component list"
+    )
+    plugin_parser.add_argument(
+        "--profile",
+        dest="component_profile",
+        required=True,
+        help="Named profile whose component list to manage",
+    )
+    plugin_parser.add_argument(
+        "args",
+        nargs=argparse.REMAINDER,
+        help="Action (list/add/remove/show) and optional component name",
+    )
+
     # component subcommand
     component_parser = subparsers.add_parser(
         "component", help="Inspect and manage components"
@@ -586,10 +687,55 @@ async def main_async(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    cmd = args.command
+    dumps = args.dump_config or args.dump_default_config or args.dump_config_schema
+    if dumps and cmd is not None:
+        parser.error("config dumps take no subcommand")
+    if args.from_default_profile and (args.profile is None or "/" in args.profile):
+        parser.error("--from-default-profile needs a named profile")
+    if args.dump_default_config and args.patch:
+        parser.error("--dump-default-config takes no --patch")
+
+    try:
+        source = resolve_profile_source(args.profile, args.from_default_profile)
+    except (OSError, ValueError) as exc:
+        print(f"mth: {exc}", file=sys.stderr)
+        return 1
+
+    if dumps:
+        if args.dump_config_schema:
+            report = dump_config_schema()
+        else:
+            report = dump_config(
+                None if args.dump_default_config else source,
+                args.patch or None,
+                default_only=args.dump_default_config,
+            )
+        print(json.dumps(report, indent=2))
+        return 0
+
+    if cmd == "plugin":
+        parts = args.args or []
+        if not parts or not parts[0]:
+            parser.error("plugin needs an action (list/add/remove/show)")
+        if len(parts) > 2:
+            parser.error("plugin takes an action and at most one component name")
+        try:
+            components = edit_components(
+                args.component_profile,
+                parts[0],
+                parts[1] if len(parts) == 2 else None,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"mth: {exc}", file=sys.stderr)
+            return 1
+        print("\n".join(components) if components else "(none)")
+        return 0
+
     storage_path = Path(args.storage) if args.storage and args.storage.strip() else None
     ctx = create_harness(
         storage_dir=storage_path,
-        profile=args.profile,
+        profile=source,
         patches=args.patch or None,
     )
     await ctx.flush()
@@ -618,15 +764,16 @@ async def main_async(argv: list[str] | None = None) -> int:
         ctx.llm.register_provider("mock", MockLLMProvider())
         ctx.llm.register_adapter(["mock"], MockLlmAdapter())
 
-    cmd = args.command
-
     if cmd == "headless":
         effective_model = args.model
         if script_spec is not None:
             effective_model = f"{script_spec.provider}/{script_spec.model}"
+        task = args.task
+        if task == "-":
+            task = None
         return await _run_headless(
             ctx,
-            args.task,
+            task,
             model=effective_model,
             session_id=args.session_id,
             json_mode=bool(args.json),

@@ -35,3 +35,5 @@ htmlcov/
 
 # Local Sessions
 .sessions/
+
+.env

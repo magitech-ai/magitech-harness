@@ -1,0 +1,36 @@
+usage: mth [-h] [--version] [--storage STORAGE] [--profile PROFILE]
+           [--model MODEL] [--patch PATCH]
+           [--from-default-profile FROM_DEFAULT_PROFILE]
+           [--dump-config | --dump-default-config | --dump-config-schema]
+           {repl,headless,session,plugin,component} ...
+
+Magitech Harness: Composable Agent Runtime by Magitech
+
+positional arguments:
+  {repl,headless,session,plugin,component}
+    repl                Start the interactive REPL shell
+    headless            Run one-shot prompt through the parity agent loop
+    session             Inspect and manage sessions
+    plugin              Manage a named profile's marketplace component list
+    component           Inspect and manage components
+
+options:
+  -h, --help            show this help message and exit
+  --version             output the version number
+  --storage STORAGE     Directory to persist JSONL session logs (default:
+                        .sessions)
+  --profile PROFILE     Optional YAML profile path to customize loaded
+                        components
+  --model MODEL         Model slug to use (e.g.
+                        'openrouter/anthropic/claude-3.5-sonnet')
+  --patch PATCH         Extra patch-list overlay applied after the profile
+                        (repeatable)
+  --from-default-profile FROM_DEFAULT_PROFILE
+                        Replace a named profile with a fresh copy of a shipped
+                        template, then boot it
+  --dump-config         Print the composed profile tree and exit without
+                        booting
+  --dump-default-config
+                        Print the tree without the profile or --patch overlays
+                        and exit
+  --dump-config-schema  Print JSON Schema for profile rows without mounting
